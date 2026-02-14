@@ -25,18 +25,23 @@ def _test_set_test_impl(ctx):
     runfiles = ctx.runfiles()
     runfiles = runfiles.merge(wrapped_test[DefaultInfo].default_runfiles)
 
+    # Bake any test args into the runner script so the orchestrator
+    # can invoke it without knowing about Bazel's args attribute.
+    baked_args = " ".join(['"%s"' % a for a in ctx.attr.args]) if ctx.attr.args else ""
+
     # Create a runner script that executes the wrapped test
     runner = ctx.actions.declare_file(ctx.label.name + "_runner.sh")
     ctx.actions.write(
         output = runner,
-        content = "#!/bin/bash\nexec {exe} \"$@\"\n".format(
+        content = "#!/bin/bash\nexec {exe} {args}\"$@\"\n".format(
             exe = wrapped_executable.short_path,
+            args = baked_args + " " if baked_args else "",
         ),
         is_executable = True,
     )
 
-    # Add the wrapped executable to runfiles
-    runfiles = runfiles.merge(ctx.runfiles(files = [wrapped_executable]))
+    # Add the wrapped executable and runner to runfiles
+    runfiles = runfiles.merge(ctx.runfiles(files = [wrapped_executable, runner]))
 
     # Collect depends_on labels
     depends_on_labels = [dep.label for dep in ctx.attr.depends_on]
@@ -57,7 +62,7 @@ def _test_set_test_impl(ctx):
             requirement_id = ctx.attr.requirement_id,
             depends_on = depends_on_labels,
             judgement_label = judgement_label,
-            executable = wrapped_executable,
+            executable = runner,
         ),
     ]
 

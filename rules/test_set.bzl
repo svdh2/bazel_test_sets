@@ -78,27 +78,38 @@ def _test_set_rule_test_impl(ctx):
         content = json.encode_indent(manifest, indent = "  "),
     )
 
-    # Collect all runfiles from all tests and subsets
-    runfiles = ctx.runfiles(files = [manifest_file])
+    # Collect all runfiles from all tests, subsets, and the orchestrator
+    orchestrator_exe = ctx.executable._orchestrator
+    runfiles = ctx.runfiles(files = [manifest_file, orchestrator_exe])
     for t in ctx.attr.tests:
         runfiles = runfiles.merge(t[DefaultInfo].default_runfiles)
     for s in ctx.attr.subsets:
         runfiles = runfiles.merge(s[DefaultInfo].default_runfiles)
+    runfiles = runfiles.merge(ctx.attr._orchestrator[DefaultInfo].default_runfiles)
 
-    # Create runner script
+    # Create runner script that invokes the orchestrator
     runner = ctx.actions.declare_file(ctx.label.name + "_runner.sh")
     ctx.actions.write(
         output = runner,
-        content = "#!/bin/bash\n" +
-                  "# Runner for test_set: {name}\n".format(name = ctx.label.name) +
-                  "MANIFEST=\"${{RUNFILES_DIR:-$0.runfiles}}/{workspace}/{manifest}\"\n".format(
-                      workspace = ctx.workspace_name,
-                      manifest = manifest_file.short_path,
-                  ) +
-                  "echo \"Manifest: $MANIFEST\"\n" +
-                  "echo \"TODO: invoke orchestrator with --manifest=$MANIFEST\"\n" +
-                  "# For now, run all tests sequentially\n" +
-                  "exit 0\n",
+        content = """\
+#!/bin/bash
+# Runner for test_set: {name}
+if [[ -n "${{RUNFILES_DIR:-}}" ]]; then
+  R="$RUNFILES_DIR"
+elif [[ -d "$0.runfiles" ]]; then
+  R="$0.runfiles"
+else
+  echo "Cannot find runfiles" >&2; exit 1
+fi
+exec "$R/{workspace}/{orchestrator}" \\
+  --manifest "$R/{workspace}/{manifest}" \\
+  "$@"
+""".format(
+            name = ctx.label.name,
+            workspace = ctx.workspace_name,
+            orchestrator = orchestrator_exe.short_path,
+            manifest = manifest_file.short_path,
+        ),
         is_executable = True,
     )
 
@@ -137,6 +148,11 @@ _test_set_rule_test = rule(
         "requirement_id": attr.string(
             doc = "Optional requirement ID for traceability",
             default = "",
+        ),
+        "_orchestrator": attr.label(
+            default = Label("//orchestrator:main"),
+            executable = True,
+            cfg = "target",
         ),
     },
     test = True,

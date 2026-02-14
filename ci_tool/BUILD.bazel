@@ -15,5 +15,6 @@ py_binary(
     name = "main",
     srcs = ["main.py"],
     main = "main.py",
+    visibility = ["//visibility:public"],
     deps = [":ci_tool_lib"],
 )

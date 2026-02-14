@@ -22,6 +22,11 @@ Standard test runners treat tests as independent, unordered units. In practice, 
 ```starlark
 # MODULE.bazel
 bazel_dep(name = "test_sets_bazel_rules", version = "0.1.0")
+git_override(
+    module_name = "test_sets_bazel_rules",
+    remote = "https://github.com/svdh2/bazel_test_sets.git",
+    commit = "<commit-sha>",
+)
 ```
 
 ### 2. Wrap tests with DAG metadata
@@ -55,12 +60,17 @@ test_set(
 )
 ```
 
-### 3. Build the manifest and run
+### 3. Run the test set
 
 ```bash
-bazel build //path/to:auth_tests
+# Runs the orchestrator in diagnostic mode (default)
+bazel test //path/to:auth_tests
 
-bazel run //orchestrator:main -- \
+# Pass extra flags to the orchestrator
+bazel test //path/to:auth_tests -- --mode detection --max-failures 3
+
+# Or invoke the orchestrator directly with a pre-built manifest
+bazel run @test_sets_bazel_rules//orchestrator:main -- \
     --manifest bazel-bin/path/to/auth_tests_manifest.json \
     --mode diagnostic \
     --output results.yaml
