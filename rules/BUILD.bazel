@@ -1,0 +1,6 @@
+# BUILD file for Starlark rules
+
+exports_files([
+    "test_set_test.bzl",
+    "test_set.bzl",
+])

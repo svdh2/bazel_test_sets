@@ -1,0 +1,38 @@
+# BUILD file for macro examples
+
+load("//macros/examples:memory_tests.bzl", "memory_test_set")
+load("//macros/examples:region_tests.bzl", "payment_region_test_set")
+
+# --- Memory test set (parameterized by tier) ---
+
+memory_test_set(
+    name = "memory_limits_production",
+    tier = "production",
+    max_ram_gb = 2,
+)
+
+memory_test_set(
+    name = "memory_limits_staging",
+    tier = "staging",
+    max_ram_gb = 1,
+)
+
+# --- Payment region test set (matrix) ---
+
+payment_region_test_set(
+    name = "payment_processing_regions",
+)
+
+# --- Hierarchical composition example ---
+# A parent test set that includes both memory and payment test sets as subsets
+
+load("//rules:test_set.bzl", "test_set")
+
+test_set(
+    name = "deployment_validation",
+    subsets = [
+        ":memory_limits_production",
+        ":payment_processing_regions",
+    ],
+    assertion = "Deployment validation passes for production environment",
+)

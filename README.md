@@ -1,2 +1,188 @@
 # bazel_test_sets
-Bazel rules for large scale testing
+
+Bazel rules for large-scale test orchestration with DAG-based dependency management, intelligent test selection, and test maturity tracking.
+
+## What it does
+
+Standard test runners treat tests as independent, unordered units. In practice, tests have dependencies: a login test is pointless if registration is broken, and a checkout test is meaningless if the cart doesn't work.
+
+**bazel_test_sets** lets you:
+
+- **Declare dependencies between tests** so failures propagate correctly and dependents are skipped
+- **Organize tests into hierarchical sets** that nest arbitrarily deep
+- **Choose execution strategies** &mdash; run everything (diagnostic), fail fast (detection), or run only what changed files affect (regression)
+- **Track test maturity** through a burn-in lifecycle backed by statistical testing (SPRT)
+- **Generate parameterized tests** from matrices or variant configurations
+- **Collect structured measurements** and produce YAML/HTML reports
+
+## Quick start
+
+### 1. Add the dependency
+
+```starlark
+# MODULE.bazel
+bazel_dep(name = "test_sets_bazel_rules", version = "0.1.0")
+```
+
+### 2. Wrap tests with DAG metadata
+
+```starlark
+# BUILD.bazel
+load("@rules_python//python:defs.bzl", "py_test")
+load("@test_sets_bazel_rules//rules:test_set_test.bzl", "test_set_test")
+load("@test_sets_bazel_rules//rules:test_set.bzl", "test_set")
+
+py_test(name = "registration_raw_test", srcs = ["registration_test.py"])
+py_test(name = "login_raw_test", srcs = ["login_test.py"])
+
+test_set_test(
+    name = "registration",
+    test = ":registration_raw_test",
+    assertion = "User can register a new account",
+)
+
+test_set_test(
+    name = "login",
+    test = ":login_raw_test",
+    assertion = "Registered user can log in",
+    depends_on = [":registration"],  # skipped if registration fails
+)
+
+test_set(
+    name = "auth_tests",
+    tests = [":registration", ":login"],
+    assertion = "Authentication flow works end-to-end",
+)
+```
+
+### 3. Build the manifest and run
+
+```bash
+bazel build //path/to:auth_tests
+
+bazel run //orchestrator:main -- \
+    --manifest bazel-bin/path/to/auth_tests_manifest.json \
+    --mode diagnostic \
+    --output results.yaml
+```
+
+## Execution modes
+
+| Mode | Ordering | Purpose |
+|------|----------|---------|
+| **Diagnostic** | Leaves-first topological sort | Full CI run. Executes everything, tracks all dependency failures. |
+| **Detection** | Roots-first BFS | Fast feedback. Stops at `--max-failures` threshold. |
+| **Regression** | Co-occurrence scoring | Feature branch CI. Selects tests correlated with changed files via git history analysis. |
+
+All modes support parallel execution with `--max-parallel` while still respecting DAG constraints.
+
+## Parameterized tests
+
+### Matrix test set
+
+Generates one test per combination from a parameter map:
+
+```starlark
+load("@test_sets_bazel_rules//macros:matrix_test_set.bzl", "matrix_test_set")
+
+matrix_test_set(
+    name = "payment_regions",
+    test_src = "payment_region_test.py",
+    assertion_template = "Payment works in {region} with {currency}",
+    matrix = {
+        "us": {"region": "US", "currency": "USD"},
+        "eu": {"region": "EU", "currency": "EUR"},
+    },
+)
+```
+
+Parameters are passed as CLI args (`--region=US --currency=USD`).
+
+### Parameterized test set
+
+Generates tests with variant-specific environment variables and args:
+
+```starlark
+load("@test_sets_bazel_rules//macros:parameterized_test_set.bzl", "parameterized_test_set")
+
+parameterized_test_set(
+    name = "resource_limits",
+    test_src = "resource_test.py",
+    variants = {
+        "production": {
+            "assertion": "Production resource limits enforced",
+            "env": {"TIER": "prod", "MAX_CONN": "100"},
+            "args": ["--strict"],
+        },
+    },
+)
+```
+
+## Test maturity lifecycle
+
+Tests are promoted through a state machine using SPRT (Sequential Probability Ratio Test):
+
+```
+new  ──>  burning_in  ──>  stable
+                │
+                └──>  flaky
+```
+
+Only `stable` tests participate in detection and regression modes. The `ci_tool` manages transitions:
+
+```bash
+bazel run //ci_tool:main -- burn-in --status-file .tests/status my_test
+bazel run //ci_tool:main -- deflake --status-file .tests/status flaky_test
+bazel run //ci_tool:main -- test-status --state stable
+```
+
+## Structured logging
+
+Tests can emit machine-readable events for measurements, rigging validation, and reporting:
+
+```python
+import json
+
+def tst(event):
+    print(f"[TST] {json.dumps(event)}")
+
+tst({"type": "block_start", "name": "rigging"})
+tst({"type": "measurement", "name": "latency_ms", "value": 42, "unit": "ms"})
+tst({"type": "block_end", "name": "rigging", "status": "passed"})
+```
+
+The orchestrator parses these events and includes them in YAML and HTML reports.
+
+## Project structure
+
+```
+rules/                 Bazel rules (test_set, test_set_test)
+macros/                Parameterization macros (matrix, parameterized)
+orchestrator/          Python execution engine (DAG ordering, parallel
+                       execution, regression scoring, burn-in, reporting)
+ci_tool/               Test lifecycle CLI (burn-in, deflake, status, re-judge)
+examples/ecommerce/    Full demo with 13 tests, DAG dependencies,
+                       parameterized sets, and structured logging
+docs/                  In-depth documentation (see below)
+```
+
+## Documentation
+
+| Topic | Description |
+|-------|-------------|
+| [Tutorial](docs/tutorial.md) | Step-by-step from a single test to a hierarchical DAG |
+| [API Reference](docs/api-reference.md) | Complete reference for rules, macros, and CLI |
+| [Execution Modes](docs/execution-modes.md) | Diagnostic, detection, and regression modes |
+| [Burn-in](docs/burn-in.md) | SPRT-based test maturity lifecycle |
+| [Regression Mode](docs/regression-mode.md) | Co-occurrence analysis and test selection |
+| [Structured Logging](docs/structured-logging.md) | Event schema and integration guide |
+| [Parameterization](docs/parameterization.md) | Matrix and parameterized test set macros |
+
+## Requirements
+
+- Bazel 9.x with Bzlmod
+- Python 3.12
+
+## License
+
+MIT

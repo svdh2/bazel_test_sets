@@ -1,0 +1,19 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+
+py_library(
+    name = "ci_tool_lib",
+    srcs = glob(
+        ["*.py"],
+        exclude = ["*_test.py"],
+    ),
+    imports = [".."],
+    visibility = ["//visibility:public"],
+    deps = ["//orchestrator:orchestrator_lib"],
+)
+
+py_binary(
+    name = "main",
+    srcs = ["main.py"],
+    main = "main.py",
+    deps = [":ci_tool_lib"],
+)

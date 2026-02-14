@@ -1,0 +1,73 @@
+load("@rules_python//python:defs.bzl", "py_binary", "py_test")
+load("//rules:test_set_test.bzl", "test_set_test")
+load("//rules:test_set.bzl", "test_set")
+
+py_binary(
+    name = "hello",
+    srcs = ["hello.py"],
+)
+
+py_test(
+    name = "hello_test",
+    srcs = ["hello.py"],
+    main = "hello.py",
+)
+
+# --- test_set_test targets ---
+
+# Underlying py_test targets
+py_test(
+    name = "sample_test",
+    srcs = ["sample_test.py"],
+    main = "sample_test.py",
+)
+
+py_test(
+    name = "sample_dep_test",
+    srcs = ["sample_dep_test.py"],
+    main = "sample_dep_test.py",
+)
+
+# test_set_test wrapping sample_test (no dependencies)
+test_set_test(
+    name = "sample_wrapped",
+    test = ":sample_test",
+    assertion = "Basic arithmetic operations work correctly",
+    requirement_id = "REQ-SAMPLE-001",
+)
+
+# test_set_test wrapping sample_dep_test (depends on sample_wrapped)
+test_set_test(
+    name = "sample_dep_wrapped",
+    test = ":sample_dep_test",
+    assertion = "Dependent arithmetic operations work correctly",
+    depends_on = [":sample_wrapped"],
+)
+
+# --- test_set targets ---
+
+# A test_set containing the sample tests
+test_set(
+    name = "sample_tests",
+    tests = [
+        ":sample_wrapped",
+        ":sample_dep_wrapped",
+    ],
+    assertion = "Sample arithmetic operations work correctly end-to-end",
+    requirement_id = "REQ-SAMPLE",
+)
+
+# A child test_set for demonstrating hierarchical composition
+test_set(
+    name = "basic_tests",
+    tests = [":sample_wrapped"],
+    assertion = "Basic operations are functional",
+)
+
+# A parent test_set that includes a subset
+test_set(
+    name = "all_sample_tests",
+    tests = [":sample_dep_wrapped"],
+    subsets = [":basic_tests"],
+    assertion = "All sample operations work correctly",
+)

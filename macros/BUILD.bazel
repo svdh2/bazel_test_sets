@@ -1,0 +1,6 @@
+# BUILD file for parameterization macros
+
+exports_files([
+    "parameterized_test_set.bzl",
+    "matrix_test_set.bzl",
+])

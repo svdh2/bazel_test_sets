@@ -1,0 +1,51 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV USE_BAZEL_VERSION=9.0.0
+
+# Host user identity for file permission matching and familiar shell experience
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+ARG HOST_USER=dev
+ARG HOST_GROUP=dev
+
+# Install base dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    git \
+    gnupg \
+    bash \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv (manages Python versions and dependencies)
+RUN curl -fsSL https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+
+# Install Python 3.12 via uv (shared location so all users can access it)
+ENV UV_PYTHON_INSTALL_DIR=/opt/python
+RUN uv python install 3.12 \
+    && ln -s /opt/python/cpython-3.12-linux-x86_64-gnu/bin/python3.12 /usr/local/bin/python3 \
+    && ln -s /opt/python/cpython-3.12-linux-x86_64-gnu/bin/python3.12 /usr/local/bin/python
+
+# Install Bazelisk (provides bazel command, auto-downloads correct Bazel version)
+RUN curl -fsSL https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64 \
+    -o /usr/local/bin/bazel \
+    && chmod +x /usr/local/bin/bazel
+
+# Create non-root user matching host UID/GID/name so mounted files have correct ownership
+RUN groupadd -g ${HOST_GID} -o ${HOST_GROUP} \
+    && useradd -m -u ${HOST_UID} -g ${HOST_GID} -o -s /bin/bash ${HOST_USER}
+
+# Mark /workspace as safe for git (mounted volume may have different ownership metadata)
+RUN git config --system --add safe.directory /workspace
+
+USER ${HOST_USER}
+
+ENV HOME=/home/${HOST_USER}
+ENV IN_CONTAINER=1
+
+WORKDIR /workspace
+
+ENTRYPOINT ["/bin/bash", "-c"]

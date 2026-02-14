@@ -1,0 +1,7 @@
+# Common settings
+build --enable_bzlmod
+startup --output_user_root=/workspace/target/bazel
+common --repo_contents_cache=
+
+# Test output settings
+test --test_output=errors

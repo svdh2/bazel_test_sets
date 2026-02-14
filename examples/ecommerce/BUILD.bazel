@@ -1,0 +1,295 @@
+# E-Commerce Demo Project
+#
+# Demonstrates the full Bazel test set rules system with:
+# - Hierarchical DAG of test sets
+# - Dependency edges between test_set_tests
+# - Parameterized test sets (matrix and parameterized macros)
+# - Tests with and without structured logging
+# - Realistic e-commerce test scenarios
+
+load("@rules_python//python:defs.bzl", "py_test")
+load("//rules:test_set_test.bzl", "test_set_test")
+load("//rules:test_set.bzl", "test_set")
+load("//macros:matrix_test_set.bzl", "matrix_test_set")
+load("//macros:parameterized_test_set.bzl", "parameterized_test_set")
+
+# ========================================================================
+# Leaf tests: individual py_test targets
+# ========================================================================
+
+py_test(
+    name = "credit_card_raw_test",
+    srcs = ["credit_card_test.py"],
+    main = "credit_card_test.py",
+)
+
+py_test(
+    name = "paypal_raw_test",
+    srcs = ["paypal_test.py"],
+    main = "paypal_test.py",
+)
+
+py_test(
+    name = "cart_raw_test",
+    srcs = ["cart_test.py"],
+    main = "cart_test.py",
+)
+
+py_test(
+    name = "discount_raw_test",
+    srcs = ["discount_test.py"],
+    main = "discount_test.py",
+)
+
+py_test(
+    name = "user_registration_raw_test",
+    srcs = ["user_registration_test.py"],
+    main = "user_registration_test.py",
+)
+
+py_test(
+    name = "user_login_raw_test",
+    srcs = ["user_login_test.py"],
+    main = "user_login_test.py",
+)
+
+py_test(
+    name = "user_profile_raw_test",
+    srcs = ["user_profile_test.py"],
+    main = "user_profile_test.py",
+)
+
+py_test(
+    name = "inventory_raw_test",
+    srcs = ["inventory_test.py"],
+    main = "inventory_test.py",
+)
+
+py_test(
+    name = "order_placement_raw_test",
+    srcs = ["order_placement_test.py"],
+    main = "order_placement_test.py",
+)
+
+py_test(
+    name = "shipping_raw_test",
+    srcs = ["shipping_test.py"],
+    main = "shipping_test.py",
+)
+
+py_test(
+    name = "email_notification_raw_test",
+    srcs = ["email_notification_test.py"],
+    main = "email_notification_test.py",
+)
+
+# ========================================================================
+# test_set_test wrappers with DAG dependencies
+# ========================================================================
+
+# --- Payment tests (no dependencies -- leaf nodes) ---
+
+test_set_test(
+    name = "credit_card_wrapped",
+    test = ":credit_card_raw_test",
+    assertion = "Credit card payments are authorized and receipts generated",
+    requirement_id = "PAY-001",
+)
+
+test_set_test(
+    name = "paypal_wrapped",
+    test = ":paypal_raw_test",
+    assertion = "PayPal payments redirect and authorize correctly",
+    requirement_id = "PAY-002",
+)
+
+# --- Cart and discount tests ---
+
+test_set_test(
+    name = "cart_wrapped",
+    test = ":cart_raw_test",
+    assertion = "Shopping cart correctly calculates totals",
+    requirement_id = "CART-001",
+)
+
+test_set_test(
+    name = "discount_wrapped",
+    test = ":discount_raw_test",
+    assertion = "Discount codes apply correct percentage reductions",
+    requirement_id = "CART-002",
+    depends_on = [":cart_wrapped"],
+)
+
+# --- Inventory test ---
+
+test_set_test(
+    name = "inventory_wrapped",
+    test = ":inventory_raw_test",
+    assertion = "Inventory queries return accurate stock levels",
+    requirement_id = "INV-001",
+)
+
+# --- Order placement (depends on cart, inventory, and payment) ---
+
+test_set_test(
+    name = "order_placement_wrapped",
+    test = ":order_placement_raw_test",
+    assertion = "Full order placement completes with payment and inventory update",
+    requirement_id = "ORD-001",
+    depends_on = [
+        ":cart_wrapped",
+        ":inventory_wrapped",
+        ":credit_card_wrapped",
+    ],
+)
+
+# --- Shipping (depends on order placement) ---
+
+test_set_test(
+    name = "shipping_wrapped",
+    test = ":shipping_raw_test",
+    assertion = "Shipping costs calculated correctly for order",
+    requirement_id = "SHIP-001",
+    depends_on = [":order_placement_wrapped"],
+)
+
+# --- Email notification (depends on order placement) ---
+
+test_set_test(
+    name = "email_notification_wrapped",
+    test = ":email_notification_raw_test",
+    assertion = "Order confirmation email sent successfully",
+    requirement_id = "NOTIF-001",
+    depends_on = [":order_placement_wrapped"],
+)
+
+# --- User account tests ---
+
+test_set_test(
+    name = "user_registration_wrapped",
+    test = ":user_registration_raw_test",
+    assertion = "User registration creates account with valid credentials",
+    requirement_id = "USR-001",
+)
+
+test_set_test(
+    name = "user_login_wrapped",
+    test = ":user_login_raw_test",
+    assertion = "User login authenticates and returns session token",
+    requirement_id = "USR-002",
+    depends_on = [":user_registration_wrapped"],
+)
+
+test_set_test(
+    name = "user_profile_wrapped",
+    test = ":user_profile_raw_test",
+    assertion = "User profile updates persist correctly",
+    requirement_id = "USR-003",
+    depends_on = [":user_login_wrapped"],
+)
+
+# ========================================================================
+# test_set groupings (hierarchical DAG)
+# ========================================================================
+
+# --- Payment tests set ---
+
+test_set(
+    name = "payment_tests",
+    tests = [
+        ":credit_card_wrapped",
+        ":paypal_wrapped",
+    ],
+    assertion = "All payment methods process transactions correctly",
+    requirement_id = "PAY-SET",
+)
+
+# --- Checkout flow tests set ---
+
+test_set(
+    name = "checkout_flow_tests",
+    tests = [
+        ":cart_wrapped",
+        ":discount_wrapped",
+        ":order_placement_wrapped",
+        ":shipping_wrapped",
+        ":email_notification_wrapped",
+        ":inventory_wrapped",
+    ],
+    subsets = [
+        ":payment_tests",
+    ],
+    assertion = "Complete checkout flow from cart to order confirmation",
+    requirement_id = "CHECKOUT-SET",
+)
+
+# --- User account tests set ---
+
+test_set(
+    name = "user_account_tests",
+    tests = [
+        ":user_registration_wrapped",
+        ":user_login_wrapped",
+        ":user_profile_wrapped",
+    ],
+    assertion = "User account lifecycle works end-to-end",
+    requirement_id = "USR-SET",
+)
+
+# ========================================================================
+# Parameterized test sets
+# ========================================================================
+
+# --- Payment region matrix (matrix_test_set) ---
+
+matrix_test_set(
+    name = "payment_region",
+    test_src = "payment_region_test.py",
+    assertion_template = "Payment processing works in {region} with {currency}",
+    matrix = {
+        "us": {"region": "US", "currency": "USD"},
+        "eu": {"region": "EU", "currency": "EUR"},
+        "uk": {"region": "UK", "currency": "GBP"},
+    },
+    assertion = "Payment processing works across all regions",
+    requirement_id = "PAY-REGION",
+)
+
+# --- Deployment resource limits (parameterized_test_set) ---
+
+parameterized_test_set(
+    name = "resource_limits",
+    test_src = "resource_limits_test.py",
+    variants = {
+        "production": {
+            "assertion": "Production tier has correct resource limits",
+            "env": {"DEPLOY_TIER": "production", "MAX_CONNECTIONS": "100"},
+        },
+        "staging": {
+            "assertion": "Staging tier has correct resource limits",
+            "env": {"DEPLOY_TIER": "staging", "MAX_CONNECTIONS": "50"},
+        },
+        "development": {
+            "assertion": "Development tier has correct resource limits",
+            "env": {"DEPLOY_TIER": "development", "MAX_CONNECTIONS": "10"},
+        },
+    },
+    assertion = "Resource limits are correct for all deployment tiers",
+    requirement_id = "DEPLOY-RES",
+)
+
+# ========================================================================
+# Root test set: combines all sub-test-sets
+# ========================================================================
+
+test_set(
+    name = "ecommerce_tests",
+    subsets = [
+        ":checkout_flow_tests",
+        ":user_account_tests",
+        ":payment_region",
+        ":resource_limits",
+    ],
+    assertion = "E-commerce platform passes all tests",
+    requirement_id = "ECOM-ROOT",
+)

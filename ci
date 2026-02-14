@@ -1,0 +1,238 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "click>=8.1.0",
+#     "rich>=13.0.0",
+# ]
+# ///
+"""Build and test tools for the Bazel test set rules project.
+
+Container commands (build, test, check, query) can be run from the host
+(auto-delegates into the container) or directly inside the container
+(e.g. after ./ci shell).
+"""
+
+from __future__ import annotations
+
+import fcntl
+import grp
+import os
+import pwd
+import shlex
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import click
+from rich.console import Console
+
+PROJECT_ROOT = Path(__file__).parent.resolve()
+TARGET_DIR = PROJECT_ROOT / "target"
+IMAGE_NAME = "test-sets-bazel-devenv"
+DOCKERFILE = PROJECT_ROOT / "Dockerfile.devenv"
+IN_CONTAINER = os.environ.get("IN_CONTAINER") == "1"
+
+console = Console()
+
+
+def run_cmd(
+    cmd: list[str], check: bool = True, **kwargs
+) -> subprocess.CompletedProcess:
+    """Run a command with logging."""
+    console.print(f"[dim]$ {' '.join(cmd)}[/dim]")
+    try:
+        return subprocess.run(cmd, check=check, text=True, **kwargs)
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Command failed with exit code {e.returncode}[/red]")
+        raise
+
+
+def _docker_build_cmd(extra_args: list[str] | None = None) -> list[str]:
+    """Return the base docker build command with UID/GID build args."""
+    cmd = [
+        "docker", "build",
+        "--build-arg", f"HOST_UID={os.getuid()}",
+        "--build-arg", f"HOST_GID={os.getgid()}",
+        "--build-arg", f"HOST_USER={pwd.getpwuid(os.getuid()).pw_name}",
+        "--build-arg", f"HOST_GROUP={grp.getgrgid(os.getgid()).gr_name}",
+    ]
+    if extra_args:
+        cmd.extend(extra_args)
+    cmd.extend(["-t", IMAGE_NAME, "-f", str(DOCKERFILE), str(PROJECT_ROOT)])
+    return cmd
+
+
+def build_image():
+    """Build Docker image, relying on Docker layer cache to skip unchanged layers."""
+    if not DOCKERFILE.exists():
+        console.print(
+            f"[red]Dockerfile not found: {DOCKERFILE.relative_to(PROJECT_ROOT)}[/red]"
+        )
+        sys.exit(1)
+    run_cmd(_docker_build_cmd())
+
+
+def _delegate_to_container(args: list[str]):
+    """Build image and re-invoke ./ci inside the container.
+
+    Acquires an exclusive file lock so only one container runs at a time.
+    """
+    build_image()
+    TARGET_DIR.mkdir(exist_ok=True)
+    lock_path = TARGET_DIR / ".ci.lock"
+    with open(lock_path, "w") as lock_fd:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            console.print("[red]Another ./ci command is already running.[/red]")
+            sys.exit(1)
+        ci_cmd = "./ci " + " ".join(shlex.quote(a) for a in args)
+        run_cmd([
+            "docker", "run", "--rm",
+            "-v", f"{PROJECT_ROOT}:/workspace:rw",
+            "-w", "/workspace",
+            IMAGE_NAME,
+            ci_cmd,
+        ])
+
+
+def _require_host(cmd_name: str):
+    """Exit with error if running inside the container."""
+    if IN_CONTAINER:
+        console.print(f"[red]'{cmd_name}' can only be run from the host.[/red]")
+        sys.exit(1)
+
+
+def _clean_stale_bazel_symlinks():
+    """Remove stale Bazel convenience symlinks that point to inaccessible locations."""
+    for item in PROJECT_ROOT.iterdir():
+        if item.is_symlink() and item.name.startswith("bazel-"):
+            try:
+                if item.resolve().exists():
+                    continue
+            except PermissionError:
+                pass
+            item.unlink()
+            console.print(f"[dim]Removed stale symlink {item.name}[/dim]")
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+@click.group()
+def cli():
+    """Build and test tools for the Bazel test set rules project."""
+
+
+# ---------------------------------------------------------------------------
+# Container commands — run directly when IN_CONTAINER, delegate otherwise
+# ---------------------------------------------------------------------------
+
+@cli.command()
+def build():
+    """Build all Bazel targets."""
+    if not IN_CONTAINER:
+        _delegate_to_container(["build"])
+        return
+    _clean_stale_bazel_symlinks()
+    run_cmd(["bazel", "build", "//..."])
+
+
+@cli.command()
+def test():
+    """Run all Bazel tests and Python unit tests."""
+    if not IN_CONTAINER:
+        _delegate_to_container(["test"])
+        return
+    _clean_stale_bazel_symlinks()
+    run_cmd(["bazel", "test", "//..."])
+    console.print("[bold]--- Running pytest ---[/bold]")
+    run_cmd([
+        "uv", "run", "--with", "pytest", "--with", "pyyaml",
+        "pytest", "orchestrator/", "ci_tool/", "tests/",
+        "-v", "--tb=short",
+    ])
+
+
+@cli.command()
+def check():
+    """Run type checks."""
+    if not IN_CONTAINER:
+        _delegate_to_container(["check"])
+        return
+    run_cmd([
+        "uv", "run", "--with", "mypy", "--with", "pyyaml", "--with", "types-pyyaml",
+        "mypy", "orchestrator/", "ci_tool/", "tests/",
+        "--ignore-missing-imports",
+    ])
+
+
+@cli.command()
+@click.argument("pattern", default="//...")
+def query(pattern):
+    """Query Bazel targets.
+
+    PATTERN is a Bazel query expression (default: //...).
+    Examples:
+        ./ci query '//macros/examples:*'
+        ./ci query 'kind(test, //...)'
+    """
+    if not IN_CONTAINER:
+        _delegate_to_container(["query", pattern])
+        return
+    _clean_stale_bazel_symlinks()
+    run_cmd(["bash", "-c", f"bazel query {shlex.quote(pattern)} 2>/dev/null | sort"])
+
+
+# ---------------------------------------------------------------------------
+# Host-only commands
+# ---------------------------------------------------------------------------
+
+@cli.command()
+def shell():
+    """Launch an interactive shell in the container."""
+    _require_host("shell")
+    build_image()
+    run_cmd([
+        "docker", "run", "--rm", "-it",
+        "-v", f"{PROJECT_ROOT}:/workspace:rw",
+        "-w", "/workspace",
+        "--entrypoint", "bash",
+        IMAGE_NAME,
+    ])
+
+
+@cli.command()
+def clean():
+    """Remove all generated files in target directory."""
+    _require_host("clean")
+    if TARGET_DIR.exists():
+        shutil.rmtree(TARGET_DIR)
+        TARGET_DIR.mkdir()
+        console.print(
+            f"[yellow]Cleaned {TARGET_DIR.relative_to(PROJECT_ROOT)}/[/yellow]"
+        )
+    else:
+        TARGET_DIR.mkdir()
+        console.print("[dim]Nothing to clean[/dim]")
+
+
+@cli.command("rebuild-image")
+def rebuild_image():
+    """Force rebuild Docker image."""
+    _require_host("rebuild-image")
+    if not DOCKERFILE.exists():
+        console.print(
+            f"[red]Dockerfile not found: {DOCKERFILE.relative_to(PROJECT_ROOT)}[/red]"
+        )
+        sys.exit(1)
+    console.print(f"Rebuilding [bold]{IMAGE_NAME}[/bold]...")
+    run_cmd(_docker_build_cmd(["--no-cache"]))
+    console.print("[green]Image rebuilt[/green]")
+
+
+if __name__ == "__main__":
+    cli()
