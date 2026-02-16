@@ -1,7 +1,6 @@
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV USE_BAZEL_VERSION=9.0.0
 
 # Host user identity for file permission matching and familiar shell experience
 ARG HOST_UID=1000
@@ -41,10 +40,47 @@ RUN groupadd -g ${HOST_GID} -o ${HOST_GROUP} \
 # Mark /workspace as safe for git (mounted volume may have different ownership metadata)
 RUN git config --system --add safe.directory /workspace
 
+# Tell Bazel to use a prebaked repository cache (survives workspace bind-mount)
+RUN echo "common --repository_cache=/home/${HOST_USER}/.cache/bazel-repo-cache" \
+    > /etc/bazel.bazelrc
+
 USER ${HOST_USER}
 
 ENV HOME=/home/${HOST_USER}
 ENV IN_CONTAINER=1
+ENV PATH="/home/${HOST_USER}/.local/bin:${PATH}"
+
+# --- Python tool warmup: prebake pytest, mypy, and ci script deps ---
+
+RUN uv tool install pytest && uv tool install mypy
+
+# Pre-warm the ci script's uv environment (click, rich) so the first
+# `uv run --script ./ci` inside the container is an instant cache hit.
+RUN printf '%s\n' \
+    '# /// script' \
+    '# requires-python = ">=3.12"' \
+    '# dependencies = ["click>=8.1.0", "rich>=13.0.0"]' \
+    '# ///' \
+    '' > /tmp/warmup.py \
+    && uv run --script /tmp/warmup.py \
+    && rm /tmp/warmup.py
+
+# --- Bazel warmup: prebake binary + external deps into the image layer ---
+
+# Pre-download Bazel binary via bazelisk (avoids ~400MB download per container run).
+# .bazelversion is the single source of truth for the Bazel version.
+COPY --chown=${HOST_UID}:${HOST_GID} .bazelversion /tmp/bazel-warmup/.bazelversion
+RUN cd /tmp/bazel-warmup && bazel version
+
+# Pre-fetch external module dependencies into the repository cache.
+# This downloads rules_python, its transitive deps, and the Python toolchain
+# so the first `bazel build` in a fresh container hits the cache instead of the network.
+COPY --chown=${HOST_UID}:${HOST_GID} MODULE.bazel MODULE.bazel.lock /tmp/bazel-warmup/
+RUN printf '' > /tmp/bazel-warmup/BUILD.bazel \
+    && cd /tmp/bazel-warmup \
+    && bazel build --nobuild //... 2>&1 \
+    && bazel shutdown \
+    && rm -rf /tmp/bazel-warmup
 
 WORKDIR /workspace
 
