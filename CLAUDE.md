@@ -1,5 +1,16 @@
 # Agent Instructions for test_sets_bazel_rules
 
+## Architecture Documentation
+
+Use `architecture/current/README.md` as the entry point to understand the
+structure of this repository and navigate its components and flows. Always
+consult the architecture docs before making changes to unfamiliar areas.
+
+After any code changes, update the relevant architecture documents in
+`architecture/current/` so they remain in sync with the source code. This
+includes component docs, flow docs, and the main README.md (e.g. updating the
+Git Sync section commit hash).
+
 ## Build, Test, and Validation Rules
 
 ALL builds, tests, type checks, queries, and validation commands MUST be run
