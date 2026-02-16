@@ -379,17 +379,29 @@ class TestResolveGitContext:
             sha = _resolve_git_context(allow_dirty=False)
             assert sha == "abc123"
 
-    def test_allow_dirty_skips_status_check(self):
-        """With allow_dirty=True, only rev-parse is called."""
+    def test_allow_dirty_appends_dirty_suffix(self):
+        """With allow_dirty=True and dirty tree, SHA gets -dirty suffix."""
         with patch("orchestrator.main.subprocess.run") as mock_run:
-            mock_run.return_value = type(
-                "Result", (), {"returncode": 0, "stdout": "def456\n"}
-            )()
+            mock_run.side_effect = [
+                # git rev-parse HEAD
+                type("Result", (), {"returncode": 0, "stdout": "def456\n"})(),
+                # git status --porcelain (dirty)
+                type("Result", (), {"returncode": 0, "stdout": " M file.py\n"})(),
+            ]
+            sha = _resolve_git_context(allow_dirty=True)
+            assert sha == "def456-dirty"
+
+    def test_allow_dirty_clean_tree_no_suffix(self):
+        """With allow_dirty=True but clean tree, SHA has no suffix."""
+        with patch("orchestrator.main.subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                # git rev-parse HEAD
+                type("Result", (), {"returncode": 0, "stdout": "def456\n"})(),
+                # git status --porcelain (clean)
+                type("Result", (), {"returncode": 0, "stdout": ""})(),
+            ]
             sha = _resolve_git_context(allow_dirty=True)
             assert sha == "def456"
-            # Only rev-parse should be called, not status
-            assert mock_run.call_count == 1
-            assert "rev-parse" in mock_run.call_args[0][0]
 
     def test_dirty_tree_exits(self):
         """Dirty working tree causes SystemExit when allow_dirty=False."""

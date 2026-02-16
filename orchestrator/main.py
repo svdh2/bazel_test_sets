@@ -169,22 +169,26 @@ def _resolve_git_context(allow_dirty: bool) -> str | None:
 
     commit_sha = sha_result.stdout.strip()
 
-    if not allow_dirty:
-        dirty_result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            timeout=10,
+    dirty_result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    is_dirty = bool(dirty_result.stdout.strip())
+
+    if is_dirty and not allow_dirty:
+        print(
+            "Error: working tree has uncommitted changes.\n"
+            "Commit your changes before running with --status-file so that\n"
+            "test results can be attributed to a specific commit.\n"
+            "Use --allow-dirty to bypass this check.",
+            file=sys.stderr,
         )
-        if dirty_result.stdout.strip():
-            print(
-                "Error: working tree has uncommitted changes.\n"
-                "Commit your changes before running with --status-file so that\n"
-                "test results can be attributed to a specific commit.\n"
-                "Use --allow-dirty to bypass this check.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+        sys.exit(1)
+
+    if is_dirty:
+        commit_sha += "-dirty"
 
     return commit_sha
 
