@@ -1,4 +1,4 @@
-"""HTML report generation from YAML test reports.
+"""HTML report generation from JSON test reports.
 
 Generates self-contained HTML reports with color-coded statuses,
 expandable log and measurement sections, and visual DAG structure.
@@ -7,10 +7,9 @@ expandable log and measurement sections, and visual DAG structure.
 from __future__ import annotations
 
 import html
+import json
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 
 # Status color mapping
@@ -223,21 +222,21 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def generate_html_from_yaml(yaml_path: Path) -> str:
-    """Generate HTML report from a YAML report file.
+def generate_html_from_file(report_path: Path) -> str:
+    """Generate HTML report from a JSON report file.
 
     Args:
-        yaml_path: Path to the YAML report file.
+        report_path: Path to the JSON report file.
 
     Returns:
         Complete HTML string.
 
     Raises:
-        FileNotFoundError: If YAML file doesn't exist.
-        yaml.YAMLError: If YAML is invalid.
+        FileNotFoundError: If report file doesn't exist.
+        json.JSONDecodeError: If JSON is invalid.
     """
-    with open(yaml_path) as f:
-        report_data = yaml.safe_load(f)
+    with open(report_path) as f:
+        report_data = json.load(f)
     return generate_html_report(report_data)
 
 

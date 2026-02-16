@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
 import pytest
-import yaml
 
 from orchestrator.reporting.html_reporter import (
     STATUS_COLORS,
     STATUS_LABELS,
-    generate_html_from_yaml,
+    generate_html_from_file,
     generate_html_report,
     write_html_report,
 )
@@ -423,25 +423,25 @@ class TestWriteHtmlReport:
             assert path.exists()
 
 
-class TestGenerateHtmlFromYaml:
-    """Tests for generate_html_from_yaml function."""
+class TestGenerateHtmlFromFile:
+    """Tests for generate_html_from_file function."""
 
-    def test_reads_yaml_and_generates_html(self):
-        """Can read a YAML file and produce HTML."""
+    def test_reads_json_and_generates_html(self):
+        """Can read a JSON file and produce HTML."""
         report = _make_flat_report()
         with tempfile.TemporaryDirectory() as tmpdir:
-            yaml_path = Path(tmpdir) / "report.yaml"
-            with open(yaml_path, "w") as f:
-                yaml.dump(report, f)
+            json_path = Path(tmpdir) / "report.json"
+            with open(json_path, "w") as f:
+                json.dump(report, f)
 
-            result = generate_html_from_yaml(yaml_path)
+            result = generate_html_from_file(json_path)
             assert "<!DOCTYPE html>" in result
             assert "test_a" in result
 
-    def test_missing_yaml_raises(self):
-        """Missing YAML file raises FileNotFoundError."""
+    def test_missing_file_raises(self):
+        """Missing report file raises FileNotFoundError."""
         with pytest.raises(FileNotFoundError):
-            generate_html_from_yaml(Path("/nonexistent/report.yaml"))
+            generate_html_from_file(Path("/nonexistent/report.json"))
 
 
 class TestHtmlEscaping:

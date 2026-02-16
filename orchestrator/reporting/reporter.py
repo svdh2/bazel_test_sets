@@ -1,6 +1,6 @@
 """Report generation for test execution results.
 
-Generates YAML reports from test results, supporting the five-status model:
+Generates JSON reports from test results, supporting the five-status model:
 passed, failed, dependencies_failed, passed+dependencies_failed,
 failed+dependencies_failed.
 
@@ -15,8 +15,6 @@ import datetime
 import json
 from pathlib import Path
 from typing import Any
-
-import yaml
 
 from orchestrator.execution.executor import TestResult
 
@@ -35,10 +33,10 @@ MAX_HISTORY = 500
 
 
 class Reporter:
-    """Collects test results and generates YAML reports.
+    """Collects test results and generates JSON reports.
 
     The reporter accepts TestResult objects and produces a structured
-    YAML report file containing all results with timing, status, and
+    JSON report file containing all results with timing, status, and
     log information. Supports hierarchical DAG structure, structured log
     data, burn-in progress, regression selection, and rolling history.
     """
@@ -135,7 +133,7 @@ class Reporter:
 
         Returns:
             Dictionary representing the full report, suitable for
-            YAML serialization.
+            JSON serialization.
         """
         summary = self._compute_summary()
         now = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
@@ -167,7 +165,7 @@ class Reporter:
         current results, and trims to MAX_HISTORY entries.
 
         Args:
-            existing_report_path: Path to existing YAML report (optional).
+            existing_report_path: Path to existing JSON report (optional).
 
         Returns:
             Report dict with history included.
@@ -179,10 +177,10 @@ class Reporter:
         if existing_report_path and existing_report_path.exists():
             try:
                 with open(existing_report_path) as f:
-                    existing = yaml.safe_load(f)
+                    existing = json.load(f)
                 if existing and "report" in existing:
                     existing_history = existing["report"].get("history", {})
-            except (yaml.YAMLError, OSError):
+            except (json.JSONDecodeError, OSError):
                 pass
 
         # Append current results to history
@@ -208,27 +206,21 @@ class Reporter:
         report["report"]["history"] = history
         return report
 
-    def write_yaml(self, path: Path) -> None:
-        """Write the report as a YAML file.
+    def write_report(self, path: Path) -> None:
+        """Write the report as a JSON file.
 
         Args:
-            path: File path to write the YAML report to.
+            path: File path to write the JSON report to.
         """
         report = self.generate_report()
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
-            yaml.dump(
-                report,
-                f,
-                default_flow_style=False,
-                sort_keys=False,
-                allow_unicode=True,
-            )
+            json.dump(report, f, indent=2)
 
-    def write_yaml_with_history(
+    def write_report_with_history(
         self, path: Path, existing_path: Path | None = None,
     ) -> None:
-        """Write report with rolling history as YAML.
+        """Write report with rolling history as JSON.
 
         Args:
             path: File path to write.
@@ -237,13 +229,7 @@ class Reporter:
         report = self.generate_report_with_history(existing_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
-            yaml.dump(
-                report,
-                f,
-                default_flow_style=False,
-                sort_keys=False,
-                allow_unicode=True,
-            )
+            json.dump(report, f, indent=2)
 
     def _build_hierarchical_report(self) -> dict[str, Any]:
         """Build a hierarchical report mirroring the DAG structure.

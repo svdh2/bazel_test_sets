@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
 
 from orchestrator.execution.dag import TestDAG
 from orchestrator.execution.executor import SequentialExecutor, TestResult
@@ -170,12 +169,12 @@ class TestDiagnosticEndToEnd:
             reporter.set_manifest(manifest)
             reporter.set_commit_hash("abc123")
 
-            yaml_path = tmpdir / "report.yaml"
-            reporter.write_yaml(yaml_path)
+            report_path = tmpdir / "report.json"
+            reporter.write_report(report_path)
 
-            assert yaml_path.exists()
-            with open(yaml_path) as f:
-                report_data = yaml.safe_load(f)
+            assert report_path.exists()
+            with open(report_path) as f:
+                report_data = json.load(f)
 
             assert report_data["report"]["summary"]["passed"] == 2
             assert report_data["report"]["summary"]["failed"] == 0
@@ -315,7 +314,7 @@ class TestDetectionMode:
 class TestReportToHtmlPipeline:
     """Full pipeline: execute -> YAML report -> HTML report."""
 
-    def test_yaml_to_html_roundtrip(self):
+    def test_json_to_html_roundtrip(self):
         """Generate YAML, then convert to HTML."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
@@ -336,13 +335,13 @@ class TestReportToHtmlPipeline:
             reporter.set_commit_hash("def456")
             report_data = reporter.generate_report()
 
-            # Write YAML
-            yaml_path = tmpdir / "report.yaml"
-            reporter.write_yaml(yaml_path)
+            # Write JSON
+            report_path = tmpdir / "report.json"
+            reporter.write_report(report_path)
 
-            # Read YAML and generate HTML
-            with open(yaml_path) as f:
-                loaded = yaml.safe_load(f)
+            # Read JSON and generate HTML
+            with open(report_path) as f:
+                loaded = json.load(f)
 
             html_output = generate_html_report(loaded)
             assert "<!DOCTYPE html>" in html_output
@@ -364,7 +363,7 @@ class TestRollingHistoryPipeline:
         """Multiple generate_report_with_history calls accumulate entries."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
-            report_path = tmpdir / "report.yaml"
+            report_path = tmpdir / "report.json"
 
             # First run
             r1 = Reporter()
@@ -373,7 +372,7 @@ class TestRollingHistoryPipeline:
                 duration=1.0, exit_code=0, stdout="", stderr="",
             ))
             r1.set_commit_hash("commit1")
-            r1.write_yaml_with_history(report_path)
+            r1.write_report_with_history(report_path)
 
             # Second run (reads existing history)
             r2 = Reporter()
@@ -382,11 +381,11 @@ class TestRollingHistoryPipeline:
                 duration=2.0, exit_code=1, stdout="", stderr="err",
             ))
             r2.set_commit_hash("commit2")
-            r2.write_yaml_with_history(report_path, existing_path=report_path)
+            r2.write_report_with_history(report_path, existing_path=report_path)
 
             # Read final report
             with open(report_path) as f:
-                report = yaml.safe_load(f)
+                report = json.load(f)
 
             history = report["report"]["history"]["t1"]
             assert len(history) == 2
@@ -772,13 +771,13 @@ class TestMainModuleIntegration:
             assert exit_code == 1
 
     def test_main_with_output_report(self):
-        """main() writes YAML report when --output specified."""
+        """main() writes JSON report when --output specified."""
         from orchestrator.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_p = Path(tmpdir)
             exe = _pass_script(tmpdir_p)
-            report_path = tmpdir_p / "report.yaml"
+            report_path = tmpdir_p / "report.json"
 
             manifest, manifest_path = _make_manifest(tmpdir_p, {
                 "t1": {"assertion": "T1", "executable": exe, "depends_on": []},
@@ -794,7 +793,7 @@ class TestMainModuleIntegration:
             assert report_path.exists()
 
             with open(report_path) as f:
-                report = yaml.safe_load(f)
+                report = json.load(f)
             assert report["report"]["summary"]["passed"] == 1
 
     def test_main_invalid_manifest_returns_1(self):

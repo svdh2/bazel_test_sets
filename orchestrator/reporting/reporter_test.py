@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
-
-import yaml
 
 from orchestrator.execution.executor import TestResult
 from orchestrator.reporting.reporter import MAX_HISTORY, VALID_STATUSES, Reporter, _aggregate_status
@@ -240,11 +239,11 @@ class TestReportFormatting:
         assert names == ["c", "a", "b"]
 
 
-class TestYamlOutput:
-    """Tests for YAML file output."""
+class TestJsonOutput:
+    """Tests for JSON file output."""
 
-    def test_yaml_output_valid(self):
-        """Written YAML file is valid and can be loaded."""
+    def test_json_output_valid(self):
+        """Written JSON file is valid and can be loaded."""
         reporter = Reporter()
         reporter.add_results([
             TestResult(
@@ -268,17 +267,17 @@ class TestYamlOutput:
         ])
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "report.yaml"
-            reporter.write_yaml(path)
+            path = Path(tmpdir) / "report.json"
+            reporter.write_report(path)
 
             assert path.exists()
-            loaded = yaml.safe_load(path.read_text())
+            loaded = json.loads(path.read_text())
             assert "report" in loaded
             assert loaded["report"]["summary"]["total"] == 2
             assert len(loaded["report"]["tests"]) == 2
 
-    def test_yaml_output_all_statuses(self):
-        """YAML output includes all five status types."""
+    def test_json_output_all_statuses(self):
+        """JSON output includes all five status types."""
         reporter = Reporter()
         for status in VALID_STATUSES:
             reporter.add_result(
@@ -291,29 +290,29 @@ class TestYamlOutput:
             )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "report.yaml"
-            reporter.write_yaml(path)
+            path = Path(tmpdir) / "report.json"
+            reporter.write_report(path)
 
-            loaded = yaml.safe_load(path.read_text())
+            loaded = json.loads(path.read_text())
             statuses_in_report = {
                 t["status"] for t in loaded["report"]["tests"]
             }
             assert statuses_in_report == VALID_STATUSES
 
-    def test_yaml_output_creates_parent_dirs(self):
-        """write_yaml creates parent directories if needed."""
+    def test_json_output_creates_parent_dirs(self):
+        """write_report creates parent directories if needed."""
         reporter = Reporter()
         reporter.add_result(
             TestResult(name="a", assertion="A", status="passed", duration=1.0)
         )
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "subdir" / "nested" / "report.yaml"
-            reporter.write_yaml(path)
+            path = Path(tmpdir) / "subdir" / "nested" / "report.json"
+            reporter.write_report(path)
             assert path.exists()
 
-    def test_yaml_output_roundtrip(self):
-        """YAML output can be loaded and matches generated report."""
+    def test_json_output_roundtrip(self):
+        """JSON output can be loaded and matches generated report."""
         reporter = Reporter()
         reporter.add_results([
             TestResult(
@@ -334,10 +333,10 @@ class TestYamlOutput:
         ])
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "report.yaml"
-            reporter.write_yaml(path)
+            path = Path(tmpdir) / "report.json"
+            reporter.write_report(path)
 
-            loaded = yaml.safe_load(path.read_text())
+            loaded = json.loads(path.read_text())
 
             # Verify structure
             tests = loaded["report"]["tests"]
@@ -572,7 +571,7 @@ class TestRollingHistory:
         """Existing history is preserved and extended."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Write initial report with history
-            path = Path(tmpdir) / "report.yaml"
+            path = Path(tmpdir) / "report.json"
             initial = {
                 "report": {
                     "history": {
@@ -584,7 +583,7 @@ class TestRollingHistory:
                 },
             }
             with open(path, "w") as f:
-                yaml.dump(initial, f)
+                json.dump(initial, f)
 
             # Generate new report extending history
             reporter = Reporter()
@@ -599,7 +598,7 @@ class TestRollingHistory:
         """History is trimmed to MAX_HISTORY entries."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Write initial report with MAX_HISTORY entries
-            path = Path(tmpdir) / "report.yaml"
+            path = Path(tmpdir) / "report.json"
             initial = {
                 "report": {
                     "history": {
@@ -611,7 +610,7 @@ class TestRollingHistory:
                 },
             }
             with open(path, "w") as f:
-                yaml.dump(initial, f)
+                json.dump(initial, f)
 
             # Add one more result
             reporter = Reporter()

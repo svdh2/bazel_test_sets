@@ -8,7 +8,7 @@ py_library(
     ),
     imports = [".."],
     visibility = ["//visibility:public"],
-    deps = ["@pypi//pyyaml"],
+    deps = [],
 )
 
 py_binary(

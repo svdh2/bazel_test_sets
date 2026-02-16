@@ -358,7 +358,7 @@ def _print_results(results: list, args: argparse.Namespace) -> None:
     if args.output:
         reporter = Reporter()
         reporter.add_results(results)
-        reporter.write_yaml(args.output)
+        reporter.write_report(args.output)
         print(f"Report written to: {args.output}")
 
         html_path = args.output.with_suffix(".html")
