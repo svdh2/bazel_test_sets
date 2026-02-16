@@ -155,6 +155,24 @@ pre {
     font-size: 13px;
     margin: 8px 0;
 }
+.history-timeline {
+    display: flex;
+    gap: 1px;
+    margin: 6px 0;
+    overflow: hidden;
+    max-width: 100%;
+}
+.history-timeline .ht-box {
+    flex: 0 0 4px;
+    height: 16px;
+    border-radius: 1px;
+    cursor: default;
+}
+.history-timeline .ht-box:hover {
+    outline: 2px solid #333;
+    outline-offset: -1px;
+    z-index: 1;
+}
 .regression-section {
     background: #fff;
     border-radius: 8px;
@@ -206,11 +224,13 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     # Header
     parts.append(_render_header(report))
 
+    history = report.get("history", {})
+
     # Test set (hierarchical) or flat tests
     if "test_set" in report:
-        parts.append(_render_test_set(report["test_set"]))
+        parts.append(_render_test_set(report["test_set"], history))
     elif "tests" in report:
-        parts.append(_render_flat_tests(report["tests"]))
+        parts.append(_render_flat_tests(report["tests"], history))
 
     # Regression selection section
     if "regression_selection" in report:
@@ -307,7 +327,9 @@ def _render_header(report: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def _render_test_set(test_set: dict[str, Any]) -> str:
+def _render_test_set(
+    test_set: dict[str, Any], history: dict[str, list[dict[str, Any]]]
+) -> str:
     """Render a hierarchical test set section."""
     parts: list[str] = []
     name = test_set.get("name", "Test Set")
@@ -330,13 +352,16 @@ def _render_test_set(test_set: dict[str, Any]) -> str:
 
     tests = test_set.get("tests", {})
     for test_name, test_data in tests.items():
-        parts.append(_render_test_entry(test_name, test_data))
+        parts.append(_render_test_entry(test_name, test_data, history.get(test_name, [])))
 
     parts.append("</div>")
     return "\n".join(parts)
 
 
-def _render_test_entry(name: str, data: dict[str, Any]) -> str:
+def _render_test_entry(
+    name: str, data: dict[str, Any],
+    history_entries: list[dict[str, Any]] | None = None,
+) -> str:
     """Render a single test entry with expandable details."""
     parts: list[str] = []
     status = data.get("status", "no_tests")
@@ -351,6 +376,10 @@ def _render_test_entry(name: str, data: dict[str, Any]) -> str:
         f'<span class="status-badge" style="background:{color}">'
         f"{html.escape(label)}</span></div>"
     )
+
+    # History timeline
+    if history_entries:
+        parts.append(_render_history_timeline(history_entries))
 
     meta_items: list[str] = []
     if assertion:
@@ -442,6 +471,41 @@ def _render_structured_log(log_data: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+# History timeline status-to-color mapping
+_TIMELINE_COLORS: dict[str, str] = {
+    "passed": "#2da44e",
+    "failed": "#cf222e",
+    "dependencies_failed": "#999",
+    "passed+dependencies_failed": "#d4a72c",
+    "failed+dependencies_failed": "#cf222e",
+    "mixed": "#d4a72c",
+    "no_tests": "#999",
+}
+
+
+def _render_history_timeline(entries: list[dict[str, Any]]) -> str:
+    """Render a compact horizontal pass/fail history timeline.
+
+    Each entry becomes a small colored box. Hovering shows the commit hash.
+    Entries are displayed in chronological order (oldest left, newest right).
+    """
+    if not entries:
+        return ""
+    parts: list[str] = []
+    parts.append('<div class="history-timeline">')
+    for entry in entries:
+        status = entry.get("status", "no_tests")
+        color = _TIMELINE_COLORS.get(status, "#999")
+        commit = entry.get("commit", "")
+        tooltip = html.escape(commit[:12]) if commit else html.escape(status)
+        parts.append(
+            f'<div class="ht-box" style="background:{color}" '
+            f'title="{tooltip}"></div>'
+        )
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
 def _render_burn_in(burn_in: dict[str, Any]) -> str:
     """Render burn-in progress information."""
     runs = burn_in.get("runs", 0)
@@ -468,14 +532,16 @@ def _render_inferred_deps(deps: list[dict[str, Any]]) -> str:
     return "\n".join(parts)
 
 
-def _render_flat_tests(tests: list[dict[str, Any]]) -> str:
+def _render_flat_tests(
+    tests: list[dict[str, Any]], history: dict[str, list[dict[str, Any]]]
+) -> str:
     """Render a flat (non-hierarchical) test list."""
     parts: list[str] = []
     parts.append('<div class="flat-tests">')
     parts.append("<h2>Test Results</h2>")
     for test in tests:
         name = test.get("name", "unknown")
-        parts.append(_render_test_entry(name, test))
+        parts.append(_render_test_entry(name, test, history.get(name, [])))
     parts.append("</div>")
     return "\n".join(parts)
 

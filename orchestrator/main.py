@@ -218,6 +218,9 @@ def main(argv: list[str] | None = None) -> int:
     commit_sha: str | None = None
     if args.status_file:
         commit_sha = _resolve_git_context(args.allow_dirty)
+    elif args.output:
+        # Best-effort: tag report history with commit SHA without enforcing clean tree
+        commit_sha = _resolve_git_context(allow_dirty=True)
 
     # Handle regression option
     if args.regression:
@@ -245,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error during execution: {e}", file=sys.stderr)
         return 1
 
-    _print_results(results, args)
+    _print_results(results, args, commit_sha)
     _update_status_file(results, args, commit_sha)
     return 1 if any(r.status == "failed" for r in results) else 0
 
@@ -360,7 +363,7 @@ def _run_regression(
         print(f"Error during execution: {e}", file=sys.stderr)
         return 1
 
-    _print_results(results, args)
+    _print_results(results, args, commit_sha)
     _update_status_file(results, args, commit_sha)
     return 1 if any(r.status == "failed" for r in results) else 0
 
@@ -416,7 +419,10 @@ def _update_status_file(
             print(f"  {name}: {old_state} \u2192 {new_state} ({etype})")
 
 
-def _print_results(results: list, args: argparse.Namespace) -> None:
+def _print_results(
+    results: list, args: argparse.Namespace,
+    commit_sha: str | None = None,
+) -> None:
     """Print test execution results summary."""
     mode_label = args.mode
     if args.regression:
@@ -448,11 +454,19 @@ def _print_results(results: list, args: argparse.Namespace) -> None:
     if args.output:
         reporter = Reporter()
         reporter.add_results(results)
-        reporter.write_report(args.output)
+        if commit_sha:
+            reporter.set_commit_hash(commit_sha)
+
+        # Use history-aware generation so the HTML timeline accumulates
+        existing = args.output if args.output.exists() else None
+        report_data = reporter.generate_report_with_history(existing)
+
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.output, "w") as f:
+            json.dump(report_data, f, indent=2)
         print(f"Report written to: {args.output}")
 
         html_path = args.output.with_suffix(".html")
-        report_data = reporter.generate_report()
         write_html_report(report_data, html_path)
         print(f"HTML report written to: {html_path}")
 

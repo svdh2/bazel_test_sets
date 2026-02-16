@@ -471,3 +471,113 @@ class TestHtmlEscaping:
         result = generate_html_report(report)
         assert "&lt;b&gt;" in result
         assert "&amp;" in result
+
+
+class TestHistoryTimeline:
+    """Tests for pass/fail history timeline rendering."""
+
+    def _make_history_entries(
+        self,
+        statuses: list[str],
+        commits: list[str] | None = None,
+    ) -> list[dict]:
+        entries = []
+        for i, status in enumerate(statuses):
+            entry: dict = {"status": status, "duration_seconds": 1.0,
+                           "timestamp": f"2026-01-0{i + 1}T00:00:00+00:00"}
+            if commits and i < len(commits):
+                entry["commit"] = commits[i]
+            entries.append(entry)
+        return entries
+
+    def test_timeline_rendered_for_flat_report_with_history(self):
+        """History timeline appears when history data is present."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed", "failed", "passed"],
+                ["aaa111", "bbb222", "ccc333"],
+            ),
+        }
+        result = generate_html_report(report)
+        assert "history-timeline" in result
+        assert "ht-box" in result
+
+    def test_timeline_not_rendered_without_history(self):
+        """No timeline div when history data is absent."""
+        report = _make_flat_report()
+        result = generate_html_report(report)
+        assert 'class="history-timeline"' not in result
+
+    def test_timeline_shows_correct_colors(self):
+        """Passed entries are green, failed entries are red."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(["passed", "failed"]),
+        }
+        result = generate_html_report(report)
+        assert "#2da44e" in result  # passed green
+        assert "#cf222e" in result  # failed red
+
+    def test_timeline_shows_commit_in_tooltip(self):
+        """Commit hash appears in title attribute for hover."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed"], ["abcdef123456789"],
+            ),
+        }
+        result = generate_html_report(report)
+        assert 'title="abcdef123456"' in result  # truncated to 12 chars
+
+    def test_timeline_falls_back_to_status_when_no_commit(self):
+        """Tooltip shows status name when commit is missing."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(["passed"]),
+        }
+        result = generate_html_report(report)
+        assert 'title="passed"' in result
+
+    def test_timeline_rendered_in_hierarchical_report(self):
+        """History timeline appears in hierarchical test sets."""
+        report = _make_hierarchical_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed", "passed", "failed"],
+                ["aaa", "bbb", "ccc"],
+            ),
+        }
+        result = generate_html_report(report)
+        assert "history-timeline" in result
+
+    def test_timeline_escapes_html_in_commit(self):
+        """Commit hash with special chars is escaped."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed"], ['<script>"x</script>'],
+            ),
+        }
+        result = generate_html_report(report)
+        assert "<script>" not in result
+        assert "&lt;script&gt;&quot;" in result
+
+    def test_empty_history_list_no_timeline(self):
+        """Empty history list for a test produces no timeline div."""
+        report = _make_flat_report()
+        report["report"]["history"] = {"test_a": []}
+        result = generate_html_report(report)
+        assert 'class="history-timeline"' not in result
+
+    def test_dependencies_failed_color(self):
+        """Dependencies_failed status uses grey in timeline."""
+        report = _make_flat_report(
+            tests=[{"name": "t", "status": "dependencies_failed",
+                    "duration_seconds": 1.0}],
+        )
+        report["report"]["history"] = {
+            "t": self._make_history_entries(["dependencies_failed"]),
+        }
+        result = generate_html_report(report)
+        assert "#999" in result

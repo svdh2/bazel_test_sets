@@ -26,6 +26,7 @@ def write_html_report(report_data: dict, output_path: Path)
 | **Test entry** | Name, status badge, assertion, duration, exit code, color-coded border |
 | **Logs** | Expandable `<details>` with stdout (dark theme pre) and stderr (pink border) |
 | **Structured log** | Expandable section with block sequence, measurement table, results, errors |
+| **History timeline** | Compact horizontal bar of colored boxes showing pass/fail history; hover reveals commit hash |
 | **Burn-in info** | Blue info box with runs, passes, SPRT status |
 | **Regression section** | Changed files list, test scores table |
 
@@ -49,7 +50,8 @@ def write_html_report(report_data: dict, output_path: Path)
 
 ## Key Design Decisions
 
-1. **Self-contained HTML**: All CSS is embedded inline in a `<style>` tag. No external dependencies, JavaScript frameworks, or CDN links. The report is a single file that can be opened in any browser.
+1. **Self-contained HTML**: All CSS is embedded inline in a `<style>` tag. No external dependencies, JavaScript frameworks, or CDN links. The report is a single file that can be opened in any browser. The history timeline uses pure CSS with native `title` attributes for tooltips.
+
 
 2. **Expandable sections**: Logs and structured data use HTML `<details>/<summary>` elements for progressive disclosure. Reports with many tests remain scannable.
 
