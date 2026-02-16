@@ -1,0 +1,20 @@
+"""Example projects demonstrating test_sets_bazel_rules."""
+
+module(
+    name = "test_sets_examples",
+    version = "0.0.0",
+)
+
+bazel_dep(name = "test_sets_bazel_rules", version = "0.1.0")
+bazel_dep(name = "rules_python", version = "1.7.0")
+
+local_path_override(
+    module_name = "test_sets_bazel_rules",
+    path = "..",
+)
+
+python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+python.toolchain(
+    python_version = "3.12",
+    is_default = True,
+)

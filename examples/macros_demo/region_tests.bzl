@@ -4,7 +4,7 @@ Demonstrates the matrix_test_set pattern where each entry in the matrix
 produces a concrete test target with parameters baked in as arguments.
 """
 
-load("//macros:matrix_test_set.bzl", "matrix_test_set")
+load("@test_sets_bazel_rules//macros:matrix_test_set.bzl", "matrix_test_set")
 
 def payment_region_test_set(name, **kwargs):
     """Generate payment processing test set across regions and currencies.

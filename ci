@@ -170,6 +170,33 @@ def check():
     ])
 
 
+@cli.command("test-examples")
+def test_examples():
+    """Run all Bazel tests in the examples module."""
+    if not IN_CONTAINER:
+        _delegate_to_container(["test-examples"])
+        return
+    examples_dir = PROJECT_ROOT / "examples"
+    for item in examples_dir.iterdir():
+        if item.is_symlink() and item.name.startswith("bazel-"):
+            try:
+                if item.resolve().exists():
+                    continue
+            except PermissionError:
+                pass
+            item.unlink()
+            console.print(f"[dim]Removed stale symlink examples/{item.name}[/dim]")
+    run_cmd(["bazel", "test", "//..."], cwd=str(examples_dir))
+
+    # Generate reports via bazel run (bazel test sandboxes output away)
+    console.print("[bold]--- Generating reports ---[/bold]")
+    for target in [
+        "//ecommerce:ecommerce_tests",
+        "//macros_demo:deployment_validation",
+    ]:
+        run_cmd(["bazel", "run", target], cwd=str(examples_dir))
+
+
 @cli.command()
 @click.argument("pattern", default="//...")
 def query(pattern):

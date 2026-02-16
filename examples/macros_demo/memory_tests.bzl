@@ -5,8 +5,8 @@ derives concrete test values from high-level parameters.
 """
 
 load("@rules_python//python:defs.bzl", "py_test")
-load("//rules:test_set_test.bzl", "test_set_test")
-load("//rules:test_set.bzl", "test_set")
+load("@test_sets_bazel_rules//rules:test_set_test.bzl", "test_set_test")
+load("@test_sets_bazel_rules//rules:test_set.bzl", "test_set")
 
 def memory_test_set(name, tier, max_ram_gb):
     """Parameter mapping macro: generates concrete test targets for memory limits.

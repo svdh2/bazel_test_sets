@@ -1,7 +1,7 @@
 # BUILD file for macro examples
 
-load("//macros/examples:memory_tests.bzl", "memory_test_set")
-load("//macros/examples:region_tests.bzl", "payment_region_test_set")
+load("//macros_demo:memory_tests.bzl", "memory_test_set")
+load("//macros_demo:region_tests.bzl", "payment_region_test_set")
 
 # --- Memory test set (parameterized by tier) ---
 
@@ -26,7 +26,7 @@ payment_region_test_set(
 # --- Hierarchical composition example ---
 # A parent test set that includes both memory and payment test sets as subsets
 
-load("//rules:test_set.bzl", "test_set")
+load("@test_sets_bazel_rules//rules:test_set.bzl", "test_set")
 
 test_set(
     name = "deployment_validation",

@@ -1,7 +1,8 @@
 """Entry point for the test set orchestrator.
 
 Parses command-line arguments and orchestrates test execution based on the
-mode and manifest. Supports diagnostic, detection, and regression modes.
+mode and manifest. Supports diagnostic and detection modes, with an optional
+regression flag to filter tests by co-occurrence analysis.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from pathlib import Path
 
 from orchestrator.dag import TestDAG
 from orchestrator.executor import AsyncExecutor, SequentialExecutor
+from orchestrator.html_reporter import write_html_report
 from orchestrator.reporter import Reporter
 
 
@@ -30,9 +32,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode",
-        choices=["diagnostic", "detection", "regression"],
+        choices=["diagnostic", "detection"],
         default="diagnostic",
         help="Execution mode (default: diagnostic)",
+    )
+    parser.add_argument(
+        "--regression",
+        action="store_true",
+        default=False,
+        help="Enable regression option: select a subset of pre-existing tests by co-occurrence analysis",
     )
     parser.add_argument(
         "--max-parallel",
@@ -59,12 +67,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to the .tests/status JSON state file",
     )
 
-    # Regression mode flags
+    # Regression option flags
     parser.add_argument(
         "--diff-base",
         type=str,
         default=None,
-        help="Git ref to diff against for regression mode (e.g. main, HEAD~3)",
+        help="Git ref to diff against for regression selection (e.g. main, HEAD~3)",
     )
     parser.add_argument(
         "--changed-files",
@@ -82,7 +90,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--max-test-percentage",
         type=float,
         default=0.10,
-        help="Max fraction of stable tests to select in regression mode (default: 0.10)",
+        help="Max fraction of stable tests to select with --regression (default: 0.10)",
     )
     parser.add_argument(
         "--max-hops",
@@ -143,9 +151,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error building DAG: {e}", file=sys.stderr)
         return 1
 
-    # Handle regression mode
-    if args.mode == "regression":
-        return _run_regression_mode(args, manifest, dag)
+    # Handle regression option
+    if args.regression:
+        return _run_regression(args, manifest, dag)
 
     # Execute tests (use AsyncExecutor for parallel, SequentialExecutor as fallback)
     executor: SequentialExecutor | AsyncExecutor
@@ -173,12 +181,12 @@ def main(argv: list[str] | None = None) -> int:
     return 1 if any(r.status == "failed" for r in results) else 0
 
 
-def _run_regression_mode(
+def _run_regression(
     args: argparse.Namespace,
     manifest: dict,
     dag: TestDAG,
 ) -> int:
-    """Execute regression mode: select tests then run them.
+    """Execute with regression option: select tests then run in chosen mode.
 
     Args:
         args: Parsed CLI arguments.
@@ -217,7 +225,7 @@ def _run_regression_mode(
             return 1
     else:
         print(
-            "Error: Regression mode requires --diff-base or --changed-files",
+            "Error: --regression requires --diff-base or --changed-files",
             file=sys.stderr,
         )
         return 1
@@ -240,7 +248,7 @@ def _run_regression_mode(
     )
 
     # Print selection summary
-    print(f"Regression mode: {len(selection.selected_tests)} tests selected "
+    print(f"Regression ({args.mode}): {len(selection.selected_tests)} tests selected "
           f"from {selection.total_stable_tests} stable tests "
           f"({len(changed_files)} files changed)")
     if selection.fallback_used:
@@ -259,18 +267,18 @@ def _run_regression_mode(
         print(f"Error building filtered DAG: {e}", file=sys.stderr)
         return 1
 
-    # Execute in diagnostic order
+    # Execute in the chosen mode (diagnostic or detection)
     executor: SequentialExecutor | AsyncExecutor
     if args.max_parallel == 1:
         executor = SequentialExecutor(
             filtered_dag,
-            mode="diagnostic",
+            mode=args.mode,
             max_failures=args.max_failures,
         )
     else:
         executor = AsyncExecutor(
             filtered_dag,
-            mode="diagnostic",
+            mode=args.mode,
             max_failures=args.max_failures,
             max_parallel=args.max_parallel,
         )
@@ -320,7 +328,10 @@ def _filter_manifest(
 
 def _print_results(results: list, args: argparse.Namespace) -> None:
     """Print test execution results summary."""
-    print(f"Mode: {args.mode}")
+    mode_label = args.mode
+    if args.regression:
+        mode_label += " + regression"
+    print(f"Mode: {mode_label}")
     print(f"Tests executed: {len(results)}")
     print()
 
@@ -343,12 +354,17 @@ def _print_results(results: list, args: argparse.Namespace) -> None:
     print()
     print(f"Results: {passed} passed, {failed} failed, {dep_failed} skipped")
 
-    # Generate report
+    # Generate reports
     if args.output:
         reporter = Reporter()
         reporter.add_results(results)
         reporter.write_yaml(args.output)
         print(f"Report written to: {args.output}")
+
+        html_path = args.output.with_suffix(".html")
+        report_data = reporter.generate_report()
+        write_html_report(report_data, html_path)
+        print(f"HTML report written to: {html_path}")
 
 
 if __name__ == "__main__":

@@ -101,8 +101,11 @@ elif [[ -d "$0.runfiles" ]]; then
 else
   echo "Cannot find runfiles" >&2; exit 1
 fi
+OUT_DIR="${{BUILD_WORKSPACE_DIRECTORY:-.}}/target/reports"
+mkdir -p "$OUT_DIR"
 exec "$R/{workspace}/{orchestrator}" \\
   --manifest "$R/{workspace}/{manifest}" \\
+  --output "$OUT_DIR/{name}.yaml" \\
   "$@"
 """.format(
             name = ctx.label.name,

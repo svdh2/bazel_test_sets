@@ -1,4 +1,4 @@
-"""Tests for the orchestrator main entry point, focused on regression mode."""
+"""Tests for the orchestrator main entry point, focused on the regression option."""
 
 from __future__ import annotations
 
@@ -13,17 +13,35 @@ from orchestrator.main import _filter_manifest, _get_changed_files, parse_args
 
 
 class TestParseArgsRegression:
-    """Tests for regression mode argument parsing."""
+    """Tests for regression option argument parsing."""
 
-    def test_regression_mode_accepted(self):
-        """--mode=regression is a valid mode."""
+    def test_regression_flag_accepted(self):
+        """--regression is a valid flag combinable with any mode."""
         args = parse_args([
             "--manifest", "/path/manifest.json",
-            "--mode", "regression",
+            "--mode", "diagnostic",
+            "--regression",
             "--diff-base", "main",
         ])
-        assert args.mode == "regression"
+        assert args.mode == "diagnostic"
+        assert args.regression is True
         assert args.diff_base == "main"
+
+    def test_regression_with_detection_mode(self):
+        """--regression combines with --mode=detection."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--mode", "detection",
+            "--regression",
+            "--diff-base", "main",
+        ])
+        assert args.mode == "detection"
+        assert args.regression is True
+
+    def test_regression_default_false(self):
+        """--regression defaults to False."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        assert args.regression is False
 
     def test_diff_base_flag(self):
         """--diff-base flag parsed correctly."""
@@ -70,6 +88,7 @@ class TestParseArgsRegression:
         args = parse_args(["--manifest", "/path/manifest.json"])
         assert args.diff_base is None
         assert args.changed_files is None
+        assert args.regression is False
         assert args.co_occurrence_graph == Path(".tests/co_occurrence_graph.json")
         assert args.max_test_percentage == 0.10
         assert args.max_hops == 2
@@ -131,8 +150,8 @@ class TestFilterManifest:
         assert filtered["test_set_tests"] == {}
 
 
-class TestRegressionModeMissingGraph:
-    """Tests for regression mode with missing co-occurrence graph."""
+class TestRegressionOptionMissingGraph:
+    """Tests for regression option with missing co-occurrence graph."""
 
     def test_regression_missing_graph(self):
         """Missing graph file produces clear error."""
@@ -147,14 +166,14 @@ class TestRegressionModeMissingGraph:
 
             exit_code = main([
                 "--manifest", str(manifest_path),
-                "--mode", "regression",
+                "--regression",
                 "--changed-files", "src/a.py",
                 "--co-occurrence-graph", str(Path(tmpdir) / "nonexistent.json"),
             ])
             assert exit_code == 1
 
     def test_regression_no_diff_base_or_changed_files(self):
-        """Regression mode without --diff-base or --changed-files errors."""
+        """--regression without --diff-base or --changed-files errors."""
         from orchestrator.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -174,17 +193,17 @@ class TestRegressionModeMissingGraph:
 
             exit_code = main([
                 "--manifest", str(manifest_path),
-                "--mode", "regression",
+                "--regression",
                 "--co-occurrence-graph", str(graph_path),
             ])
             assert exit_code == 1
 
 
-class TestRegressionModeEndToEnd:
-    """End-to-end tests for regression mode."""
+class TestRegressionOptionEndToEnd:
+    """End-to-end tests for regression option."""
 
-    def test_regression_end_to_end_with_changed_files(self):
-        """Regression mode with --changed-files runs selected tests."""
+    def test_regression_diagnostic_with_changed_files(self):
+        """--regression with diagnostic mode runs selected tests."""
         from orchestrator.main import main
         from orchestrator.co_occurrence import save_graph, build_co_occurrence_graph
 
@@ -236,7 +255,68 @@ class TestRegressionModeEndToEnd:
 
             exit_code = main([
                 "--manifest", str(manifest_path),
-                "--mode", "regression",
+                "--mode", "diagnostic",
+                "--regression",
+                "--changed-files", "src/auth.py",
+                "--co-occurrence-graph", str(graph_path),
+                "--max-parallel", "1",
+            ])
+            assert exit_code == 0
+
+    def test_regression_detection_with_changed_files(self):
+        """--regression with detection mode runs selected tests."""
+        from orchestrator.main import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a simple pass-script
+            import stat
+            script_path = Path(tmpdir) / "pass_test.sh"
+            script_path.write_text("#!/bin/bash\nexit 0\n")
+            script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+            # Create manifest with one test
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps({
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "auth_test": {
+                        "assertion": "Auth works",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                    },
+                },
+            }))
+
+            # Create co-occurrence graph
+            from datetime import datetime, timezone
+            ts = datetime.now(timezone.utc).isoformat()
+            graph = {
+                "metadata": {
+                    "last_commit": "abc",
+                    "total_commits_analyzed": 1,
+                    "source_extensions": [".py"],
+                    "test_patterns": ["*_test.*"],
+                },
+                "file_commits": {
+                    "src/auth.py": [
+                        {"commit": "c1", "timestamp": ts},
+                    ],
+                },
+                "commit_files": {
+                    "c1": {
+                        "timestamp": ts,
+                        "source_files": ["src/auth.py"],
+                        "test_files": ["tests/auth_test.py"],
+                    },
+                },
+            }
+            graph_path = Path(tmpdir) / "graph.json"
+            graph_path.write_text(json.dumps(graph))
+
+            exit_code = main([
+                "--manifest", str(manifest_path),
+                "--mode", "detection",
+                "--regression",
                 "--changed-files", "src/auth.py",
                 "--co-occurrence-graph", str(graph_path),
                 "--max-parallel", "1",
@@ -244,7 +324,7 @@ class TestRegressionModeEndToEnd:
             assert exit_code == 0
 
     def test_regression_no_changed_files_returns_zero(self):
-        """Regression mode with empty changed files returns 0."""
+        """--regression with empty changed files returns 0."""
         from orchestrator.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -263,7 +343,7 @@ class TestRegressionModeEndToEnd:
 
             exit_code = main([
                 "--manifest", str(manifest_path),
-                "--mode", "regression",
+                "--regression",
                 "--changed-files", "",
                 "--co-occurrence-graph", str(graph_path),
             ])

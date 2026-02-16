@@ -1,0 +1,3 @@
+build --enable_bzlmod
+startup --output_user_root=/workspace/target/bazel
+test --test_output=errors

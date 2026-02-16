@@ -171,10 +171,23 @@ macros/                Parameterization macros (matrix, parameterized)
 orchestrator/          Python execution engine (DAG ordering, parallel
                        execution, regression scoring, burn-in, reporting)
 ci_tool/               Test lifecycle CLI (burn-in, deflake, status, re-judge)
-examples/ecommerce/    Full demo with 13 tests, DAG dependencies,
-                       parameterized sets, and structured logging
 docs/                  In-depth documentation (see below)
+examples/              Separate Bazel module with demo projects (see below)
 ```
+
+## Examples
+
+The `examples/` directory is a separate Bazel module that consumes `test_sets_bazel_rules` via `local_path_override`. This mirrors how an external project would use the rules.
+
+```bash
+cd examples
+bazel test //...
+```
+
+| Example | Description |
+|---------|-------------|
+| `ecommerce/` | Full demo with 13 tests, DAG dependencies, parameterized sets, and structured logging |
+| `macros_demo/` | Custom macro patterns: parameter mapping and matrix generation |
 
 ## Documentation
 

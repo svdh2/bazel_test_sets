@@ -8,10 +8,10 @@
 # - Realistic e-commerce test scenarios
 
 load("@rules_python//python:defs.bzl", "py_test")
-load("//rules:test_set_test.bzl", "test_set_test")
-load("//rules:test_set.bzl", "test_set")
-load("//macros:matrix_test_set.bzl", "matrix_test_set")
-load("//macros:parameterized_test_set.bzl", "parameterized_test_set")
+load("@test_sets_bazel_rules//rules:test_set_test.bzl", "test_set_test")
+load("@test_sets_bazel_rules//rules:test_set.bzl", "test_set")
+load("@test_sets_bazel_rules//macros:matrix_test_set.bzl", "matrix_test_set")
+load("@test_sets_bazel_rules//macros:parameterized_test_set.bzl", "parameterized_test_set")
 
 # ========================================================================
 # Leaf tests: individual py_test targets
