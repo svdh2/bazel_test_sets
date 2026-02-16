@@ -139,7 +139,7 @@ Structured logging is optional and additive.
 
 ## Report Integration
 
-When structured logs are present, the YAML report includes:
+When structured logs are present, the JSON report includes:
 
 ```yaml
 tests:

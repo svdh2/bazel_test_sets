@@ -2,14 +2,14 @@
 
 ## Purpose
 
-After test execution, generate structured reports in YAML and HTML formats. Reports include test results, timing, structured log data, burn-in progress, regression selection details, and optionally rolling history for SPRT demotion analysis.
+After test execution, generate structured reports in JSON and HTML formats. Reports include test results, timing, structured log data, burn-in progress, regression selection details, and optionally rolling history for SPRT demotion analysis.
 
 ## Trigger
 
 Test execution with `--output` flag:
 
 ```bash
-bazel run //path/to:my_test_set -- --output target/reports/my_tests.yaml
+bazel run //path/to:my_test_set -- --output target/reports/my_tests.json
 ```
 
 ## Steps
@@ -25,10 +25,10 @@ reporter.add_results(results)
 
 **Components**: Orchestrator Main, Reporter
 
-### 2. YAML Report Generation
+### 2. JSON Report Generation
 
 ```python
-reporter.write_yaml(args.output)
+reporter.write_report(args.output)
 ```
 
 The Reporter:
@@ -36,7 +36,7 @@ The Reporter:
 2. If a manifest is set, builds a hierarchical report mirroring the DAG structure; otherwise, builds a flat report
 3. Formats each test result with status, duration, exit code, stdout/stderr
 4. Adds optional enrichment data (structured logs, burn-in progress, inferred dependencies)
-5. Serializes to YAML and writes to disk
+5. Serializes to JSON and writes to disk
 
 **Components**: Reporter
 
@@ -48,10 +48,10 @@ write_html_report(report_data, html_path)
 ```
 
 The HTML Reporter:
-1. Takes the same report data structure used for YAML
+1. Takes the same report data structure used for JSON
 2. Renders a self-contained HTML page with embedded CSS
 3. Creates color-coded status badges, expandable log sections, measurement tables
-4. Writes to the same path as YAML but with `.html` extension
+4. Writes to the same path as JSON but with `.html` extension
 
 **Components**: HTML Reporter
 
@@ -80,14 +80,14 @@ Reporter.generate_report()
     v
 report_data = {"report": {...}}
     |
-    +---> yaml.dump() -> my_tests.yaml
+    +---> json.dump() -> my_tests.json
     |
     +---> generate_html_report() -> my_tests.html
 ```
 
 ## Report Content
 
-### YAML Report Structure
+### JSON Report Structure
 
 ```yaml
 report:
@@ -135,7 +135,7 @@ report:
 
 When using `generate_report_with_history`:
 
-1. Load existing YAML report
+1. Load existing JSON report
 2. Extract per-test history entries
 3. Append current results
 4. Trim to 500 entries per test (MAX_HISTORY)
@@ -145,9 +145,9 @@ This enables reverse-chronological SPRT for demotion analysis across multiple CI
 
 ## Output Files
 
-Given `--output target/reports/my_tests.yaml`:
+Given `--output target/reports/my_tests.json`:
 
 | File | Format | Content |
 |------|--------|---------|
-| `target/reports/my_tests.yaml` | YAML | Full structured report |
+| `target/reports/my_tests.json` | JSON | Full structured report |
 | `target/reports/my_tests.html` | HTML | Self-contained visual report |

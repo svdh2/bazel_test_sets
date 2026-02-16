@@ -1,8 +1,9 @@
-# Regression Mode Guide
+# Regression Guide
 
-Regression mode selects a subset of tests most likely to catch regressions
-based on which source files changed. It uses a co-occurrence graph built
-from git history to identify tests historically associated with changed code.
+The `--regression` flag narrows any execution mode to a subset of tests most
+likely to catch regressions based on which source files changed. It uses a
+co-occurrence graph built from git history to identify tests historically
+associated with changed code.
 
 ## Overview
 
@@ -72,14 +73,15 @@ bazel run //ci_tool:main -- build-graph --output .tests/co_occurrence_graph.json
 bazel run //ci_tool:main -- build-graph --output .tests/co_occurrence_graph.json
 ```
 
-## Running Regression Mode
+## Running with Regression
 
 ### Using git diff
 
 ```bash
 bazel run //orchestrator:main -- \
     --manifest manifest.json \
-    --mode regression \
+    --mode diagnostic \
+    --regression \
     --diff-base main \
     --co-occurrence-graph .tests/co_occurrence_graph.json
 ```
@@ -89,7 +91,8 @@ bazel run //orchestrator:main -- \
 ```bash
 bazel run //orchestrator:main -- \
     --manifest manifest.json \
-    --mode regression \
+    --mode detection \
+    --regression \
     --changed-files "src/auth.py,src/payment.py"
 ```
 
@@ -178,7 +181,7 @@ not in the graph), the system falls back to:
 
 The fallback is reported in the output:
 ```
-Regression mode: 5 tests selected from 100 stable tests
+Regression: 5 tests selected from 100 stable tests
   (fallback: co-occurrence yielded too few tests)
 ```
 
@@ -189,7 +192,7 @@ Only `stable` tests are candidates for regression selection. Tests in
 
 ## Report Integration
 
-When running in regression mode, the YAML report includes a
+When using the `--regression` flag, the JSON report includes a
 `regression_selection` section:
 
 ```yaml

@@ -1,7 +1,8 @@
 # Execution Modes
 
-The orchestrator supports three execution modes, each optimized for a
-different use case.
+The orchestrator supports two execution modes, each optimized for a
+different use case. Either mode can be combined with the `--regression` flag
+to narrow the test scope.
 
 ## Diagnostic Mode
 
@@ -57,10 +58,11 @@ bazel run //orchestrator:main -- \
 - Pull request checks where fast feedback matters
 - Developer workstation testing
 
-## Regression Mode
+## Regression Flag
 
-**Purpose**: Run a subset of tests most likely to catch regressions based
-on which source files changed.
+Either mode can be combined with `--regression` to run only tests correlated
+with changed files. Co-occurrence scoring analyses git history to select the
+most relevant subset.
 
 **Selection algorithm**:
 1. Identify changed files (via `--diff-base` or `--changed-files`)
@@ -71,16 +73,18 @@ on which source files changed.
 6. Add dependency closure for self-containment
 
 ```bash
-# Using git diff
+# Diagnostic mode with regression selection (using git diff)
 bazel run //orchestrator:main -- \
     --manifest manifest.json \
-    --mode regression \
+    --mode diagnostic \
+    --regression \
     --diff-base main
 
-# Using explicit file list
+# Detection mode with regression selection (using explicit file list)
 bazel run //orchestrator:main -- \
     --manifest manifest.json \
-    --mode regression \
+    --mode detection \
+    --regression \
     --changed-files "src/auth.py,src/payment.py"
 ```
 
@@ -89,7 +93,7 @@ bazel run //orchestrator:main -- \
 - Large test suites where only a subset is relevant
 - Post-commit testing with targeted coverage
 
-See [Regression Mode](regression-mode.md) for full details.
+See [Regression](regression-mode.md) for full details.
 
 ## Parallel Execution
 
@@ -114,12 +118,12 @@ DAG ordering even in parallel.
 
 ## Report Generation
 
-All modes support YAML report output:
+All modes support JSON report output:
 
 ```bash
 bazel run //orchestrator:main -- \
     --manifest manifest.json \
-    --output results.yaml
+    --output results.json
 ```
 
 The report includes:
@@ -128,9 +132,9 @@ The report includes:
 - Hierarchical structure mirroring the DAG
 - Structured log data (if tests emit `[TST]` events)
 
-Generate HTML from the YAML report:
+Generate HTML from the JSON report:
 
 ```python
-from orchestrator.reporting.html_reporter import generate_html_from_yaml
-html = generate_html_from_yaml(Path("results.yaml"))
+from orchestrator.reporting.html_reporter import generate_html_from_file
+html = generate_html_from_file(Path("results.json"))
 ```

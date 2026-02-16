@@ -91,7 +91,7 @@ Burn-in status affects execution modes:
 
 - **Diagnostic mode**: Runs all tests regardless of maturity
 - **Detection mode**: Only runs `stable` tests for fast reliable feedback
-- **Regression mode**: Only selects from `stable` tests for co-occurrence scoring
+- **Regression flag**: Only selects from `stable` tests for co-occurrence scoring
 
 ## Deflaking
 
@@ -112,6 +112,6 @@ SPRT over the rolling history (up to 500 entries) to detect degradation.
 This allows automatic demotion of previously stable tests that have become
 unreliable.
 
-The rolling history is maintained in the YAML report and can be used to
+The rolling history is maintained in the JSON report and can be used to
 compute SPRT in reverse order (most recent results first) for faster
 detection of recent degradation.

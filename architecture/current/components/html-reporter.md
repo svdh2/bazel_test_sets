@@ -12,7 +12,7 @@ Generates self-contained HTML reports from the report data structure produced by
 
 ```python
 def generate_html_report(report_data: dict) -> str
-def generate_html_from_yaml(yaml_path: Path) -> str
+def generate_html_from_file(report_path: Path) -> str
 def write_html_report(report_data: dict, output_path: Path)
 ```
 
@@ -41,12 +41,11 @@ def write_html_report(report_data: dict, output_path: Path)
 
 ## Dependencies
 
-- **PyYAML**: Loading YAML reports for `generate_html_from_yaml`
-- Standard library: `html` (escaping)
+- Standard library: `json` (loading reports), `html` (escaping)
 
 ## Dependents
 
-- **Orchestrator Main**: Writes HTML report alongside YAML when `--output` is specified
+- **Orchestrator Main**: Writes HTML report alongside JSON when `--output` is specified
 
 ## Key Design Decisions
 

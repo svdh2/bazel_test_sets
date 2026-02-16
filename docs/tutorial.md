@@ -184,7 +184,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-The orchestrator parses these events and includes them in the YAML report.
+The orchestrator parses these events and includes them in the JSON report.
 
 ## Step 8: Hierarchical Nesting
 
@@ -210,8 +210,8 @@ test_set(
 ## Next Steps
 
 - See [API Reference](api-reference.md) for all rule attributes
-- See [Execution Modes](execution-modes.md) for diagnostic vs detection mode
+- See [Execution Modes](execution-modes.md) for diagnostic vs detection modes and the regression flag
 - See [Structured Logging](structured-logging.md) for the event schema
 - See [Burn-in](burn-in.md) for the test maturity lifecycle
 - See [Parameterization](parameterization.md) for matrix test sets
-- See [Regression Mode](regression-mode.md) for co-occurrence-based test selection
+- See [Regression](regression-mode.md) for co-occurrence-based test selection

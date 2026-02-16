@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Collects test execution results and generates YAML reports. Supports both flat and hierarchical (DAG-mirroring) report structures, structured log data integration, burn-in progress, regression selection details, and rolling history for reverse-chronological SPRT.
+Collects test execution results and generates JSON reports. Supports both flat and hierarchical (DAG-mirroring) report structures, structured log data integration, burn-in progress, regression selection details, and rolling history for reverse-chronological SPRT.
 
 ## Interface
 
@@ -31,11 +31,11 @@ class Reporter:
     def generate_report_with_history(self, existing_report_path=None) -> dict
 
     # File output
-    def write_yaml(self, path: Path)
-    def write_yaml_with_history(self, path, existing_path=None)
+    def write_report(self, path: Path)
+    def write_report_with_history(self, path, existing_path=None)
 ```
 
-### Report Structure (YAML)
+### Report Structure (JSON)
 
 ```yaml
 report:
@@ -59,7 +59,7 @@ report:
         structured_log: {...}
         burn_in: {...}
         inferred_dependencies: [...]
-  regression_selection: {...}  # When regression mode was used
+  regression_selection: {...}  # When --regression flag was used
   history:                     # When using generate_report_with_history
     "//test:a":
       - status: "passed"
@@ -80,11 +80,11 @@ report:
 ## Dependencies
 
 - **Executor** (`orchestrator.execution.executor.TestResult`): Input data structure
-- **PyYAML**: YAML serialization
+- Standard library: `json` (serialization)
 
 ## Dependents
 
-- **Orchestrator Main**: Creates Reporter, adds results, writes YAML
+- **Orchestrator Main**: Creates Reporter, adds results, writes JSON
 - **HTML Reporter**: Consumes the report dict from `generate_report()`
 
 ## Key Design Decisions

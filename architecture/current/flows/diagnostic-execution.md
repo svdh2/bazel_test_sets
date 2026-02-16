@@ -86,7 +86,7 @@ Results: 9 passed, 1 failed, 1 skipped
 ### 7. Report Generation (if --output)
 
 If `--output` is specified:
-- Generate YAML report with summary, test results, and optional structured log data
+- Generate JSON report with summary, test results, and optional structured log data
 - Generate HTML report at the same path with `.html` extension
 
 **Components**: Reporter, HTML Reporter
@@ -117,7 +117,7 @@ Executor.execute()
 list[TestResult]
     |
     +---> stdout summary
-    +---> Reporter.write_yaml()
+    +---> Reporter.write_report()
     +---> write_html_report()
 ```
 

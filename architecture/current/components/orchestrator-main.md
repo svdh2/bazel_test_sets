@@ -19,7 +19,7 @@ CLI entry point for the test set orchestrator. Parses command-line arguments, lo
 | `--regression` | Flag | `false` | Enable regression test selection |
 | `--max-parallel` | int | CPU count | Maximum parallel test executions |
 | `--max-failures` | int | Unlimited | Stop after N failures |
-| `--output` | Path | None | Path for YAML report output |
+| `--output` | Path | None | Path for JSON report output |
 | `--status-file` | Path | None | Path to burn-in status file |
 | `--diff-base` | string | None | Git ref for regression diff (e.g., `main`) |
 | `--changed-files` | string | None | Comma-separated changed files (alternative to `--diff-base`) |
@@ -39,7 +39,7 @@ Returns exit code 0 if all tests pass, 1 if any test fails.
 
 - **DAG** (`orchestrator.execution.dag.TestDAG`): Builds the test graph from manifest
 - **Executor** (`orchestrator.execution.executor`): `SequentialExecutor` and `AsyncExecutor` for test execution
-- **Reporter** (`orchestrator.reporting.reporter.Reporter`): Generates YAML reports
+- **Reporter** (`orchestrator.reporting.reporter.Reporter`): Generates JSON reports
 - **HTML Reporter** (`orchestrator.reporting.html_reporter`): Generates HTML reports
 - **Co-occurrence** (`orchestrator.regression.co_occurrence`): Loads co-occurrence graph (lazy import for regression)
 - **Regression Selector** (`orchestrator.regression.regression_selector`): Selects tests for regression runs (lazy import)
@@ -54,6 +54,6 @@ Returns exit code 0 if all tests pass, 1 if any test fails.
 
 2. **Executor selection**: `max_parallel == 1` uses SequentialExecutor (simpler, no asyncio overhead); all other values use AsyncExecutor with a semaphore-based sliding window.
 
-3. **Manifest filtering for regression**: When regression mode selects a subset of tests, the manifest is filtered to include only selected tests, with depends_on edges pruned to the selected set. A new DAG is then built from the filtered manifest.
+3. **Manifest filtering for regression**: When the `--regression` flag selects a subset of tests, the manifest is filtered to include only selected tests, with depends_on edges pruned to the selected set. A new DAG is then built from the filtered manifest.
 
-4. **Dual report output**: When `--output` is specified, both YAML and HTML reports are written (same path, different extensions).
+4. **Dual report output**: When `--output` is specified, both JSON and HTML reports are written (same path, different extensions).

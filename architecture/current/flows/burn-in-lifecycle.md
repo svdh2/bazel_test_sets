@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Manages test maturity through a state machine driven by SPRT (Sequential Probability Ratio Test). New tests must prove their reliability before participating in detection and regression modes. Flaky tests are quarantined until fixed.
+Manages test maturity through a state machine driven by SPRT (Sequential Probability Ratio Test). New tests must prove their reliability before participating in detection mode and regression selection. Flaky tests are quarantined until fixed.
 
 ## State Machine
 
@@ -74,8 +74,8 @@ The sweep repeats up to `max_iterations` (default 200) until all tests are decid
 
 ### 4. Outcome
 
-- **Stable**: Test reliably passes (e.g., 20/20 runs -> SPRT accept). It now participates in detection and regression modes.
-- **Flaky**: Test shows unreliable behavior (e.g., 15/20 runs -> SPRT reject). It is excluded from detection/regression.
+- **Stable**: Test reliably passes (e.g., 20/20 runs -> SPRT accept). It now participates in detection mode and regression selection.
+- **Flaky**: Test shows unreliable behavior (e.g., 15/20 runs -> SPRT reject). It is excluded from detection and regression selection.
 - **Undecided**: Max iterations reached without SPRT decision. Test remains `burning_in`.
 
 ## Flow: Stable Test Demotion

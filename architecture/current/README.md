@@ -10,7 +10,7 @@ Bazel rules for large-scale test orchestration with DAG-based dependency managem
 - **Testing**: pytest (unit), Bazel test (integration)
 - **Type checking**: mypy
 - **Container tooling**: Docker (Ubuntu 22.04 base image)
-- **Dependencies**: PyYAML (report serialization), click + rich (CI script)
+- **Dependencies**: click + rich (CI script)
 
 ## System Overview
 
@@ -89,7 +89,7 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 | [Co-occurrence Graph](components/co-occurrence.md) | `orchestrator/regression/` | Git history analysis to build file-commit bidirectional index |
 | [Regression Selector](components/regression-selector.md) | `orchestrator/regression/` | Selects tests by co-occurrence scoring with hop decay and dependency closure |
 | [Log Parser](components/log-parser.md) | `orchestrator/analysis/` | Parses [TST] structured log events from test stdout |
-| [Reporter](components/reporter.md) | `orchestrator/reporting/` | Generates YAML reports with hierarchical DAG structure and rolling history |
+| [Reporter](components/reporter.md) | `orchestrator/reporting/` | Generates JSON reports with hierarchical DAG structure and rolling history |
 | [HTML Reporter](components/html-reporter.md) | `orchestrator/reporting/` | Generates self-contained HTML reports from report data |
 | [Measurements](components/measurements.md) | `orchestrator/analysis/` | Stores and retrieves structured measurement data per test label |
 | [Inference](components/inference.md) | `orchestrator/analysis/` | Infers DAG dependencies from rigging feature events in structured logs |
@@ -111,7 +111,7 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 | [Regression Selection](flows/regression-selection.md) | Co-occurrence-based test selection for feature branch CI |
 | [Burn-in Lifecycle](flows/burn-in-lifecycle.md) | SPRT-driven test maturity progression from new to stable or flaky |
 | [Manifest Generation](flows/manifest-generation.md) | Build-time flow from Starlark rules to JSON manifest to orchestrator |
-| [Report Generation](flows/report-generation.md) | Post-execution YAML and HTML report generation with structured log integration |
+| [Report Generation](flows/report-generation.md) | Post-execution JSON and HTML report generation with structured log integration |
 
 ## Git Sync
 

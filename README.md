@@ -10,10 +10,10 @@ Standard test runners treat tests as independent, unordered units. In practice, 
 
 - **Declare dependencies between tests** so failures propagate correctly and dependents are skipped
 - **Organize tests into hierarchical sets** that nest arbitrarily deep
-- **Choose execution strategies** &mdash; run everything (diagnostic), fail fast (detection), or run only what changed files affect (regression)
+- **Choose execution strategies** &mdash; run everything (diagnostic) or fail fast (detection), optionally narrowed to tests correlated with changed files (regression)
 - **Track test maturity** through a burn-in lifecycle backed by statistical testing (SPRT)
 - **Generate parameterized tests** from matrices or variant configurations
-- **Collect structured measurements** and produce YAML/HTML reports
+- **Collect structured measurements** and produce JSON/HTML reports
 
 ## Quick start
 
@@ -73,7 +73,7 @@ bazel test //path/to:auth_tests -- --mode detection --max-failures 3
 bazel run @test_sets_bazel_rules//orchestrator:main -- \
     --manifest bazel-bin/path/to/auth_tests_manifest.json \
     --mode diagnostic \
-    --output results.yaml
+    --output results.json
 ```
 
 ## Execution modes
@@ -82,9 +82,12 @@ bazel run @test_sets_bazel_rules//orchestrator:main -- \
 |------|----------|---------|
 | **Diagnostic** | Leaves-first topological sort | Full CI run. Executes everything, tracks all dependency failures. |
 | **Detection** | Roots-first BFS | Fast feedback. Stops at `--max-failures` threshold. |
-| **Regression** | Co-occurrence scoring | Feature branch CI. Selects tests correlated with changed files via git history analysis. |
 
-All modes support parallel execution with `--max-parallel` while still respecting DAG constraints.
+Both modes support parallel execution with `--max-parallel` while still respecting DAG constraints.
+
+### Regression flag
+
+Either mode can be combined with `--regression` to narrow the test scope to tests correlated with changed files. Co-occurrence scoring analyses git history to select only the tests affected by the current changes, making it ideal for feature branch CI.
 
 ## Parameterized tests
 
@@ -138,7 +141,7 @@ new  ──>  burning_in  ──>  stable
                 └──>  flaky
 ```
 
-Only `stable` tests participate in detection and regression modes. The `ci_tool` manages transitions:
+Only `stable` tests participate in detection mode and regression selection. The `ci_tool` manages transitions:
 
 ```bash
 bazel run //ci_tool:main -- burn-in --status-file .tests/status my_test
@@ -161,7 +164,7 @@ tst({"type": "measurement", "name": "latency_ms", "value": 42, "unit": "ms"})
 tst({"type": "block_end", "name": "rigging", "status": "passed"})
 ```
 
-The orchestrator parses these events and includes them in YAML and HTML reports.
+The orchestrator parses these events and includes them in JSON and HTML reports.
 
 ## Project structure
 
@@ -186,7 +189,7 @@ bazel test //...
 
 | Example | Description |
 |---------|-------------|
-| `ecommerce/` | Full demo with 13 tests, DAG dependencies, parameterized sets, and structured logging |
+| `ecommerce/` | Full demo with 14 tests, DAG dependencies, parameterized sets, and structured logging |
 | `macros_demo/` | Custom macro patterns: parameter mapping and matrix generation |
 
 ## Documentation
@@ -195,9 +198,9 @@ bazel test //...
 |-------|-------------|
 | [Tutorial](docs/tutorial.md) | Step-by-step from a single test to a hierarchical DAG |
 | [API Reference](docs/api-reference.md) | Complete reference for rules, macros, and CLI |
-| [Execution Modes](docs/execution-modes.md) | Diagnostic, detection, and regression modes |
+| [Execution Modes](docs/execution-modes.md) | Diagnostic and detection modes, regression flag |
 | [Burn-in](docs/burn-in.md) | SPRT-based test maturity lifecycle |
-| [Regression Mode](docs/regression-mode.md) | Co-occurrence analysis and test selection |
+| [Regression](docs/regression-mode.md) | Co-occurrence analysis and test selection |
 | [Structured Logging](docs/structured-logging.md) | Event schema and integration guide |
 | [Parameterization](docs/parameterization.md) | Matrix and parameterized test set macros |
 
