@@ -2,7 +2,7 @@
 
 ## Location
 
-`orchestrator/executor.py`
+`orchestrator/execution/executor.py`
 
 ## Purpose
 
@@ -53,7 +53,7 @@ class AsyncExecutor:
 
 ## Dependencies
 
-- **DAG** (`orchestrator.dag.TestDAG`): Provides ordering and dependency queries
+- **DAG** (`orchestrator.execution.dag.TestDAG`): Provides ordering and dependency queries
 
 ## Dependents
 

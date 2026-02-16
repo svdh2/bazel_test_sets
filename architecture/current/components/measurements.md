@@ -2,7 +2,7 @@
 
 ## Location
 
-`orchestrator/measurements.py`
+`orchestrator/analysis/measurements.py`
 
 ## Purpose
 
@@ -41,7 +41,7 @@ def _label_to_filename(test_label: str) -> str
 
 ## Dependents
 
-- **Judgement** (`orchestrator.judgement`): Loads measurements for re-evaluation; uses `_label_to_filename` for file path construction
+- **Judgement** (`orchestrator.analysis.judgement`): Loads measurements for re-evaluation; uses `_label_to_filename` for file path construction
 - **Reporter**: Could store measurements alongside reports (integration point)
 
 ## Key Design Decisions

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from orchestrator.co_occurrence import (
+from orchestrator.regression.co_occurrence import (
     DEFAULT_SOURCE_EXTENSIONS,
     DEFAULT_TEST_PATTERNS,
     build_co_occurrence_graph,

@@ -11,8 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from orchestrator.log_parser import parse_test_output
-from orchestrator.measurements import load_measurements
+from orchestrator.analysis.log_parser import parse_test_output
+from orchestrator.analysis.measurements import load_measurements
 
 
 @dataclass
@@ -82,7 +82,7 @@ def execute_judgement(
 
     # Find the measurement file path
     measurements_dir_path = Path(measurements_dir)
-    from orchestrator.measurements import _label_to_filename
+    from orchestrator.analysis.measurements import _label_to_filename
     measurement_file = str(
         measurements_dir_path / (_label_to_filename(test_name) + ".json")
     )

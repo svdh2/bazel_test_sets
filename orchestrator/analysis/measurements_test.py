@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.measurements import (
+from orchestrator.analysis.measurements import (
     _label_to_filename,
     load_measurements,
     store_measurements,

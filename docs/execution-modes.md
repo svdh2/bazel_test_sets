@@ -131,6 +131,6 @@ The report includes:
 Generate HTML from the YAML report:
 
 ```python
-from orchestrator.html_reporter import generate_html_from_yaml
+from orchestrator.reporting.html_reporter import generate_html_from_yaml
 html = generate_html_from_yaml(Path("results.yaml"))
 ```

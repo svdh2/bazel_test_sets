@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from orchestrator.dag import TestDAG, TestNode
+from orchestrator.execution.dag import TestDAG, TestNode
 
 
 # --- Manifest Parsing Tests ---

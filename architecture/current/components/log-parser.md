@@ -2,7 +2,7 @@
 
 ## Location
 
-`orchestrator/log_parser.py`
+`orchestrator/analysis/log_parser.py`
 
 ## Purpose
 
@@ -54,9 +54,9 @@ def get_rigging_features(parsed: dict) -> list[str]
 
 ## Dependents
 
-- **Inference** (`orchestrator.inference`): Uses `get_rigging_features` to find features for dependency inference
-- **Judgement** (`orchestrator.judgement`): Parses structured output from judgement executables
-- **Reporter** (`orchestrator.reporter`): Includes structured log data in reports
+- **Inference** (`orchestrator.analysis.inference`): Uses `get_rigging_features` to find features for dependency inference
+- **Judgement** (`orchestrator.analysis.judgement`): Parses structured output from judgement executables
+- **Reporter** (`orchestrator.reporting.reporter`): Includes structured log data in reports
 
 ## Key Design Decisions
 

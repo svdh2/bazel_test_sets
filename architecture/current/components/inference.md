@@ -2,7 +2,7 @@
 
 ## Location
 
-`orchestrator/inference.py`
+`orchestrator/analysis/inference.py`
 
 ## Purpose
 

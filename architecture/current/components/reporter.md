@@ -2,7 +2,7 @@
 
 ## Location
 
-`orchestrator/reporter.py`
+`orchestrator/reporting/reporter.py`
 
 ## Purpose
 
@@ -79,7 +79,7 @@ report:
 
 ## Dependencies
 
-- **Executor** (`orchestrator.executor.TestResult`): Input data structure
+- **Executor** (`orchestrator.execution.executor.TestResult`): Input data structure
 - **PyYAML**: YAML serialization
 
 ## Dependents

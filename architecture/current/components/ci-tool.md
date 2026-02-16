@@ -41,9 +41,9 @@ bazel run //ci_tool:main -- build-graph --output .tests/co_occurrence_graph.json
 
 ## Dependencies
 
-- **Status File** (`orchestrator.status.StatusFile`): Used by burn-in, deflake, and test-status subcommands
-- **Judgement** (`orchestrator.judgement`): Used by re-judge subcommand (lazy import)
-- **Co-occurrence** (`orchestrator.co_occurrence`): Used by build-graph subcommand (lazy import)
+- **Status File** (`orchestrator.lifecycle.status.StatusFile`): Used by burn-in, deflake, and test-status subcommands
+- **Judgement** (`orchestrator.analysis.judgement`): Used by re-judge subcommand (lazy import)
+- **Co-occurrence** (`orchestrator.regression.co_occurrence`): Used by build-graph subcommand (lazy import)
 
 ## Dependents
 

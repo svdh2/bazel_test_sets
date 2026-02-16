@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from orchestrator.executor import TestResult
+from orchestrator.execution.executor import TestResult
 
 
 # Valid status values in the five-status model

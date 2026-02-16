@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from orchestrator.dag import TestDAG
+from orchestrator.execution.dag import TestDAG
 
 
 @dataclass

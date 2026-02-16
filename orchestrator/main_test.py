@@ -205,7 +205,7 @@ class TestRegressionOptionEndToEnd:
     def test_regression_diagnostic_with_changed_files(self):
         """--regression with diagnostic mode runs selected tests."""
         from orchestrator.main import main
-        from orchestrator.co_occurrence import save_graph, build_co_occurrence_graph
+        from orchestrator.regression.co_occurrence import save_graph, build_co_occurrence_graph
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create a simple pass-script

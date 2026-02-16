@@ -2,7 +2,7 @@
 
 ## Location
 
-`orchestrator/regression_selector.py`
+`orchestrator/regression/regression_selector.py`
 
 ## Purpose
 
@@ -65,7 +65,7 @@ def add_dependency_closure(selected_tests, manifest) -> list[str]
 
 ## Dependencies
 
-- **Co-occurrence Graph** (`orchestrator.co_occurrence`): Provides the file-commit index
+- **Co-occurrence Graph** (`orchestrator.regression.co_occurrence`): Provides the file-commit index
 - Standard library: `math`, `collections.deque`, `os`, `datetime`
 
 ## Dependents

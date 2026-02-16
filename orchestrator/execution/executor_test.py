@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.dag import TestDAG
-from orchestrator.executor import AsyncExecutor, SequentialExecutor, TestResult
+from orchestrator.execution.dag import TestDAG
+from orchestrator.execution.executor import AsyncExecutor, SequentialExecutor, TestResult
 
 
 def _make_script(content: str) -> str:

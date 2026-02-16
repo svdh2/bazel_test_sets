@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from orchestrator.log_parser import (
+from orchestrator.analysis.log_parser import (
     SENTINEL,
     parse_test_output,
     is_rigging_failure,

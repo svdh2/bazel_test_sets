@@ -81,19 +81,19 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 | [matrix_test_set macro](components/matrix-test-set-macro.md) | `macros/` | Generates parameterized tests from a matrix of parameter combinations |
 | [parameterized_test_set macro](components/parameterized-test-set-macro.md) | `macros/` | Generates variant-specific tests with environment variables and args |
 | [Orchestrator Main](components/orchestrator-main.md) | `orchestrator/` | CLI entry point; parses args, loads manifest, dispatches to executor or regression flow |
-| [DAG](components/dag.md) | `orchestrator/` | TestNode/TestDAG data structures with topological sort and BFS ordering |
-| [Executor](components/executor.md) | `orchestrator/` | Sequential and async parallel test execution with dependency gating |
-| [Burn-in](components/burnin.md) | `orchestrator/` | Sweep loop for burning_in tests and stable demotion logic |
-| [SPRT](components/sprt.md) | `orchestrator/` | Sequential Probability Ratio Test for burn-in accept/reject and demotion decisions |
-| [Status File](components/status-file.md) | `orchestrator/` | JSON state file manager for test maturity lifecycle (new/burning_in/stable/flaky) |
-| [Co-occurrence Graph](components/co-occurrence.md) | `orchestrator/` | Git history analysis to build file-commit bidirectional index |
-| [Regression Selector](components/regression-selector.md) | `orchestrator/` | Selects tests by co-occurrence scoring with hop decay and dependency closure |
-| [Log Parser](components/log-parser.md) | `orchestrator/` | Parses [TST] structured log events from test stdout |
-| [Reporter](components/reporter.md) | `orchestrator/` | Generates YAML reports with hierarchical DAG structure and rolling history |
-| [HTML Reporter](components/html-reporter.md) | `orchestrator/` | Generates self-contained HTML reports from report data |
-| [Measurements](components/measurements.md) | `orchestrator/` | Stores and retrieves structured measurement data per test label |
-| [Inference](components/inference.md) | `orchestrator/` | Infers DAG dependencies from rigging feature events in structured logs |
-| [Judgement](components/judgement.md) | `orchestrator/` | Executes judgement targets with stored measurements for verdict re-evaluation |
+| [DAG](components/dag.md) | `orchestrator/execution/` | TestNode/TestDAG data structures with topological sort and BFS ordering |
+| [Executor](components/executor.md) | `orchestrator/execution/` | Sequential and async parallel test execution with dependency gating |
+| [Burn-in](components/burnin.md) | `orchestrator/lifecycle/` | Sweep loop for burning_in tests and stable demotion logic |
+| [SPRT](components/sprt.md) | `orchestrator/lifecycle/` | Sequential Probability Ratio Test for burn-in accept/reject and demotion decisions |
+| [Status File](components/status-file.md) | `orchestrator/lifecycle/` | JSON state file manager for test maturity lifecycle (new/burning_in/stable/flaky) |
+| [Co-occurrence Graph](components/co-occurrence.md) | `orchestrator/regression/` | Git history analysis to build file-commit bidirectional index |
+| [Regression Selector](components/regression-selector.md) | `orchestrator/regression/` | Selects tests by co-occurrence scoring with hop decay and dependency closure |
+| [Log Parser](components/log-parser.md) | `orchestrator/analysis/` | Parses [TST] structured log events from test stdout |
+| [Reporter](components/reporter.md) | `orchestrator/reporting/` | Generates YAML reports with hierarchical DAG structure and rolling history |
+| [HTML Reporter](components/html-reporter.md) | `orchestrator/reporting/` | Generates self-contained HTML reports from report data |
+| [Measurements](components/measurements.md) | `orchestrator/analysis/` | Stores and retrieves structured measurement data per test label |
+| [Inference](components/inference.md) | `orchestrator/analysis/` | Infers DAG dependencies from rigging feature events in structured logs |
+| [Judgement](components/judgement.md) | `orchestrator/analysis/` | Executes judgement targets with stored measurements for verdict re-evaluation |
 
 ### Consumers / Development Infrastructure
 

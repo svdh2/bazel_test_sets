@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.burnin import BurnInSweep, filter_tests_by_state, handle_stable_failure
-from orchestrator.dag import TestDAG
-from orchestrator.status import StatusFile
+from orchestrator.lifecycle.burnin import BurnInSweep, filter_tests_by_state, handle_stable_failure
+from orchestrator.execution.dag import TestDAG
+from orchestrator.lifecycle.status import StatusFile
 
 
 def _make_script(content: str) -> str:

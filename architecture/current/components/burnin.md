@@ -2,7 +2,7 @@
 
 ## Location
 
-`orchestrator/burnin.py`
+`orchestrator/lifecycle/burnin.py`
 
 ## Purpose
 
@@ -62,10 +62,10 @@ flaky  -------->  burning_in
 
 ## Dependencies
 
-- **DAG** (`orchestrator.dag.TestDAG`): Test execution and node lookup
-- **Executor** (`orchestrator.executor.TestResult`): Result data structure
-- **SPRT** (`orchestrator.sprt`): `sprt_evaluate` for burn-in decisions, `demotion_evaluate` for stable demotion
-- **Status File** (`orchestrator.status.StatusFile`): State persistence
+- **DAG** (`orchestrator.execution.dag.TestDAG`): Test execution and node lookup
+- **Executor** (`orchestrator.execution.executor.TestResult`): Result data structure
+- **SPRT** (`orchestrator.lifecycle.sprt`): `sprt_evaluate` for burn-in decisions, `demotion_evaluate` for stable demotion
+- **Status File** (`orchestrator.lifecycle.status.StatusFile`): State persistence
 
 ## Dependents
 

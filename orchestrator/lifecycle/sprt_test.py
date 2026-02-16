@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from orchestrator.sprt import demotion_evaluate, sprt_evaluate
+from orchestrator.lifecycle.sprt import demotion_evaluate, sprt_evaluate
 
 
 class TestSPRTAccept:

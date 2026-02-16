@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.inference import (
+from orchestrator.analysis.inference import (
     find_tests_verifying_feature,
     infer_rigging_dependencies,
     load_feature_map,

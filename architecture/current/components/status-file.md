@@ -2,7 +2,7 @@
 
 ## Location
 
-`orchestrator/status.py`
+`orchestrator/lifecycle/status.py`
 
 ## Purpose
 
@@ -65,7 +65,7 @@ class StatusFile:
 
 ## Dependents
 
-- **Burn-in** (`orchestrator.burnin`): Reads/writes test states and run counts during sweep
+- **Burn-in** (`orchestrator.lifecycle.burnin`): Reads/writes test states and run counts during sweep
 - **CI Tool** (`ci_tool/main.py`): All subcommands (burn-in, deflake, test-status) use StatusFile
 - **Regression Selector**: Could filter by burn-in state (currently treats all manifest tests as candidates)
 

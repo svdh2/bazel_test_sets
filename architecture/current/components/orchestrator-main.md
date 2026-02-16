@@ -37,16 +37,16 @@ Returns exit code 0 if all tests pass, 1 if any test fails.
 
 ## Dependencies
 
-- **DAG** (`orchestrator.dag.TestDAG`): Builds the test graph from manifest
-- **Executor** (`orchestrator.executor`): `SequentialExecutor` and `AsyncExecutor` for test execution
-- **Reporter** (`orchestrator.reporter.Reporter`): Generates YAML reports
-- **HTML Reporter** (`orchestrator.html_reporter`): Generates HTML reports
-- **Co-occurrence** (`orchestrator.co_occurrence`): Loads co-occurrence graph (lazy import for regression)
-- **Regression Selector** (`orchestrator.regression_selector`): Selects tests for regression runs (lazy import)
+- **DAG** (`orchestrator.execution.dag.TestDAG`): Builds the test graph from manifest
+- **Executor** (`orchestrator.execution.executor`): `SequentialExecutor` and `AsyncExecutor` for test execution
+- **Reporter** (`orchestrator.reporting.reporter.Reporter`): Generates YAML reports
+- **HTML Reporter** (`orchestrator.reporting.html_reporter`): Generates HTML reports
+- **Co-occurrence** (`orchestrator.regression.co_occurrence`): Loads co-occurrence graph (lazy import for regression)
+- **Regression Selector** (`orchestrator.regression.regression_selector`): Selects tests for regression runs (lazy import)
 
 ## Dependents
 
-- **Bazel**: test_set rules invoke `orchestrator/main.py` at run time (during `bazel test` or `bazel run`). Bazel is triggered by the CI Script inside the container.
+- **Bazel**: test_set rules invoke `orchestrator/main.py` at run time (during `bazel test` or `bazel run`). Bazel is triggered by the CI Script inside the container. Note: `main.py` remains at the top level of the orchestrator package.
 
 ## Key Design Decisions
 

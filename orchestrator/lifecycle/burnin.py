@@ -20,10 +20,10 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from orchestrator.dag import TestDAG
-from orchestrator.executor import TestResult
-from orchestrator.sprt import demotion_evaluate, sprt_evaluate
-from orchestrator.status import StatusFile
+from orchestrator.execution.dag import TestDAG
+from orchestrator.execution.executor import TestResult
+from orchestrator.lifecycle.sprt import demotion_evaluate, sprt_evaluate
+from orchestrator.lifecycle.status import StatusFile
 
 
 @dataclass

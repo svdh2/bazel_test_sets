@@ -7,8 +7,8 @@ from pathlib import Path
 
 import yaml
 
-from orchestrator.executor import TestResult
-from orchestrator.reporter import MAX_HISTORY, VALID_STATUSES, Reporter, _aggregate_status
+from orchestrator.execution.executor import TestResult
+from orchestrator.reporting.reporter import MAX_HISTORY, VALID_STATUSES, Reporter, _aggregate_status
 
 
 class TestReporterBasics:

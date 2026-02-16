@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.status import DEFAULT_CONFIG, VALID_STATES, StatusFile
+from orchestrator.lifecycle.status import DEFAULT_CONFIG, VALID_STATES, StatusFile
 
 
 class TestStatusFileCreate:

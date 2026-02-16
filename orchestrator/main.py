@@ -13,10 +13,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from orchestrator.dag import TestDAG
-from orchestrator.executor import AsyncExecutor, SequentialExecutor
-from orchestrator.html_reporter import write_html_report
-from orchestrator.reporter import Reporter
+from orchestrator.execution.dag import TestDAG
+from orchestrator.execution.executor import AsyncExecutor, SequentialExecutor
+from orchestrator.reporting.html_reporter import write_html_report
+from orchestrator.reporting.reporter import Reporter
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -196,8 +196,8 @@ def _run_regression(
     Returns:
         Exit code.
     """
-    from orchestrator.co_occurrence import load_graph
-    from orchestrator.regression_selector import (
+    from orchestrator.regression.co_occurrence import load_graph
+    from orchestrator.regression.regression_selector import (
         RegressionConfig,
         select_regression_tests,
     )

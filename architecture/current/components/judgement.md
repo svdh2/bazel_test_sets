@@ -2,7 +2,7 @@
 
 ## Location
 
-`orchestrator/judgement.py`
+`orchestrator/analysis/judgement.py`
 
 ## Purpose
 
@@ -45,8 +45,8 @@ Returns tests that have both a judgement_executable and stored measurements.
 
 ## Dependencies
 
-- **Log Parser** (`orchestrator.log_parser`): Parses structured output from judgement executables
-- **Measurements** (`orchestrator.measurements`): Loads stored measurement files
+- **Log Parser** (`orchestrator.analysis.log_parser`): Parses structured output from judgement executables
+- **Measurements** (`orchestrator.analysis.measurements`): Loads stored measurement files
 
 ## Dependents
 

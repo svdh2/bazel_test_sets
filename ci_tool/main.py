@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-from orchestrator.status import StatusFile
+from orchestrator.lifecycle.status import StatusFile
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -291,7 +291,7 @@ def cmd_re_judge(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success, 1 for any failures).
     """
-    from orchestrator.judgement import execute_judgement, find_rejudgeable_tests
+    from orchestrator.analysis.judgement import execute_judgement, find_rejudgeable_tests
 
     # Load manifest
     try:
@@ -374,7 +374,7 @@ def cmd_build_graph(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success, 1 for errors).
     """
-    from orchestrator.co_occurrence import (
+    from orchestrator.regression.co_occurrence import (
         build_co_occurrence_graph,
         load_graph,
         parse_git_log,

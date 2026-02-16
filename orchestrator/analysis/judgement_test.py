@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.judgement import (
+from orchestrator.analysis.judgement import (
     JudgementResult,
     execute_judgement,
     find_rejudgeable_tests,
 )
-from orchestrator.measurements import store_measurements
+from orchestrator.analysis.measurements import store_measurements
 
 
 def _make_judgement_script(tmpdir: str, name: str, exit_code: int = 0,

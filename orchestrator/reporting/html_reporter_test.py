@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from orchestrator.html_reporter import (
+from orchestrator.reporting.html_reporter import (
     STATUS_COLORS,
     STATUS_LABELS,
     generate_html_from_yaml,

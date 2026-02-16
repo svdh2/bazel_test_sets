@@ -21,8 +21,8 @@ from ci_tool.main import (
     main,
     parse_args,
 )
-from orchestrator.measurements import store_measurements
-from orchestrator.status import StatusFile
+from orchestrator.analysis.measurements import store_measurements
+from orchestrator.lifecycle.status import StatusFile
 
 
 def _make_args(**kwargs):

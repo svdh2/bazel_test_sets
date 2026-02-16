@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from orchestrator.regression_selector import (
+from orchestrator.regression.regression_selector import (
     RegressionConfig,
     SelectionResult,
     _days_since,

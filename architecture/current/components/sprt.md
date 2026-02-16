@@ -2,7 +2,7 @@
 
 ## Location
 
-`orchestrator/sprt.py`
+`orchestrator/lifecycle/sprt.py`
 
 ## Purpose
 
@@ -49,7 +49,7 @@ Processes history from newest to oldest. When SPRT reaches sufficient confidence
 
 ## Dependents
 
-- **Burn-in** (`orchestrator.burnin`): Calls `sprt_evaluate` after each test run in the sweep loop; calls `demotion_evaluate` for stable test failure handling
+- **Burn-in** (`orchestrator.lifecycle.burnin`): Calls `sprt_evaluate` after each test run in the sweep loop; calls `demotion_evaluate` for stable test failure handling
 
 ## Key Design Decisions
 

@@ -2,7 +2,7 @@
 
 ## Location
 
-`orchestrator/html_reporter.py`
+`orchestrator/reporting/html_reporter.py`
 
 ## Purpose
 

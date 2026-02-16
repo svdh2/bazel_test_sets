@@ -16,11 +16,11 @@ from typing import Any
 import pytest
 import yaml
 
-from orchestrator.dag import TestDAG
-from orchestrator.executor import SequentialExecutor, TestResult
-from orchestrator.reporter import Reporter
-from orchestrator.html_reporter import generate_html_report
-from orchestrator.sprt import sprt_evaluate
+from orchestrator.execution.dag import TestDAG
+from orchestrator.execution.executor import SequentialExecutor, TestResult
+from orchestrator.reporting.reporter import Reporter
+from orchestrator.reporting.html_reporter import generate_html_report
+from orchestrator.lifecycle.sprt import sprt_evaluate
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +428,7 @@ class TestBurnInLifecycle:
 
     def test_status_file_roundtrip(self):
         """Status file can be saved and loaded."""
-        from orchestrator.status import StatusFile
+        from orchestrator.lifecycle.status import StatusFile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
@@ -470,7 +470,7 @@ class TestStructuredLoggingIntegration:
             assert results[0].status == "passed"
 
             # Parse structured logs from stdout
-            from orchestrator.log_parser import parse_test_output
+            from orchestrator.analysis.log_parser import parse_test_output
             parsed = parse_test_output(results[0].stdout)
 
             assert "rigging" in parsed["block_sequence"]
@@ -500,7 +500,7 @@ class TestRegressionModeIntegration:
 
     def test_regression_selection_with_co_occurrence(self):
         """Regression selector picks tests based on co-occurrence."""
-        from orchestrator.regression_selector import (
+        from orchestrator.regression.regression_selector import (
             RegressionConfig,
             select_regression_tests,
         )
@@ -559,7 +559,7 @@ class TestCoOccurrenceGraphIntegration:
 
     def test_graph_save_load_roundtrip(self):
         """Graph can be saved and loaded."""
-        from orchestrator.co_occurrence import save_graph, load_graph
+        from orchestrator.regression.co_occurrence import save_graph, load_graph
 
         graph = {
             "metadata": {"last_commit": "abc"},
