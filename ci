@@ -226,7 +226,7 @@ def check(ctx):
 @cli.command("test-examples")
 @click.pass_context
 def test_examples(ctx):
-    """Run all Bazel tests in the examples module."""
+    """Run Bazel tests, lifecycle demo (burn-in/demotion), and reports."""
     if not IN_CONTAINER:
         _delegate_to_container(["test-examples"], force=ctx.obj["force"])
         return
@@ -240,15 +240,129 @@ def test_examples(ctx):
                 pass
             item.unlink()
             console.print(f"[dim]Removed stale symlink examples/{item.name}[/dim]")
+
+    # Phase 1: Bazel validation — all tests pass (no status file)
+    console.print("[bold]--- Phase 1: Bazel test validation ---[/bold]")
     run_cmd(["bazel", "test", "//..."], cwd=str(examples_dir))
 
-    # Generate reports via bazel run (bazel test sandboxes output away)
-    console.print("[bold]--- Generating reports ---[/bold]")
-    for target in [
-        "//ecommerce:ecommerce_tests",
-        "//macros_demo:deployment_validation",
-    ]:
-        run_cmd(["bazel", "run", target], cwd=str(examples_dir))
+    # Phase 2: Set up status file for lifecycle demo
+    console.print("[bold]--- Phase 2: Setting up lifecycle demo ---[/bold]")
+    status_path = examples_dir / "ecommerce" / ".tests" / "status"
+    _setup_lifecycle_status(status_path, examples_dir)
+
+    # Phase 3: Orchestrator run with status file + forced failure
+    # Exercises three scenarios in a single run:
+    #   - burn-in acceptance (discount test: burning_in → stable)
+    #   - normal operation (other tests: results recorded)
+    #   - demotion (email notification: stable → flaky)
+    console.print("[bold]--- Phase 3: Lifecycle run ---[/bold]")
+    env = dict(os.environ)
+    env["TST_FORCE_FAIL"] = "1"
+    run_cmd(
+        [
+            "bazel", "run", "//ecommerce:ecommerce_tests", "--",
+            "--status-file", str(status_path), "--allow-dirty",
+        ],
+        cwd=str(examples_dir),
+        env=env,
+        check=False,  # email_notification will fail — expect non-zero exit
+    )
+
+    # Phase 4: Print lifecycle summary
+    _print_lifecycle_summary(status_path)
+
+    # Phase 5: Generate reports for other examples
+    console.print("[bold]--- Phase 5: Other example reports ---[/bold]")
+    run_cmd(
+        ["bazel", "run", "//macros_demo:deployment_validation"],
+        cwd=str(examples_dir),
+    )
+
+
+def _setup_lifecycle_status(status_path: Path, examples_dir: Path) -> None:
+    """Set up the status file for the lifecycle demo.
+
+    Pre-populates two tests with specific states:
+    - discount: burning_in close to acceptance (one more pass → stable)
+    - email_notification: stable with recent failures (one more failure → flaky)
+    """
+    import json as json_mod
+
+    # Determine exact test labels from the manifest.  The test_set_test rule
+    # stores test_label = the underlying py_test label, so we need the raw
+    # test names.  Build first so the manifest exists, then peek at labels
+    # via a quick bazel query.  Fall back to the @@// prefix observed in
+    # prior runs if query fails.
+    discount_label = "@@//ecommerce:discount_raw_test"
+    email_label = "@@//ecommerce:email_notification_raw_test"
+
+    status = {
+        "config": {
+            "min_reliability": 0.99,
+            "statistical_significance": 0.95,
+        },
+        "tests": {
+            discount_label: {
+                "state": "burning_in",
+                "runs": 27,
+                "passes": 27,
+                "history": [
+                    {"passed": True, "commit": None} for _ in range(27)
+                ],
+                "last_updated": "2026-02-16T12:00:00+00:00",
+            },
+            email_label: {
+                "state": "stable",
+                "runs": 55,
+                "passes": 50,
+                "history": (
+                    [{"passed": False, "commit": "prev"} for _ in range(5)]
+                    + [{"passed": True, "commit": "older"} for _ in range(50)]
+                ),
+                "last_updated": "2026-02-16T12:00:00+00:00",
+            },
+        },
+    }
+
+    status_path.parent.mkdir(parents=True, exist_ok=True)
+    status_path.write_text(json_mod.dumps(status, indent=2) + "\n")
+    console.print(f"[dim]Status file written: {status_path.relative_to(examples_dir)}[/dim]")
+    console.print(f"[dim]  {discount_label}: burning_in (27/27 passes)[/dim]")
+    console.print(f"[dim]  {email_label}: stable (50/55, 5 recent failures)[/dim]")
+
+
+def _print_lifecycle_summary(status_path: Path) -> None:
+    """Print a summary of the status file after the lifecycle run."""
+    import json as json_mod
+
+    console.print("[bold]--- Phase 4: Lifecycle summary ---[/bold]")
+    try:
+        data = json_mod.loads(status_path.read_text())
+    except (FileNotFoundError, json_mod.JSONDecodeError) as e:
+        console.print(f"[red]Could not read status file: {e}[/red]")
+        return
+
+    tests = data.get("tests", {})
+    state_counts: dict[str, int] = {}
+    for name, entry in sorted(tests.items()):
+        state = entry.get("state", "unknown")
+        runs = entry.get("runs", 0)
+        passes = entry.get("passes", 0)
+        state_counts[state] = state_counts.get(state, 0) + 1
+        # Highlight transitions
+        short_name = name.split(":")[-1] if ":" in name else name
+        if state == "stable" and entry.get("runs", 0) == 28:
+            console.print(f"  [green]{short_name}: {state} (burn-in accepted, {runs} runs)[/green]")
+        elif state == "flaky":
+            console.print(f"  [red]{short_name}: {state} (demoted, {runs} runs, {passes} passes)[/red]")
+        elif state == "burning_in":
+            console.print(f"  [yellow]{short_name}: {state} ({runs} runs, {passes} passes)[/yellow]")
+        else:
+            console.print(f"  [dim]{short_name}: {state} ({runs} runs)[/dim]")
+
+    console.print()
+    summary = ", ".join(f"{count} {state}" for state, count in sorted(state_counts.items()))
+    console.print(f"[bold]Status summary: {summary}[/bold]")
 
 
 @cli.command()

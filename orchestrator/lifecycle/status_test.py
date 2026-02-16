@@ -8,7 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.lifecycle.status import DEFAULT_CONFIG, VALID_STATES, StatusFile
+from orchestrator.lifecycle.status import (
+    DEFAULT_CONFIG,
+    HISTORY_CAP,
+    VALID_STATES,
+    StatusFile,
+)
 
 
 class TestStatusFileCreate:
@@ -271,3 +276,132 @@ class TestStatusFileCorrupted:
             sf = StatusFile(path)
             assert sf.min_reliability == DEFAULT_CONFIG["min_reliability"]
             assert sf.get_all_tests() == {}
+
+
+class TestStatusFileHistory:
+    """Tests for per-run history tracking."""
+
+    def test_record_run_creates_history_entry(self):
+        """record_run creates a history entry."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.record_run("//test:a", passed=True, commit="abc123")
+
+            history = sf.get_test_history("//test:a")
+            assert len(history) == 1
+            assert history[0] == {"passed": True, "commit": "abc123"}
+
+    def test_history_newest_first(self):
+        """History is stored newest-first."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.record_run("//test:a", passed=True, commit="aaa")
+            sf.record_run("//test:a", passed=False, commit="bbb")
+            sf.record_run("//test:a", passed=True, commit="ccc")
+
+            history = sf.get_test_history("//test:a")
+            assert len(history) == 3
+            assert history[0] == {"passed": True, "commit": "ccc"}
+            assert history[1] == {"passed": False, "commit": "bbb"}
+            assert history[2] == {"passed": True, "commit": "aaa"}
+
+    def test_history_without_commit(self):
+        """record_run without commit stores None."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.record_run("//test:a", passed=True)
+
+            history = sf.get_test_history("//test:a")
+            assert history[0] == {"passed": True, "commit": None}
+
+    def test_history_capped_at_limit(self):
+        """History is capped at HISTORY_CAP entries."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            for i in range(HISTORY_CAP + 10):
+                sf.record_run("//test:a", passed=True, commit=f"c{i}")
+
+            history = sf.get_test_history("//test:a")
+            assert len(history) == HISTORY_CAP
+            # Newest entry should be the last one recorded
+            assert history[0]["commit"] == f"c{HISTORY_CAP + 9}"
+
+    def test_history_survives_roundtrip(self):
+        """History persists through save/load."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "status.json"
+            sf1 = StatusFile(path)
+            sf1.record_run("//test:a", passed=True, commit="abc")
+            sf1.record_run("//test:a", passed=False, commit="def")
+            sf1.save()
+
+            sf2 = StatusFile(path)
+            history = sf2.get_test_history("//test:a")
+            assert len(history) == 2
+            assert history[0] == {"passed": False, "commit": "def"}
+            assert history[1] == {"passed": True, "commit": "abc"}
+
+    def test_backward_compat_missing_history_field(self):
+        """Old status files without history field return empty list."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "status.json"
+            # Write a status file in the old format (no history)
+            data = {
+                "config": {"min_reliability": 0.99, "statistical_significance": 0.95},
+                "tests": {
+                    "//test:a": {
+                        "state": "stable",
+                        "runs": 50,
+                        "passes": 50,
+                        "last_updated": "2026-01-01T00:00:00+00:00",
+                    }
+                },
+            }
+            path.write_text(json.dumps(data))
+
+            sf = StatusFile(path)
+            assert sf.get_test_history("//test:a") == []
+
+            # After recording a run, history should start populating
+            sf.record_run("//test:a", passed=True, commit="abc")
+            assert len(sf.get_test_history("//test:a")) == 1
+
+    def test_reset_clears_history(self):
+        """set_test_state with runs=0, passes=0 clears history."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable", runs=50, passes=50)
+            sf.record_run("//test:a", passed=True, commit="abc")
+            sf.record_run("//test:a", passed=False, commit="def")
+            assert len(sf.get_test_history("//test:a")) == 2
+
+            # Reset (deflake scenario)
+            sf.set_test_state("//test:a", "burning_in", runs=0, passes=0)
+            assert sf.get_test_history("//test:a") == []
+
+    def test_set_test_state_preserves_history(self):
+        """set_test_state without counter reset preserves history."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "burning_in", runs=0, passes=0)
+            sf.record_run("//test:a", passed=True, commit="abc")
+            sf.record_run("//test:a", passed=True, commit="def")
+
+            # Transition to stable (preserving counters)
+            sf.set_test_state("//test:a", "stable", runs=2, passes=2)
+            assert len(sf.get_test_history("//test:a")) == 2
+
+    def test_get_test_history_nonexistent(self):
+        """get_test_history for unknown test returns empty list."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            assert sf.get_test_history("//test:nonexistent") == []
+
+    def test_get_test_history_returns_copy(self):
+        """get_test_history returns a copy, not a reference."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.record_run("//test:a", passed=True, commit="abc")
+            history = sf.get_test_history("//test:a")
+            history.clear()
+            assert len(sf.get_test_history("//test:a")) == 1

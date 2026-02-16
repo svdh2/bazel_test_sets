@@ -21,6 +21,9 @@ DEFAULT_CONFIG = {
     "statistical_significance": 0.95,
 }
 
+# Maximum per-test history entries (newest-first, oldest dropped when exceeded)
+HISTORY_CAP = 200
+
 
 class StatusFile:
     """Manages the .tests/status JSON state file.
@@ -151,25 +154,34 @@ class StatusFile:
         now = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
 
         existing = self._data["tests"].get(test_name, {})
+
+        # When counters are explicitly reset to zero, clear history too
+        # (fresh burn-in cycle after deflake or initial burn-in).
+        reset = runs == 0 and passes == 0
         entry: dict[str, Any] = {
             "state": state,
             "runs": runs if runs is not None else existing.get("runs", 0),
             "passes": (
                 passes if passes is not None else existing.get("passes", 0)
             ),
+            "history": [] if reset else existing.get("history", []),
             "last_updated": now,
         }
         self._data["tests"][test_name] = entry
 
-    def record_run(self, test_name: str, passed: bool) -> None:
+    def record_run(
+        self, test_name: str, passed: bool, commit: str | None = None
+    ) -> None:
         """Record a test run result.
 
-        Increments run count and optionally pass count. Updates last_updated.
+        Increments run count and optionally pass count. Prepends a history
+        entry with the pass/fail result and commit SHA. Updates last_updated.
         If test doesn't exist in state file, creates it with state "new".
 
         Args:
             test_name: Test identifier.
             passed: Whether the test passed.
+            commit: Git commit SHA the run belongs to, or None.
         """
         now = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
 
@@ -178,6 +190,7 @@ class StatusFile:
                 "state": "new",
                 "runs": 0,
                 "passes": 0,
+                "history": [],
                 "last_updated": now,
             }
 
@@ -186,6 +199,27 @@ class StatusFile:
         if passed:
             entry["passes"] = entry.get("passes", 0) + 1
         entry["last_updated"] = now
+
+        # Prepend to history (newest-first) and cap
+        history = entry.get("history", [])
+        history.insert(0, {"passed": passed, "commit": commit})
+        entry["history"] = history[:HISTORY_CAP]
+
+    def get_test_history(self, test_name: str) -> list[dict[str, Any]]:
+        """Get the run history for a test (newest-first).
+
+        Each entry is {"passed": bool, "commit": str | None}.
+
+        Args:
+            test_name: Test identifier.
+
+        Returns:
+            List of history entries, or empty list if not found.
+        """
+        entry = self._data["tests"].get(test_name)
+        if entry is None:
+            return []
+        return list(entry.get("history", []))
 
     def get_all_tests(self) -> dict[str, dict[str, Any]]:
         """Get all test entries.

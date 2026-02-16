@@ -9,8 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from orchestrator.lifecycle.burnin import BurnInSweep, filter_tests_by_state, handle_stable_failure
+from orchestrator.lifecycle.burnin import (
+    BurnInSweep,
+    filter_tests_by_state,
+    handle_stable_failure,
+    process_results,
+)
 from orchestrator.execution.dag import TestDAG
+from orchestrator.execution.executor import TestResult
 from orchestrator.lifecycle.status import StatusFile
 
 
@@ -244,7 +250,9 @@ class TestStableDemotion:
                 sf.set_test_state("a", "stable", runs=50, passes=50)
                 sf.save()
 
-                result = handle_stable_failure("a", dag, sf, max_reruns=20)
+                result = handle_stable_failure(
+                    "a", dag, sf, commit_sha="abc123", max_reruns=20
+                )
                 assert result == "demote"
                 assert sf.get_test_state("a") == "flaky"
         finally:
@@ -277,6 +285,114 @@ class TestStableDemotion:
             sf = StatusFile(Path(tmpdir) / "status.json")
             result = handle_stable_failure("nonexistent", dag, sf)
             assert result == "inconclusive"
+
+    def test_demotion_records_commit_in_history(self):
+        """handle_stable_failure records commit SHA in history."""
+        fail_exe = _make_fail_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": fail_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "stable", runs=50, passes=50)
+                sf.save()
+
+                handle_stable_failure(
+                    "a", dag, sf, commit_sha="deadbeef", max_reruns=20
+                )
+                history = sf.get_test_history("a")
+                assert len(history) > 0
+                assert all(h["commit"] == "deadbeef" for h in history)
+        finally:
+            os.unlink(fail_exe)
+
+    def test_demotion_uses_persisted_history(self):
+        """Demotion considers pre-existing history from previous CI runs.
+
+        Simulates cross-run demotion: the test has accumulated failures
+        from prior runs. A single additional failure in the current session
+        (combined with the persisted history) should trigger demotion.
+        """
+        fail_exe = _make_fail_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": fail_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "stable", runs=60, passes=55)
+
+                # Pre-populate with a history of recent failures from
+                # previous CI runs (newest-first).
+                for i in range(8):
+                    sf.record_run("a", passed=False, commit=f"prev_{i}")
+                sf.save()
+
+                # Now handle_stable_failure adds one more failure via
+                # the fail script, reads the full persisted history, and
+                # should demote quickly.
+                result = handle_stable_failure(
+                    "a", dag, sf, commit_sha="current", max_reruns=5
+                )
+                assert result == "demote"
+                assert sf.get_test_state("a") == "flaky"
+        finally:
+            os.unlink(fail_exe)
+
+
+class TestBurnInSweepCommitSHA:
+    """Tests for commit SHA propagation in burn-in sweep."""
+
+    def test_sweep_records_commit_in_history(self):
+        """Burn-in sweep records commit SHA in history entries."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "burning_in", runs=0, passes=0)
+                sf.save()
+
+                sweep = BurnInSweep(dag, sf, commit_sha="abc123")
+                sweep.run()
+
+                history = sf.get_test_history("a")
+                assert len(history) > 0
+                assert all(h["commit"] == "abc123" for h in history)
+        finally:
+            os.unlink(pass_exe)
+
+    def test_sweep_without_commit_records_none(self):
+        """Burn-in sweep without commit SHA records None."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "burning_in", runs=0, passes=0)
+                sf.save()
+
+                sweep = BurnInSweep(dag, sf)
+                sweep.run()
+
+                history = sf.get_test_history("a")
+                assert len(history) > 0
+                assert all(h["commit"] is None for h in history)
+        finally:
+            os.unlink(pass_exe)
 
 
 class TestFilterTestsByState:
@@ -358,3 +474,201 @@ class TestFilterTestsByState:
             sf = StatusFile(Path(tmpdir) / "status.json")
             result = filter_tests_by_state(dag, sf)
             assert result == []
+
+
+def _result(name: str, status: str = "passed") -> TestResult:
+    """Create a minimal TestResult for process_results tests."""
+    return TestResult(name=name, assertion=f"{name} works", status=status)
+
+
+class TestProcessResultsNormalOps:
+    """Tests for process_results recording results (normal operation)."""
+
+    def test_records_passing_result(self):
+        """Passing test is recorded in status file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            results = [_result("a", "passed")]
+            events = process_results(results, sf)
+
+            assert events == []
+            entry = sf.get_test_entry("a")
+            assert entry is not None
+            assert entry["runs"] == 1
+            assert entry["passes"] == 1
+
+    def test_skips_dependencies_failed(self):
+        """Tests with dependencies_failed are not recorded."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            results = [_result("a", "dependencies_failed")]
+            events = process_results(results, sf)
+
+            assert events == []
+            assert sf.get_test_entry("a") is None
+
+    def test_new_test_created_as_new(self):
+        """Test not in status file is created with state 'new'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            results = [_result("a", "passed")]
+            process_results(results, sf)
+
+            assert sf.get_test_state("a") == "new"
+
+    def test_flaky_test_just_records(self):
+        """Flaky test result is recorded without state transition."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("a", "flaky", runs=30, passes=20)
+            sf.save()
+            results = [_result("a", "failed")]
+            events = process_results(results, sf)
+
+            assert events == []
+            assert sf.get_test_state("a") == "flaky"
+            assert sf.get_test_entry("a")["runs"] == 31
+
+    def test_commit_sha_propagated(self):
+        """Commit SHA is recorded in history entries."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            results = [_result("a", "passed")]
+            process_results(results, sf, commit_sha="abc123")
+
+            history = sf.get_test_history("a")
+            assert len(history) == 1
+            assert history[0]["commit"] == "abc123"
+
+
+class TestProcessResultsBurnIn:
+    """Tests for process_results handling burning_in tests."""
+
+    def test_burning_in_accepted(self):
+        """Burning-in test with enough passes is accepted as stable."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("a", "burning_in", runs=19, passes=19)
+            for _ in range(19):
+                sf.record_run("a", True)
+            sf.save()
+
+            results = [_result("a", "passed")]
+            events = process_results(results, sf)
+
+            assert len(events) == 1
+            assert events[0] == ("accepted", "a", "burning_in", "stable")
+            assert sf.get_test_state("a") == "stable"
+
+    def test_burning_in_rejected(self):
+        """Burning-in test with many failures is rejected as flaky."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("a", "burning_in", runs=19, passes=0)
+            for _ in range(19):
+                sf.record_run("a", False)
+            sf.save()
+
+            results = [_result("a", "failed")]
+            events = process_results(results, sf)
+
+            assert len(events) == 1
+            assert events[0] == ("rejected", "a", "burning_in", "flaky")
+            assert sf.get_test_state("a") == "flaky"
+
+    def test_burning_in_continue(self):
+        """Burning-in test with few runs stays in burning_in."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("a", "burning_in", runs=2, passes=2)
+            sf.save()
+
+            results = [_result("a", "passed")]
+            events = process_results(results, sf)
+
+            assert events == []
+            assert sf.get_test_state("a") == "burning_in"
+
+
+class TestProcessResultsDemotion:
+    """Tests for process_results handling stable test demotion."""
+
+    def test_stable_failure_demotes_with_history(self):
+        """Stable test with enough failure history is demoted to flaky."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("a", "stable", runs=55, passes=50)
+            # Pre-populate with recent failures (newest-first)
+            for _ in range(5):
+                sf.record_run("a", passed=False, commit="prev")
+            for _ in range(50):
+                sf.record_run("a", passed=True, commit="older")
+            sf.save()
+
+            results = [_result("a", "failed")]
+            events = process_results(results, sf)
+
+            assert len(events) == 1
+            assert events[0] == ("demoted", "a", "stable", "flaky")
+            assert sf.get_test_state("a") == "flaky"
+
+    def test_stable_failure_retains_with_low_threshold(self):
+        """Stable test retains when observed reliability meets a low threshold."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            # With min_reliability=0.50, a test with mostly passes retains
+            # even after a failure because observed rate stays above 50%.
+            sf.set_config(min_reliability=0.50, statistical_significance=0.95)
+            sf.set_test_state("a", "stable", runs=50, passes=50)
+            for _ in range(50):
+                sf.record_run("a", passed=True)
+            sf.save()
+
+            results = [_result("a", "failed")]
+            events = process_results(results, sf)
+
+            # SPRT should retain: observed ~49/50 = 98% >> 50% threshold
+            assert events == []
+            assert sf.get_test_state("a") == "stable"
+
+    def test_stable_failure_inconclusive_to_burning_in(self):
+        """Stable test with inconclusive SPRT moves to burning_in."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("a", "stable", runs=3, passes=2)
+            # Very little history — SPRT will be inconclusive
+            sf.record_run("a", passed=True)
+            sf.record_run("a", passed=True)
+            sf.save()
+
+            results = [_result("a", "failed")]
+            events = process_results(results, sf)
+
+            assert len(events) == 1
+            assert events[0] == ("suspicious", "a", "stable", "burning_in")
+            assert sf.get_test_state("a") == "burning_in"
+
+    def test_default_stable_failure_not_evaluated(self):
+        """Test not in status file (default stable) is not evaluated for demotion."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            # "a" is NOT in the status file
+            results = [_result("a", "failed")]
+            events = process_results(results, sf)
+
+            # No demotion evaluation for unknown tests
+            assert events == []
+            assert sf.get_test_state("a") == "new"
+
+    def test_stable_pass_no_evaluation(self):
+        """Passing stable test records result without evaluation."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("a", "stable", runs=50, passes=50)
+            sf.save()
+            results = [_result("a", "passed")]
+            events = process_results(results, sf)
+
+            assert events == []
+            assert sf.get_test_state("a") == "stable"
+            assert sf.get_test_entry("a")["runs"] == 51

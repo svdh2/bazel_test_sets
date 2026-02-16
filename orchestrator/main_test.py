@@ -9,7 +9,12 @@ from unittest.mock import patch
 
 import pytest
 
-from orchestrator.main import _filter_manifest, _get_changed_files, parse_args
+from orchestrator.main import (
+    _filter_manifest,
+    _get_changed_files,
+    _resolve_git_context,
+    parse_args,
+)
 
 
 class TestParseArgsRegression:
@@ -92,6 +97,15 @@ class TestParseArgsRegression:
         assert args.co_occurrence_graph == Path(".tests/co_occurrence_graph.json")
         assert args.max_test_percentage == 0.10
         assert args.max_hops == 2
+        assert args.allow_dirty is False
+
+    def test_allow_dirty_flag(self):
+        """--allow-dirty flag parsed correctly."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--allow-dirty",
+        ])
+        assert args.allow_dirty is True
 
 
 class TestFilterManifest:
@@ -348,3 +362,59 @@ class TestRegressionOptionEndToEnd:
                 "--co-occurrence-graph", str(graph_path),
             ])
             assert exit_code == 0
+
+
+class TestResolveGitContext:
+    """Tests for _resolve_git_context."""
+
+    def test_returns_commit_sha_when_clean(self):
+        """Returns HEAD sha when tree is clean."""
+        with patch("orchestrator.main.subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                # git rev-parse HEAD
+                type("Result", (), {"returncode": 0, "stdout": "abc123\n"})(),
+                # git status --porcelain
+                type("Result", (), {"returncode": 0, "stdout": ""})(),
+            ]
+            sha = _resolve_git_context(allow_dirty=False)
+            assert sha == "abc123"
+
+    def test_allow_dirty_skips_status_check(self):
+        """With allow_dirty=True, only rev-parse is called."""
+        with patch("orchestrator.main.subprocess.run") as mock_run:
+            mock_run.return_value = type(
+                "Result", (), {"returncode": 0, "stdout": "def456\n"}
+            )()
+            sha = _resolve_git_context(allow_dirty=True)
+            assert sha == "def456"
+            # Only rev-parse should be called, not status
+            assert mock_run.call_count == 1
+            assert "rev-parse" in mock_run.call_args[0][0]
+
+    def test_dirty_tree_exits(self):
+        """Dirty working tree causes SystemExit when allow_dirty=False."""
+        with patch("orchestrator.main.subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                # git rev-parse HEAD
+                type("Result", (), {"returncode": 0, "stdout": "abc123\n"})(),
+                # git status --porcelain (dirty)
+                type("Result", (), {"returncode": 0, "stdout": " M file.py\n"})(),
+            ]
+            with pytest.raises(SystemExit):
+                _resolve_git_context(allow_dirty=False)
+
+    def test_no_git_returns_none(self):
+        """Returns None when git is not installed."""
+        with patch("orchestrator.main.subprocess.run") as mock_run:
+            mock_run.side_effect = FileNotFoundError
+            sha = _resolve_git_context(allow_dirty=False)
+            assert sha is None
+
+    def test_not_a_repo_returns_none(self):
+        """Returns None when not inside a git repository."""
+        with patch("orchestrator.main.subprocess.run") as mock_run:
+            mock_run.return_value = type(
+                "Result", (), {"returncode": 128, "stdout": "", "stderr": "not a git repo"}
+            )()
+            sha = _resolve_git_context(allow_dirty=False)
+            assert sha is None

@@ -17,16 +17,20 @@ Manages test maturity through a state machine driven by SPRT (Sequential Probabi
                               v                       v
                            stable                   flaky
                               |                       |
-                     demotion (repeated           CI tool: deflake
-                      failure + SPRT)                 |
+                     failure + SPRT              CI tool: deflake
+                     evaluation                       |
                               |                       |
-                              +----------> flaky <----+
-                                             |
-                                     CI tool: deflake
-                                             |
-                                             v
-                                         burning_in
-                                       (counters reset)
+                    +---------+---------+             |
+                    |         |         |             |
+                 demote   inconclusive retain         |
+                    |         |         |             |
+                    v         v      (no change)      |
+                  flaky   burning_in                   |
+                    ^     (suspicious,                 |
+                    |      counters                    |
+                    |      preserved)                  |
+                    +----------------------------------+
+                                             (counters reset)
 ```
 
 ## States
@@ -74,34 +78,54 @@ The sweep repeats up to `max_iterations` (default 200) until all tests are decid
 
 ### 4. Outcome
 
-- **Stable**: Test reliably passes (e.g., 20/20 runs -> SPRT accept). It now participates in detection mode and regression selection.
+- **Stable**: Test reliably passes (e.g., ~28 consecutive passes -> SPRT accept). It now participates in detection mode and regression selection.
 - **Flaky**: Test shows unreliable behavior (e.g., 15/20 runs -> SPRT reject). It is excluded from detection and regression selection.
 - **Undecided**: Max iterations reached without SPRT decision. Test remains `burning_in`.
 
 ## Flow: Stable Test Demotion
 
-### 1. Stable Test Fails
+There are two paths for demotion evaluation:
 
-During normal execution, a test with `stable` state fails.
+### Path A: Via Orchestrator (process_results)
 
-### 2. Demotion Evaluation
+When the orchestrator runs with `--status-file`, each result is processed without re-execution:
+
+```
+1. Stable test fails during orchestrator run
+2. Record failure in status file via record_run(passed=False, commit)
+3. Read full persisted history from status file (newest-first)
+4. Evaluate demotion_evaluate(full_history, min_reliability, significance)
+5. If "demote": transition to flaky
+   If "inconclusive": transition to burning_in (suspicious, counters preserved)
+   If "retain": stays stable (one-off failure)
+```
+
+This is the primary integration path. Cross-run demotion works because failures accumulate in the persisted history across separate CI invocations.
+
+**Components**: Burn-in (`process_results`), SPRT (`demotion_evaluate`), Status File
+
+### Path B: Via handle_stable_failure (immediate re-runs)
+
+For dedicated demotion evaluation with re-runs:
 
 ```
 For up to max_reruns (20):
     1. Re-run the test
-    2. Record result
-    3. Evaluate demotion_evaluate(recent_history, min_reliability, significance)
-    4. If "demote": transition to flaky
+    2. Record result with commit SHA via record_run(passed, commit)
+    3. Read full persisted history from status file (newest-first)
+    4. Evaluate demotion_evaluate(full_history, min_reliability, significance)
+    5. If "demote": transition to flaky
        If "retain": stays stable (likely a one-off failure)
        If exhausted: inconclusive
 ```
 
 **Components**: Burn-in (`handle_stable_failure`), SPRT (`demotion_evaluate`), Status File
 
-### 3. Outcome
+### Outcome
 
-- **Demote**: Recent history shows the test has become unreliable. Transitioned to `flaky`.
-- **Retain**: Re-runs show the failure was transient. Test stays `stable`.
+- **Demote**: Persisted history shows the test has become unreliable. Transitioned to `flaky`. Commit SHAs in the history enable identifying the commit range that caused the reliability change.
+- **Suspicious (inconclusive)**: Not enough evidence to demote, but the failure is concerning. Transitioned to `burning_in` for closer monitoring, with counters and history preserved.
+- **Retain**: Failure was transient. Test stays `stable`.
 
 ## Flow: Deflaking
 
@@ -123,6 +147,38 @@ Transitions from `flaky` to `burning_in` with counters reset to `runs=0, passes=
 
 The test goes through the normal burn-in process again.
 
+## Flow: Orchestrator Integration
+
+When the orchestrator is invoked with `--status-file`, it auto-detects the HEAD commit SHA from git, verifies the working tree is clean (no uncommitted changes), and records all test results with the commit SHA. Use `--allow-dirty` to bypass the clean-tree check.
+
+```
+orchestrator main(--status-file path [--allow-dirty])
+    |
+    +---> _resolve_git_context(): verify clean tree, get HEAD SHA
+    +---> execute tests (DAG order)
+    |
+    +---> process_results(results, status_file, commit_sha)
+              |
+              for each result (skip dependencies_failed):
+              |
+              +---> record_run(passed, commit)
+              +---> save()  (incremental, crash recovery)
+              |
+              +---> if burning_in:
+              |         sprt_evaluate(runs, passes) -> accept/reject/continue
+              |
+              +---> if stable + failed:
+              |         demotion_evaluate(history) -> demote/retain/inconclusive
+              |
+              +---> if flaky/new: no evaluation (just recorded)
+              |
+              +---> return lifecycle events
+```
+
+This also applies to the regression path (`--regression --status-file`).
+
+**Components**: Orchestrator Main, Burn-in (`process_results`), SPRT, Status File
+
 ## Data Flow
 
 ```
@@ -131,10 +187,26 @@ The test goes through the normal burn-in process again.
     v
 StatusFile (in-memory)
     |
-    +---> BurnInSweep.run()
+    +---> process_results(results, commit_sha)    [orchestrator integration]
+    |         |
+    |         for each result:
+    |         +---> record_run(passed, commit=commit_sha)
+    |         +---> save()  (incremental)
+    |         |
+    |         +---> burning_in: sprt_evaluate(runs, passes)
+    |         |         +---> "accept" -> set_test_state("stable")
+    |         |         +---> "reject" -> set_test_state("flaky")
+    |         |         +---> "continue" -> no change
+    |         |
+    |         +---> stable + failed: demotion_evaluate(history)
+    |                   +---> "demote" -> set_test_state("flaky")
+    |                   +---> "inconclusive" -> set_test_state("burning_in")
+    |                   +---> "retain" -> no change
+    |
+    +---> BurnInSweep.run(commit_sha)             [dedicated burn-in]
     |         |
     |         +---> execute test (subprocess)
-    |         +---> record_run(passed)
+    |         +---> record_run(passed, commit=commit_sha)
     |         +---> sprt_evaluate(runs, passes, ...)
     |         |         |
     |         |         +---> "accept" -> set_test_state("stable")
@@ -143,9 +215,11 @@ StatusFile (in-memory)
     |         |
     |         +---> save() after each run (crash recovery)
     |
-    +---> handle_stable_failure()
+    +---> handle_stable_failure(commit_sha)        [dedicated demotion]
               |
               +---> re-run test
+              +---> record_run(passed, commit=commit_sha)
+              +---> get_test_history() -> full persisted history
               +---> demotion_evaluate(history)
               |         |
               |         +---> "demote" -> set_test_state("flaky")
@@ -163,6 +237,6 @@ StatusFile (in-memory)
 | `margin` | 0.10 | Separation between H0 (0.99) and H1 (0.89) |
 
 With these defaults:
-- A test passing 20/20 runs typically triggers "accept" (stable)
+- A test passing ~28 consecutive runs triggers "accept" (stable)
 - A test failing 3/20 runs typically triggers "reject" (flaky)
 - Borderline cases may need 50-100 runs before a decision

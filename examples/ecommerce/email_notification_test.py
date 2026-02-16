@@ -1,6 +1,7 @@
 """Simulated email notification test with structured logging."""
 
 import json
+import os
 import sys
 import time
 
@@ -24,6 +25,8 @@ def main() -> int:
     tst({"type": "result", "name": "email_delivered", "passed": True})
     tst({"type": "block_end", "block": "verdict"})
 
+    if os.environ.get("TST_FORCE_FAIL"):
+        return 1
     return 0
 
 

@@ -127,25 +127,30 @@ class TestSPRTEdgeCases:
         assert result == "reject", "SPRT should reject low reliability"
 
 
+def _h(passed: bool, commit: str | None = None) -> dict:
+    """Helper to create a history entry."""
+    return {"passed": passed, "commit": commit}
+
+
 class TestDemotionEvaluate:
     """Tests for reverse-chronological SPRT demotion."""
 
     def test_retain_all_passes(self):
         """All passes in history -> retain."""
-        history = [True] * 50
+        history = [_h(True)] * 50
         result = demotion_evaluate(history, 0.99, 0.95)
         assert result == "retain"
 
     def test_demote_many_failures(self):
         """Many recent failures -> demote."""
         # Recent failures (newest first)
-        history = [False] * 10 + [True] * 40
+        history = [_h(False)] * 10 + [_h(True)] * 40
         result = demotion_evaluate(history, 0.99, 0.95)
         assert result == "demote"
 
     def test_demote_all_failures(self):
         """All failures -> demote."""
-        history = [False] * 20
+        history = [_h(False)] * 20
         result = demotion_evaluate(history, 0.99, 0.95)
         assert result == "demote"
 
@@ -156,19 +161,26 @@ class TestDemotionEvaluate:
 
     def test_inconclusive_single_result(self):
         """Single result may be inconclusive."""
-        result = demotion_evaluate([True], 0.99, 0.95)
+        result = demotion_evaluate([_h(True)], 0.99, 0.95)
         assert result in ("inconclusive", "retain")
 
     def test_retain_recent_passes_old_failures(self):
         """Recent passes outweigh old failures (newest first)."""
         # 50 recent passes, then some old failures
-        history = [True] * 50 + [False] * 5
+        history = [_h(True)] * 50 + [_h(False)] * 5
         result = demotion_evaluate(history, 0.99, 0.95)
         assert result == "retain"
 
     def test_demote_recent_failures_old_passes(self):
         """Recent failures override old passes."""
         # 5 recent failures, then many old passes
-        history = [False] * 10 + [True] * 90
+        history = [_h(False)] * 10 + [_h(True)] * 90
         result = demotion_evaluate(history, 0.99, 0.95)
         assert result == "demote"
+
+    def test_commit_field_ignored_by_sprt(self):
+        """Commit SHA does not affect SPRT decision."""
+        history_with = [_h(True, "abc123")] * 50
+        history_without = [_h(True)] * 50
+        assert demotion_evaluate(history_with, 0.99, 0.95) == \
+               demotion_evaluate(history_without, 0.99, 0.95)

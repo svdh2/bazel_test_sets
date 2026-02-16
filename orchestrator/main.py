@@ -66,6 +66,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Path to the .tests/status JSON state file",
     )
+    parser.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        default=False,
+        help="Allow running with uncommitted changes (commit SHA will still be recorded)",
+    )
 
     # Regression option flags
     parser.add_argument(
@@ -130,6 +136,59 @@ def _get_changed_files(diff_base: str) -> list[str]:
     return [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
 
 
+def _resolve_git_context(allow_dirty: bool) -> str | None:
+    """Verify the working tree is clean and return the HEAD commit SHA.
+
+    Args:
+        allow_dirty: If True, skip the dirty-tree check but still return
+            the commit SHA.
+
+    Returns:
+        The HEAD commit SHA, or None if git is unavailable.
+
+    Raises:
+        SystemExit: If the working tree has uncommitted changes and
+            allow_dirty is False.
+    """
+    try:
+        sha_result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        print("Warning: git not found, commit SHA will not be recorded",
+              file=sys.stderr)
+        return None
+
+    if sha_result.returncode != 0:
+        print("Warning: not a git repository, commit SHA will not be recorded",
+              file=sys.stderr)
+        return None
+
+    commit_sha = sha_result.stdout.strip()
+
+    if not allow_dirty:
+        dirty_result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if dirty_result.stdout.strip():
+            print(
+                "Error: working tree has uncommitted changes.\n"
+                "Commit your changes before running with --status-file so that\n"
+                "test results can be attributed to a specific commit.\n"
+                "Use --allow-dirty to bypass this check.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+    return commit_sha
+
+
 def main(argv: list[str] | None = None) -> int:
     """Main entry point."""
     args = parse_args(argv)
@@ -151,9 +210,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error building DAG: {e}", file=sys.stderr)
         return 1
 
+    # Resolve git context when status file tracking is enabled
+    commit_sha: str | None = None
+    if args.status_file:
+        commit_sha = _resolve_git_context(args.allow_dirty)
+
     # Handle regression option
     if args.regression:
-        return _run_regression(args, manifest, dag)
+        return _run_regression(args, manifest, dag, commit_sha)
 
     # Execute tests (use AsyncExecutor for parallel, SequentialExecutor as fallback)
     executor: SequentialExecutor | AsyncExecutor
@@ -178,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     _print_results(results, args)
+    _update_status_file(results, args, commit_sha)
     return 1 if any(r.status == "failed" for r in results) else 0
 
 
@@ -185,6 +250,7 @@ def _run_regression(
     args: argparse.Namespace,
     manifest: dict,
     dag: TestDAG,
+    commit_sha: str | None = None,
 ) -> int:
     """Execute with regression option: select tests then run in chosen mode.
 
@@ -192,6 +258,7 @@ def _run_regression(
         args: Parsed CLI arguments.
         manifest: Parsed manifest dict.
         dag: Constructed test DAG.
+        commit_sha: Resolved git commit SHA (or None).
 
     Returns:
         Exit code.
@@ -290,6 +357,7 @@ def _run_regression(
         return 1
 
     _print_results(results, args)
+    _update_status_file(results, args, commit_sha)
     return 1 if any(r.status == "failed" for r in results) else 0
 
 
@@ -324,6 +392,24 @@ def _filter_manifest(
         "test_set": manifest.get("test_set", {}),
         "test_set_tests": filtered_tests,
     }
+
+
+def _update_status_file(
+    results: list, args: argparse.Namespace, commit_sha: str | None
+) -> None:
+    """Update the status file with test results if --status-file is set."""
+    if not args.status_file:
+        return
+
+    from orchestrator.lifecycle.burnin import process_results
+    from orchestrator.lifecycle.status import StatusFile
+
+    sf = StatusFile(args.status_file)
+    events = process_results(results, sf, commit_sha=commit_sha)
+    if events:
+        print("\nLifecycle events:")
+        for etype, name, old_state, new_state in events:
+            print(f"  {name}: {old_state} \u2192 {new_state} ({etype})")
 
 
 def _print_results(results: list, args: argparse.Namespace) -> None:

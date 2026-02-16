@@ -31,14 +31,14 @@ Tests H0 (reliability >= min_reliability) against H1 (reliability < min_reliabil
 
 ```python
 def demotion_evaluate(
-    test_history: list[bool],   # Newest-first pass/fail records
+    test_history: list[dict],   # Newest-first, each {"passed": bool, "commit": str | None}
     min_reliability: float,
     significance: float,
     margin: float = 0.10,
 ) -> str   # "demote", "retain", or "inconclusive"
 ```
 
-Processes history from newest to oldest. When SPRT reaches sufficient confidence, compares empirical reliability against the threshold:
+Accepts rich history entries with pass/fail status and commit SHA. Processes history from newest to oldest using only the `passed` field for SPRT math. When SPRT reaches sufficient confidence, compares empirical reliability against the threshold:
 - `"demote"`: Observed reliability below min_reliability (transition to flaky)
 - `"retain"`: Observed reliability meets threshold (stays stable)
 - `"inconclusive"`: Exhausted history without reaching confidence

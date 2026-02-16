@@ -1,14 +1,16 @@
-"""Burn-in sweep loop and stable demotion logic.
+"""Burn-in sweep loop, stable demotion logic, and result processing.
 
 Implements the burn-in lifecycle:
 - Sweep loop: runs burning_in tests until SPRT decides each one
 - Stable demotion: re-runs failed stable tests to evaluate demotion
+- Result processing: records orchestrator results and drives state transitions
 
 State transitions:
 - new -> burning_in (via CI tool)
 - burning_in -> stable (SPRT accept)
 - burning_in -> flaky (SPRT reject)
 - stable -> flaky (demotion after repeated failure)
+- stable -> burning_in (suspicious: SPRT inconclusive after failure)
 - flaky -> burning_in (via CI tool deflake)
 """
 
@@ -47,11 +49,13 @@ class BurnInSweep:
         self,
         dag: TestDAG,
         status_file: StatusFile,
+        commit_sha: str | None = None,
         max_iterations: int = 200,
         timeout: float = 300.0,
     ) -> None:
         self.dag = dag
         self.status_file = status_file
+        self.commit_sha = commit_sha
         self.max_iterations = max_iterations
         self.timeout = timeout
 
@@ -93,7 +97,9 @@ class BurnInSweep:
 
                 # Record the run
                 passed = result.status == "passed"
-                self.status_file.record_run(test_name, passed)
+                self.status_file.record_run(
+                    test_name, passed, commit=self.commit_sha
+                )
                 self.status_file.save()  # Incremental save for crash recovery
 
                 # Evaluate SPRT
@@ -185,18 +191,21 @@ def handle_stable_failure(
     test_name: str,
     dag: TestDAG,
     status_file: StatusFile,
+    commit_sha: str | None = None,
     max_reruns: int = 20,
     timeout: float = 300.0,
 ) -> str:
     """Handle a failed stable test by evaluating demotion.
 
-    Re-runs the test and evaluates reverse-chronological SPRT to
-    determine if the test should be demoted to flaky.
+    Re-runs the test and evaluates reverse-chronological SPRT using the
+    full persisted history (not just current-session re-runs). This
+    enables cross-run demotion detection for intermittent failures.
 
     Args:
         test_name: Name of the failed stable test.
         dag: Test DAG for execution.
         status_file: StatusFile for state management.
+        commit_sha: Git commit SHA the runs belong to, or None.
         max_reruns: Maximum re-runs for demotion evaluation.
         timeout: Test execution timeout.
 
@@ -209,7 +218,6 @@ def handle_stable_failure(
         return "inconclusive"
 
     node = dag.nodes[test_name]
-    rerun_results: list[bool] = []
 
     for _ in range(max_reruns):
         # Run the test
@@ -224,13 +232,11 @@ def handle_stable_failure(
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             passed = False
 
-        rerun_results.append(passed)
-        status_file.record_run(test_name, passed)
+        status_file.record_run(test_name, passed, commit=commit_sha)
         status_file.save()
 
-        # Build history for demotion evaluation (newest first)
-        # Use rerun results as the recent history
-        history = list(reversed(rerun_results))
+        # Use the full persisted history for demotion evaluation
+        history = status_file.get_test_history(test_name)
 
         decision = demotion_evaluate(
             history,
@@ -285,3 +291,95 @@ def filter_tests_by_state(
             result.append(name)
 
     return result
+
+
+def process_results(
+    results: list[TestResult],
+    status_file: StatusFile,
+    commit_sha: str | None = None,
+) -> list[tuple[str, str, str, str]]:
+    """Record orchestrator test results and evaluate lifecycle transitions.
+
+    For each result (skipping dependencies_failed — test didn't run):
+    - Records the run via status_file.record_run()
+    - burning_in: evaluates SPRT on aggregate counters
+        - accept → stable, reject → flaky
+    - stable + failed: evaluates demotion via SPRT on full history
+        - demote → flaky, inconclusive → burning_in, retain → no change
+    - flaky / new: just records, no evaluation
+
+    Args:
+        results: Test results from the orchestrator executor.
+        status_file: StatusFile for state management and persistence.
+        commit_sha: Git commit SHA to record with each run, or None.
+
+    Returns:
+        List of (event_type, test_name, old_state, new_state) tuples
+        for each state transition that occurred.
+    """
+    events: list[tuple[str, str, str, str]] = []
+
+    for result in results:
+        if result.status == "dependencies_failed":
+            continue
+
+        # Look up state BEFORE recording (record_run creates "new" entries)
+        state = status_file.get_test_state(result.name)
+
+        # Record the run
+        passed = result.status == "passed"
+        status_file.record_run(result.name, passed, commit=commit_sha)
+        status_file.save()
+
+        if state == "burning_in":
+            entry = status_file.get_test_entry(result.name)
+            if entry is None:
+                continue
+            decision = sprt_evaluate(
+                entry["runs"],
+                entry["passes"],
+                status_file.min_reliability,
+                status_file.statistical_significance,
+            )
+            if decision == "accept":
+                status_file.set_test_state(
+                    result.name,
+                    "stable",
+                    runs=entry["runs"],
+                    passes=entry["passes"],
+                )
+                status_file.save()
+                events.append(("accepted", result.name, "burning_in", "stable"))
+            elif decision == "reject":
+                status_file.set_test_state(
+                    result.name,
+                    "flaky",
+                    runs=entry["runs"],
+                    passes=entry["passes"],
+                )
+                status_file.save()
+                events.append(("rejected", result.name, "burning_in", "flaky"))
+
+        elif state in ("stable", None) and not passed:
+            # Default-stable (None) or explicitly stable test failed.
+            # Only evaluate demotion for explicitly stable tests.
+            if state != "stable":
+                continue
+            history = status_file.get_test_history(result.name)
+            decision = demotion_evaluate(
+                history,
+                status_file.min_reliability,
+                status_file.statistical_significance,
+            )
+            if decision == "demote":
+                status_file.set_test_state(result.name, "flaky")
+                status_file.save()
+                events.append(("demoted", result.name, "stable", "flaky"))
+            elif decision == "inconclusive":
+                # Suspicious — can't confidently retain, move to burn-in
+                # for closer monitoring. Preserve counters and history.
+                status_file.set_test_state(result.name, "burning_in")
+                status_file.save()
+                events.append(("suspicious", result.name, "stable", "burning_in"))
+
+    return events

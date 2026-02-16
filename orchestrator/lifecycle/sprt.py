@@ -7,6 +7,7 @@ SPRT for stable test demotion. Pure Python implementation using math.log.
 from __future__ import annotations
 
 import math
+from typing import Any
 
 
 def sprt_evaluate(
@@ -73,7 +74,7 @@ def sprt_evaluate(
 
 
 def demotion_evaluate(
-    test_history: list[bool],
+    test_history: list[dict[str, Any]],
     min_reliability: float,
     significance: float,
     margin: float = 0.10,
@@ -86,8 +87,8 @@ def demotion_evaluate(
     min_reliability.
 
     Args:
-        test_history: List of pass/fail results ordered newest-first.
-            True = passed, False = failed.
+        test_history: List of run records ordered newest-first.
+            Each entry is {"passed": bool, "commit": str | None}.
         min_reliability: Minimum acceptable pass rate.
         significance: Required confidence level.
         margin: Difference between H0 and H1 reliability (default 0.10).
@@ -119,9 +120,9 @@ def demotion_evaluate(
     passes = 0
     runs = 0
 
-    for result in test_history:  # newest first
+    for entry in test_history:  # newest first
         runs += 1
-        if result:
+        if entry["passed"]:
             passes += 1
         failures = runs - passes
 

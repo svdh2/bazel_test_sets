@@ -25,8 +25,11 @@ class StatusFile:
     def get_test_state(test_name: str) -> str | None
     def get_test_entry(test_name: str) -> dict | None
     def set_test_state(test_name, state, runs=None, passes=None)
-    def record_run(test_name: str, passed: bool)
+    def record_run(test_name: str, passed: bool, commit: str | None = None)
     def remove_test(test_name: str) -> bool
+
+    # History
+    def get_test_history(test_name: str) -> list[dict]
 
     # Queries
     def get_all_tests() -> dict[str, dict]
@@ -53,11 +56,17 @@ class StatusFile:
       "state": "stable",
       "runs": 50,
       "passes": 50,
+      "history": [
+        {"passed": true, "commit": "abc123"},
+        {"passed": false, "commit": "def456"}
+      ],
       "last_updated": "2026-02-16T12:00:00+00:00"
     }
   }
 }
 ```
+
+The `history` array is ordered newest-first and capped at 200 entries (`HISTORY_CAP`). Each entry records a pass/fail result and the git commit SHA (or `null` if unavailable). Oldest entries are dropped when the cap is exceeded.
 
 ## Dependencies
 
@@ -65,7 +74,8 @@ class StatusFile:
 
 ## Dependents
 
-- **Burn-in** (`orchestrator.lifecycle.burnin`): Reads/writes test states and run counts during sweep
+- **Burn-in** (`orchestrator.lifecycle.burnin`): Reads/writes test states and run counts during sweep and result processing
+- **Orchestrator Main** (`orchestrator.main`): Loads StatusFile when `--status-file` is provided, passes it to `process_results` after test execution
 - **CI Tool** (`ci_tool/main.py`): All subcommands (burn-in, deflake, test-status) use StatusFile
 - **Regression Selector**: Could filter by burn-in state (currently treats all manifest tests as candidates)
 
@@ -78,3 +88,7 @@ class StatusFile:
 3. **State validation**: `set_test_state` validates that the state is one of the four valid states, raising `ValueError` for invalid transitions. The state machine semantics (which transitions are allowed) are enforced by the burn-in and CI tool logic, not by StatusFile itself.
 
 4. **Parent directory creation**: The `save()` method creates parent directories if needed, supporting first-time initialization without manual directory setup.
+
+5. **Capped history with commit SHAs**: Each `record_run` prepends a `{passed, commit}` entry to the test's history. The history is capped at 200 entries (oldest dropped) and stored newest-first. Commit SHAs enable correlating reliability changes with specific commits for root cause diagnostics. When `set_test_state` resets counters to zero (deflake/burn-in scenarios), the history is also cleared.
+
+6. **Backward compatibility**: Old status files without a `history` field load without error; `get_test_history` returns an empty list for entries that lack the field.
