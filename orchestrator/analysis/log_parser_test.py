@@ -6,7 +6,10 @@ import pytest
 
 from orchestrator.analysis.log_parser import (
     SENTINEL,
+    BlockSegment,
+    TextSegment,
     parse_test_output,
+    parse_stdout_segments,
     is_rigging_failure,
     get_rigging_features,
 )
@@ -517,3 +520,231 @@ class TestHasRiggingFailureFlag:
         """Empty input has has_rigging_failure=False."""
         result = parse_test_output([])
         assert result["has_rigging_failure"] is False
+
+
+class TestParseStdoutSegments:
+    """Tests for parse_stdout_segments (segment-based parser)."""
+
+    def test_empty_input(self):
+        """Empty string produces empty segment list."""
+        assert parse_stdout_segments("") == []
+
+    def test_plain_text_only(self):
+        """Input with no [TST] lines produces a single TextSegment."""
+        segments = parse_stdout_segments("Hello world\nTest running...")
+        assert len(segments) == 1
+        assert isinstance(segments[0], TextSegment)
+        assert segments[0].text == "Hello world\nTest running..."
+
+    def test_single_block(self):
+        """A single block_start/block_end pair produces a BlockSegment."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "verdict"}\n'
+            '[TST] {"type": "result", "name": "ok", "passed": true}\n'
+            '[TST] {"type": "block_end", "block": "verdict"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        assert len(segments) == 1
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.block == "verdict"
+        assert len(seg.assertions) == 1
+        assert seg.assertions[0] == {"description": "ok", "status": "passed"}
+
+    def test_interleaved_text_and_blocks(self):
+        """Mixed plain text and blocks produce alternating segments."""
+        stdout = (
+            "Setting up...\n"
+            '[TST] {"type": "block_start", "block": "rigging"}\n'
+            '[TST] {"type": "feature", "name": "auth"}\n'
+            '[TST] {"type": "block_end", "block": "rigging"}\n'
+            "Test complete."
+        )
+        segments = parse_stdout_segments(stdout)
+        assert len(segments) == 3
+        assert isinstance(segments[0], TextSegment)
+        assert segments[0].text == "Setting up..."
+        assert isinstance(segments[1], BlockSegment)
+        assert segments[1].block == "rigging"
+        assert isinstance(segments[2], TextSegment)
+        assert segments[2].text == "Test complete."
+
+    def test_block_with_plain_logs(self):
+        """Plain text inside a block goes to BlockSegment.logs."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "stimulation"}\n'
+            "Running test...\n"
+            "Processing data...\n"
+            '[TST] {"type": "block_end", "block": "stimulation"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        assert len(segments) == 1
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.logs == "Running test...\nProcessing data..."
+
+    def test_block_features(self):
+        """Feature events inside a block populate features list."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "rigging"}\n'
+            '[TST] {"type": "feature", "name": "payment", "action": "connect"}\n'
+            '[TST] {"type": "feature", "name": "auth"}\n'
+            '[TST] {"type": "block_end", "block": "rigging"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert len(seg.features) == 2
+        assert seg.features[0] == {"name": "payment", "action": "connect"}
+        assert seg.features[1] == {"name": "auth"}
+
+    def test_block_measurements(self):
+        """Measurement events inside a block populate measurements list."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "stimulation"}\n'
+            '[TST] {"type": "measurement", "name": "latency", "value": 42, "unit": "ms"}\n'
+            '[TST] {"type": "block_end", "block": "stimulation"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert len(seg.measurements) == 1
+        assert seg.measurements[0] == {"name": "latency", "value": 42, "unit": "ms"}
+
+    def test_block_assertions_name_passed_format(self):
+        """Result events with name/passed format normalize to assertions."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "verdict"}\n'
+            '[TST] {"type": "result", "name": "discount_applied", "passed": true}\n'
+            '[TST] {"type": "result", "name": "total_correct", "passed": false}\n'
+            '[TST] {"type": "block_end", "block": "verdict"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert len(seg.assertions) == 2
+        assert seg.assertions[0] == {"description": "discount_applied", "status": "passed"}
+        assert seg.assertions[1] == {"description": "total_correct", "status": "failed"}
+
+    def test_block_assertions_status_message_format(self):
+        """Result events with status/message format normalize to assertions."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "checkpoint"}\n'
+            '[TST] {"type": "result", "status": "pass", "message": "all good"}\n'
+            '[TST] {"type": "block_end", "block": "checkpoint"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.assertions[0] == {"description": "all good", "status": "pass"}
+
+    def test_block_error(self):
+        """Error event sets BlockSegment.error."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "rigging"}\n'
+            '[TST] {"type": "error", "message": "connection refused"}\n'
+            '[TST] {"type": "block_end", "block": "rigging"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.error == "connection refused"
+
+    def test_description_on_block_start(self):
+        """block_start with description field populates BlockSegment.description."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "stimulation", '
+            '"description": "Apply 15% discount"}\n'
+            '[TST] {"type": "block_end", "block": "stimulation"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.description == "Apply 15% discount"
+
+    def test_implicit_block_end_on_new_block(self):
+        """Starting a new block without ending the previous one finalizes it."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "rigging"}\n'
+            '[TST] {"type": "feature", "name": "auth"}\n'
+            '[TST] {"type": "block_start", "block": "stimulation"}\n'
+            '[TST] {"type": "measurement", "name": "x", "value": 1}\n'
+            '[TST] {"type": "block_end", "block": "stimulation"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        assert len(segments) == 2
+        assert isinstance(segments[0], BlockSegment)
+        assert segments[0].block == "rigging"
+        assert len(segments[0].features) == 1
+        assert isinstance(segments[1], BlockSegment)
+        assert segments[1].block == "stimulation"
+        assert len(segments[1].measurements) == 1
+
+    def test_implicit_block_end_on_eof(self):
+        """Reaching EOF inside a block finalizes it."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "verdict"}\n'
+            '[TST] {"type": "result", "name": "test_ok", "passed": true}'
+        )
+        segments = parse_stdout_segments(stdout)
+        assert len(segments) == 1
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.block == "verdict"
+        assert len(seg.assertions) == 1
+
+    def test_malformed_tst_lines_in_block_go_to_logs(self):
+        """Malformed [TST] lines inside a block are added to logs."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "stimulation"}\n'
+            "[TST] not valid json\n"
+            '[TST] {"type": "block_end", "block": "stimulation"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert "[TST] not valid json" in seg.logs
+
+    def test_full_realistic_output(self):
+        """Parse a complete realistic test output with all event types."""
+        stdout = (
+            "=== Test: //ecommerce:order_test ===\n"
+            '[TST] {"type": "block_start", "block": "rigging"}\n'
+            '[TST] {"type": "feature", "name": "order_service", "action": "initialize"}\n'
+            '[TST] {"type": "feature", "name": "payment_gateway", "action": "connect"}\n'
+            '[TST] {"type": "block_end", "block": "rigging"}\n'
+            '[TST] {"type": "block_start", "block": "stimulation", '
+            '"description": "Place order for 3 items"}\n'
+            '[TST] {"type": "measurement", "name": "order_total", "value": 129.97, "unit": "USD"}\n'
+            '[TST] {"type": "measurement", "name": "items_count", "value": 3, "unit": "items"}\n'
+            '[TST] {"type": "block_end", "block": "stimulation"}\n'
+            '[TST] {"type": "block_start", "block": "verdict"}\n'
+            '[TST] {"type": "result", "name": "order_placed", "passed": true}\n'
+            '[TST] {"type": "block_end", "block": "verdict"}\n'
+            "Test complete."
+        )
+        segments = parse_stdout_segments(stdout)
+        assert len(segments) == 5  # text, rigging, stimulation, verdict, text
+
+        assert isinstance(segments[0], TextSegment)
+        assert "order_test" in segments[0].text
+
+        rigging = segments[1]
+        assert isinstance(rigging, BlockSegment)
+        assert rigging.block == "rigging"
+        assert len(rigging.features) == 2
+
+        stim = segments[2]
+        assert isinstance(stim, BlockSegment)
+        assert stim.block == "stimulation"
+        assert stim.description == "Place order for 3 items"
+        assert len(stim.measurements) == 2
+
+        verdict = segments[3]
+        assert isinstance(verdict, BlockSegment)
+        assert verdict.block == "verdict"
+        assert len(verdict.assertions) == 1
+        assert verdict.assertions[0]["status"] == "passed"
+
+        assert isinstance(segments[4], TextSegment)
+        assert "Test complete." in segments[4].text

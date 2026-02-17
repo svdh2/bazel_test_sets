@@ -328,20 +328,16 @@ class TestExpandableSections:
         # Should not have a Logs details element
         assert "Logs" not in result
 
-    def test_structured_log_measurements_in_table(self):
-        """Measurements from structured log appear in a table."""
+    def test_structured_stdout_measurements_in_table(self):
+        """Measurements from [TST] stdout appear in a table."""
         tests = {
             "t": {
                 "assertion": "A", "status": "passed", "duration_seconds": 1.0,
-                "structured_log": {
-                    "block_sequence": ["rigging", "stimulation"],
-                    "measurements": [
-                        {"name": "latency", "value": 42, "unit": "ms"},
-                    ],
-                    "results": [],
-                    "errors": [],
-                    "has_rigging_failure": False,
-                },
+                "stdout": (
+                    '[TST] {"type": "block_start", "block": "stimulation"}\n'
+                    '[TST] {"type": "measurement", "name": "latency", "value": 42, "unit": "ms"}\n'
+                    '[TST] {"type": "block_end", "block": "stimulation"}'
+                ),
             },
         }
         report = _make_hierarchical_report(tests=tests)
@@ -351,61 +347,90 @@ class TestExpandableSections:
         assert "ms" in result
         assert "measurements-table" in result
 
-    def test_structured_log_blocks_rendered(self):
-        """Block sequence from structured log is rendered."""
+    def test_structured_stdout_blocks_rendered(self):
+        """Block types from [TST] stdout are rendered as block segments."""
         tests = {
             "t": {
                 "assertion": "A", "status": "passed", "duration_seconds": 1.0,
-                "structured_log": {
-                    "block_sequence": ["rigging", "stimulation", "checkpoint"],
-                    "measurements": [],
-                    "results": [],
-                    "errors": [],
-                    "has_rigging_failure": False,
-                },
+                "stdout": (
+                    '[TST] {"type": "block_start", "block": "rigging"}\n'
+                    '[TST] {"type": "block_end", "block": "rigging"}\n'
+                    '[TST] {"type": "block_start", "block": "stimulation"}\n'
+                    '[TST] {"type": "block_end", "block": "stimulation"}\n'
+                    '[TST] {"type": "block_start", "block": "checkpoint"}\n'
+                    '[TST] {"type": "block_end", "block": "checkpoint"}'
+                ),
             },
         }
         report = _make_hierarchical_report(tests=tests)
         result = generate_html_report(report)
-        assert "rigging" in result
-        assert "stimulation" in result
-        assert "checkpoint" in result
+        assert "block-rigging" in result
+        assert "block-stimulation" in result
+        assert "block-checkpoint" in result
 
-    def test_structured_log_errors_rendered(self):
-        """Errors from structured log are rendered."""
+    def test_structured_stdout_errors_rendered(self):
+        """Errors from [TST] stdout are rendered."""
         tests = {
             "t": {
                 "assertion": "A", "status": "failed", "duration_seconds": 1.0,
-                "structured_log": {
-                    "block_sequence": [],
-                    "measurements": [],
-                    "results": [],
-                    "errors": [{"message": "sensor timeout"}],
-                    "has_rigging_failure": False,
-                },
+                "stdout": (
+                    '[TST] {"type": "block_start", "block": "rigging"}\n'
+                    '[TST] {"type": "error", "message": "sensor timeout"}\n'
+                    '[TST] {"type": "block_end", "block": "rigging"}'
+                ),
             },
         }
         report = _make_hierarchical_report(tests=tests)
         result = generate_html_report(report)
         assert "sensor timeout" in result
 
-    def test_rigging_failure_flag_rendered(self):
-        """Rigging failure flag is highlighted."""
+    def test_structured_stdout_assertions_rendered(self):
+        """Assertions from [TST] result events are rendered."""
         tests = {
             "t": {
-                "assertion": "A", "status": "failed", "duration_seconds": 1.0,
-                "structured_log": {
-                    "block_sequence": [],
-                    "measurements": [],
-                    "results": [],
-                    "errors": [],
-                    "has_rigging_failure": True,
-                },
+                "assertion": "A", "status": "passed", "duration_seconds": 1.0,
+                "stdout": (
+                    '[TST] {"type": "block_start", "block": "verdict"}\n'
+                    '[TST] {"type": "result", "name": "discount_applied", "passed": true}\n'
+                    '[TST] {"type": "block_end", "block": "verdict"}'
+                ),
             },
         }
         report = _make_hierarchical_report(tests=tests)
         result = generate_html_report(report)
-        assert "Rigging failure" in result
+        assert "discount_applied" in result
+        assert "assertion-pass" in result
+
+    def test_plain_stdout_renders_as_raw_pre(self):
+        """Stdout with no [TST] lines renders as a simple <pre> block."""
+        tests = {
+            "t": {
+                "assertion": "A", "status": "passed", "duration_seconds": 1.0,
+                "stdout": "Hello world\nTest running...",
+            },
+        }
+        report = _make_hierarchical_report(tests=tests)
+        result = generate_html_report(report)
+        assert "Hello world" in result
+        assert "<pre>" in result
+        # Should not contain block-segment divs (CSS class defs are ok)
+        assert 'class="block-segment' not in result
+
+    def test_structured_stdout_with_description(self):
+        """Block description from block_start is rendered."""
+        tests = {
+            "t": {
+                "assertion": "A", "status": "passed", "duration_seconds": 1.0,
+                "stdout": (
+                    '[TST] {"type": "block_start", "block": "stimulation", '
+                    '"description": "Apply 15% discount"}\n'
+                    '[TST] {"type": "block_end", "block": "stimulation"}'
+                ),
+            },
+        }
+        report = _make_hierarchical_report(tests=tests)
+        result = generate_html_report(report)
+        assert "Apply 15% discount" in result
 
 
 class TestBurnInSection:

@@ -453,7 +453,7 @@ class TestStructuredLoggingIntegration:
     """End-to-end structured log parsing in the pipeline."""
 
     def test_structured_log_in_report(self):
-        """Structured log events appear in the report."""
+        """Structured log events are preserved in stdout and render correctly."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             exe = _structured_log_script(tmpdir)
@@ -470,7 +470,7 @@ class TestStructuredLoggingIntegration:
             assert results[0].status == "passed"
 
             # Parse structured logs from stdout
-            from orchestrator.analysis.log_parser import parse_test_output
+            from orchestrator.analysis.log_parser import parse_test_output, parse_stdout_segments, BlockSegment
             parsed = parse_test_output(results[0].stdout)
 
             assert "rigging" in parsed["block_sequence"]
@@ -478,16 +478,22 @@ class TestStructuredLoggingIntegration:
             assert "verdict" in parsed["block_sequence"]
             assert len(parsed["measurements"]) >= 1
 
-            # Add to report
+            # Verify segment-based parser also works on the same stdout
+            segments = parse_stdout_segments(results[0].stdout)
+            block_names = [s.block for s in segments if isinstance(s, BlockSegment)]
+            assert "rigging" in block_names
+            assert "stimulation" in block_names
+            assert "verdict" in block_names
+
+            # Add to report — stdout is preserved, no structured_log field
             reporter = Reporter()
             reporter.add_results(results)
             reporter.set_manifest(manifest)
-            reporter.add_structured_log("test_s", parsed)
             report = reporter.generate_report()
 
             test_data = report["report"]["test_set"]["tests"]["test_s"]
-            assert "structured_log" in test_data
-            assert "rigging" in test_data["structured_log"]["block_sequence"]
+            assert "stdout" in test_data
+            assert "[TST]" in test_data["stdout"]
 
 
 # ---------------------------------------------------------------------------
@@ -681,13 +687,6 @@ class TestHierarchicalReportValidation:
             reporter.add_results(results)
             reporter.set_manifest(manifest)
             reporter.set_commit_hash("test123")
-            reporter.add_structured_log("t1", {
-                "block_sequence": ["rigging", "verdict"],
-                "measurements": [{"name": "latency", "value": 10, "unit": "ms"}],
-                "results": [{"name": "ok", "passed": True}],
-                "errors": [],
-                "has_rigging_failure": False,
-            })
             reporter.add_burn_in_progress("t1", {
                 "runs": 20, "passes": 20, "sprt_status": "accept",
             })
@@ -711,7 +710,6 @@ class TestHierarchicalReportValidation:
             assert "t2" in ts["tests"]
 
             t1 = ts["tests"]["t1"]
-            assert "structured_log" in t1
             assert "burn_in" in t1
             assert "inferred_dependencies" in t1
 
@@ -721,7 +719,6 @@ class TestHierarchicalReportValidation:
             # Generate HTML from the same data
             html = generate_html_report(report)
             assert "test123" in html
-            assert "latency" in html
             assert "Regression Selection" in html
 
 

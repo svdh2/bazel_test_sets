@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import warnings
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Union
 
 # Sentinel prefix for structured log lines
 SENTINEL = "[TST] "
@@ -177,3 +177,173 @@ def get_rigging_features(parsed: dict[str, Any]) -> list[str]:
         for f in parsed.get("features", [])
         if f.get("block") == "rigging"
     ]
+
+
+# ---------------------------------------------------------------------------
+# Segment-based stdout parser
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TextSegment:
+    """Plain text output not within any structured block."""
+
+    text: str
+
+
+@dataclass
+class BlockSegment:
+    """A structured block delimited by block_start/block_end events."""
+
+    block: str
+    description: str = ""
+    logs: str = ""
+    error: str | None = None
+    features: list[dict[str, Any]] = field(default_factory=list)
+    measurements: list[dict[str, Any]] = field(default_factory=list)
+    assertions: list[dict[str, Any]] = field(default_factory=list)
+
+
+Segment = Union[TextSegment, BlockSegment]
+
+
+def _finalize_block(seg: BlockSegment) -> BlockSegment:
+    """Strip trailing whitespace from accumulated logs."""
+    seg.logs = seg.logs.strip("\n")
+    return seg
+
+
+def _normalize_assertion(entry: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a result event into an assertion dict.
+
+    Handles both ``name``/``passed`` and ``status``/``message`` formats.
+    """
+    if "name" in entry:
+        passed = entry.get("passed")
+        if isinstance(passed, bool):
+            status = "passed" if passed else "failed"
+        else:
+            status = str(passed) if passed is not None else "unknown"
+        return {"description": entry["name"], "status": status}
+
+    status = entry.get("status", "unknown")
+    message = entry.get("message", "")
+    return {"description": message, "status": status}
+
+
+def parse_stdout_segments(stdout: str) -> list[Segment]:
+    """Parse test stdout into interleaved text and block segments.
+
+    Splits stdout into a sequence of ``TextSegment`` (plain text) and
+    ``BlockSegment`` (structured blocks delimited by block_start/block_end
+    events).  This allows unified rendering of structured and unstructured
+    test output.
+
+    Args:
+        stdout: Raw stdout string from a test execution.
+
+    Returns:
+        List of segments in the order they appear in stdout.
+    """
+    if not stdout:
+        return []
+
+    lines = stdout.splitlines()
+    segments: list[Segment] = []
+    text_accum: list[str] = []
+    current_block: BlockSegment | None = None
+
+    def _flush_text() -> None:
+        if text_accum:
+            segments.append(TextSegment(text="\n".join(text_accum)))
+            text_accum.clear()
+
+    def _flush_block() -> None:
+        nonlocal current_block
+        if current_block is not None:
+            segments.append(_finalize_block(current_block))
+            current_block = None
+
+    for line in lines:
+        if not line.startswith(SENTINEL):
+            # Plain text line
+            if current_block is not None:
+                if current_block.logs:
+                    current_block.logs += "\n"
+                current_block.logs += line
+            else:
+                text_accum.append(line)
+            continue
+
+        json_str = line[len(SENTINEL):]
+        try:
+            entry = json.loads(json_str)
+        except json.JSONDecodeError:
+            # Malformed sentinel line — treat as plain text
+            if current_block is not None:
+                if current_block.logs:
+                    current_block.logs += "\n"
+                current_block.logs += line
+            else:
+                text_accum.append(line)
+            continue
+
+        if not isinstance(entry, dict) or "type" not in entry:
+            if current_block is not None:
+                if current_block.logs:
+                    current_block.logs += "\n"
+                current_block.logs += line
+            else:
+                text_accum.append(line)
+            continue
+
+        event_type = entry["type"]
+
+        if event_type in ("phase", "block_start"):
+            block_name = entry.get("block")
+            if block_name is not None:
+                # Implicitly close previous block if still open
+                _flush_block()
+                _flush_text()
+                current_block = BlockSegment(
+                    block=block_name,
+                    description=entry.get("description", ""),
+                )
+
+        elif event_type == "block_end":
+            _flush_block()
+
+        elif current_block is not None:
+            # Event inside a block — dispatch to block fields
+            if event_type == "feature":
+                feat: dict[str, Any] = {"name": entry.get("name", "")}
+                action = entry.get("action")
+                if action is not None:
+                    feat["action"] = action
+                current_block.features.append(feat)
+
+            elif event_type == "measurement":
+                m: dict[str, Any] = {
+                    "name": entry.get("name", ""),
+                    "value": entry.get("value"),
+                }
+                unit = entry.get("unit")
+                if unit is not None:
+                    m["unit"] = unit
+                current_block.measurements.append(m)
+
+            elif event_type == "result":
+                current_block.assertions.append(_normalize_assertion(entry))
+
+            elif event_type == "error":
+                current_block.error = entry.get("message", "")
+
+            # Unknown event types inside blocks are silently skipped
+
+        # Events outside any block (other than block_start) are skipped
+
+    # Finalize anything still open
+    _flush_block()
+    _flush_text()
+
+    return segments

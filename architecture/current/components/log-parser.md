@@ -34,11 +34,11 @@ Returns:
 
 | Type | Fields | Description |
 |------|--------|-------------|
-| `block_start` / `phase` | `block` | Opens a named block; sets current block context |
+| `block_start` / `phase` | `block`, `description` (opt) | Opens a named block; sets current block context |
 | `block_end` | `block` | Closes a block; resets current block to None |
-| `feature` | `name` | Declares a feature exercised in the current block |
-| `measurement` | `name`, `value` | Records a numeric measurement |
-| `result` | `status`, `message` | Records a test result within a block |
+| `feature` | `name`, `action` (opt) | Declares a feature exercised in the current block |
+| `measurement` | `name`, `value`, `unit` (opt) | Records a numeric measurement |
+| `result` | `name`/`passed` or `status`/`message` | Records a test result within a block |
 | `error` | `message` | Records an error within a block |
 
 ### Helper Functions
@@ -48,6 +48,38 @@ def is_rigging_failure(parsed: dict) -> bool
 def get_rigging_features(parsed: dict) -> list[str]
 ```
 
+### parse_stdout_segments (segment-based parser)
+
+```python
+def parse_stdout_segments(stdout: str) -> list[TextSegment | BlockSegment]
+```
+
+Parses raw stdout into a sequence of interleaved `TextSegment` (plain text) and `BlockSegment` (structured blocks) for unified rendering. Used by the HTML reporter to detect and render structured logging inline with plain text.
+
+```python
+@dataclass
+class TextSegment:
+    text: str
+
+@dataclass
+class BlockSegment:
+    block: str              # "rigging", "stimulation", "checkpoint", "verdict"
+    description: str        # from optional block_start description field
+    logs: str               # plain text emitted during block
+    error: str | None       # error that terminated block
+    features: list[dict]    # rigging & stimulation
+    measurements: list[dict]  # stimulation
+    assertions: list[dict]  # checkpoint/verdict: [{"description": ..., "status": ...}]
+```
+
+Block-specific fields:
+- **All blocks**: `logs` (unstructured text during execution), `error` (termination error)
+- **rigging & stimulation**: `features` (services/features triggered)
+- **stimulation**: `description`, `measurements`
+- **checkpoint/verdict**: `assertions` (each with `description` and `status`)
+
+Result events are normalized: `name`/`passed` → `{"description": name, "status": "passed"/"failed"}`; `status`/`message` → `{"description": message, "status": status}`.
+
 ## Dependencies
 
 - Standard library: `json`
@@ -55,8 +87,8 @@ def get_rigging_features(parsed: dict) -> list[str]
 ## Dependents
 
 - **Inference** (`orchestrator.analysis.inference`): Uses `get_rigging_features` to find features for dependency inference
-- **Judgement** (`orchestrator.analysis.judgement`): Parses structured output from judgement executables
-- **Reporter** (`orchestrator.reporting.reporter`): Includes structured log data in reports
+- **Judgement** (`orchestrator.analysis.judgement`): Parses structured output from judgement executables via `parse_test_output`
+- **HTML Reporter** (`orchestrator.reporting.html_reporter`): Uses `parse_stdout_segments` to render structured stdout
 
 ## Key Design Decisions
 
