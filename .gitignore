@@ -12,3 +12,5 @@ bazel-*
 
 # Test status files
 examples/ecommerce/.tests/
+
+.claude-images/
