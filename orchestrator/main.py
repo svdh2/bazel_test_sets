@@ -248,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error during execution: {e}", file=sys.stderr)
         return 1
 
-    _print_results(results, args, commit_sha)
+    _print_results(results, args, commit_sha, manifest)
     _update_status_file(results, args, commit_sha)
     return 1 if any(r.status == "failed" for r in results) else 0
 
@@ -363,7 +363,7 @@ def _run_regression(
         print(f"Error during execution: {e}", file=sys.stderr)
         return 1
 
-    _print_results(results, args, commit_sha)
+    _print_results(results, args, commit_sha, filtered_manifest)
     _update_status_file(results, args, commit_sha)
     return 1 if any(r.status == "failed" for r in results) else 0
 
@@ -422,6 +422,7 @@ def _update_status_file(
 def _print_results(
     results: list, args: argparse.Namespace,
     commit_sha: str | None = None,
+    manifest: dict | None = None,
 ) -> None:
     """Print test execution results summary."""
     mode_label = args.mode
@@ -453,6 +454,8 @@ def _print_results(
     # Generate reports
     if args.output:
         reporter = Reporter()
+        if manifest is not None:
+            reporter.set_manifest(manifest)
         reporter.add_results(results)
         if commit_sha:
             reporter.set_commit_hash(commit_sha)

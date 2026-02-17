@@ -234,8 +234,12 @@ class Reporter:
     def _build_hierarchical_report(self) -> dict[str, Any]:
         """Build a hierarchical report mirroring the DAG structure.
 
+        If the manifest contains a tree structure (with ``subsets``),
+        produces a nested report.  Otherwise falls back to a flat report
+        for backward compatibility with older manifests.
+
         Returns:
-            Nested dict with test_set at top, test_set_tests as leaves.
+            Nested dict with test_set at top, subsets recursively nested.
         """
         assert self.manifest is not None
 
@@ -247,44 +251,73 @@ class Reporter:
         for r in self.results:
             results_by_name[r.name] = r
 
-        # Build test entries
+        # New tree-aware path
+        if "subsets" in test_set_info:
+            return self._build_report_node(
+                test_set_info, test_set_tests, results_by_name,
+            )
+
+        # Fallback: old flat manifest (no subsets field)
+        return self._build_flat_report_node(
+            test_set_info, test_set_tests, results_by_name,
+        )
+
+    def _build_report_node(
+        self,
+        tree_node: dict[str, Any],
+        test_set_tests: dict[str, dict[str, Any]],
+        results_by_name: dict[str, TestResult],
+    ) -> dict[str, Any]:
+        """Recursively build a report node from a manifest tree node."""
+        # Direct test entries
         test_entries: dict[str, dict[str, Any]] = {}
-        for name, data in test_set_tests.items():
-            entry: dict[str, Any] = {
-                "assertion": data.get("assertion", ""),
-                "requirement_id": data.get("requirement_id", ""),
-            }
+        direct_statuses: list[str] = []
 
-            if name in results_by_name:
-                result = results_by_name[name]
-                entry.update(self._format_result(result))
-                # Remove duplicate name key
-                entry.pop("name", None)
+        for test_label in tree_node.get("tests", []):
+            entry = self._build_test_entry(
+                test_label, test_set_tests, results_by_name,
+            )
+            if entry is not None:
+                test_entries[test_label] = entry
+                if "status" in entry:
+                    direct_statuses.append(entry["status"])
 
-            # Add structured log data
-            if name in self.structured_logs:
-                log_data = self.structured_logs[name]
-                entry["structured_log"] = {
-                    "block_sequence": log_data.get("block_sequence", []),
-                    "measurements": log_data.get("measurements", []),
-                    "results": log_data.get("results", []),
-                    "errors": log_data.get("errors", []),
-                    "has_rigging_failure": log_data.get(
-                        "has_rigging_failure", False
-                    ),
-                }
+        # Recurse into subsets
+        subset_nodes: list[dict[str, Any]] = []
+        subset_statuses: list[str] = []
+        for subset in tree_node.get("subsets", []):
+            child = self._build_report_node(
+                subset, test_set_tests, results_by_name,
+            )
+            subset_nodes.append(child)
+            subset_statuses.append(child["status"])
 
-            # Add burn-in progress
-            if name in self.burn_in_data:
-                entry["burn_in"] = self.burn_in_data[name]
+        agg_status = _aggregate_status(direct_statuses + subset_statuses)
 
-            # Add inferred dependencies
-            if name in self.inferred_deps:
-                entry["inferred_dependencies"] = self.inferred_deps[name]
+        return {
+            "name": tree_node.get("name", ""),
+            "assertion": tree_node.get("assertion", ""),
+            "requirement_id": tree_node.get("requirement_id", ""),
+            "status": agg_status,
+            "tests": test_entries,
+            "subsets": subset_nodes,
+        }
 
-            test_entries[name] = entry
+    def _build_flat_report_node(
+        self,
+        test_set_info: dict[str, Any],
+        test_set_tests: dict[str, dict[str, Any]],
+        results_by_name: dict[str, TestResult],
+    ) -> dict[str, Any]:
+        """Build a flat report node (backward compat for old manifests)."""
+        test_entries: dict[str, dict[str, Any]] = {}
+        for name in test_set_tests:
+            entry = self._build_test_entry(
+                name, test_set_tests, results_by_name,
+            )
+            if entry is not None:
+                test_entries[name] = entry
 
-        # Compute aggregated status
         statuses = [
             results_by_name[n].status
             for n in test_set_tests
@@ -298,7 +331,49 @@ class Reporter:
             "requirement_id": test_set_info.get("requirement_id", ""),
             "status": agg_status,
             "tests": test_entries,
+            "subsets": [],
         }
+
+    def _build_test_entry(
+        self,
+        name: str,
+        test_set_tests: dict[str, dict[str, Any]],
+        results_by_name: dict[str, TestResult],
+    ) -> dict[str, Any] | None:
+        """Build a single test entry with metadata and results."""
+        data = test_set_tests.get(name)
+        if data is None:
+            return None
+
+        entry: dict[str, Any] = {
+            "assertion": data.get("assertion", ""),
+            "requirement_id": data.get("requirement_id", ""),
+        }
+
+        if name in results_by_name:
+            result = results_by_name[name]
+            entry.update(self._format_result(result))
+            entry.pop("name", None)
+
+        if name in self.structured_logs:
+            log_data = self.structured_logs[name]
+            entry["structured_log"] = {
+                "block_sequence": log_data.get("block_sequence", []),
+                "measurements": log_data.get("measurements", []),
+                "results": log_data.get("results", []),
+                "errors": log_data.get("errors", []),
+                "has_rigging_failure": log_data.get(
+                    "has_rigging_failure", False
+                ),
+            }
+
+        if name in self.burn_in_data:
+            entry["burn_in"] = self.burn_in_data[name]
+
+        if name in self.inferred_deps:
+            entry["inferred_dependencies"] = self.inferred_deps[name]
+
+        return entry
 
     def _compute_summary(self) -> dict[str, Any]:
         """Compute summary statistics from results.

@@ -445,6 +445,88 @@ class TestHierarchicalReport:
         assert "test_set" not in report["report"]
 
 
+NESTED_MANIFEST = {
+    "test_set": {
+        "name": "root_tests",
+        "assertion": "Root assertion",
+        "requirement_id": "ROOT",
+        "tests": ["root_test"],
+        "subsets": [
+            {
+                "name": "child_tests",
+                "assertion": "Child assertion",
+                "requirement_id": "CHILD",
+                "tests": ["child_test"],
+                "subsets": [],
+            },
+        ],
+    },
+    "test_set_tests": {
+        "root_test": {
+            "assertion": "Root test works",
+            "executable": "/bin/root",
+            "depends_on": [],
+        },
+        "child_test": {
+            "assertion": "Child test works",
+            "executable": "/bin/child",
+            "depends_on": [],
+        },
+    },
+}
+
+
+class TestNestedSubsets:
+    """Tests for nested test set hierarchy in reports."""
+
+    def test_nested_structure(self):
+        """Report includes subsets when manifest has tree structure."""
+        reporter = Reporter()
+        reporter.set_manifest(NESTED_MANIFEST)
+        reporter.add_results([
+            TestResult(name="root_test", assertion="Root test works", status="passed", duration=1.0),
+            TestResult(name="child_test", assertion="Child test works", status="passed", duration=2.0),
+        ])
+
+        report = reporter.generate_report()
+        test_set = report["report"]["test_set"]
+        assert test_set["name"] == "root_tests"
+        assert "root_test" in test_set["tests"]
+        assert len(test_set["subsets"]) == 1
+
+        child = test_set["subsets"][0]
+        assert child["name"] == "child_tests"
+        assert "child_test" in child["tests"]
+        assert child["tests"]["child_test"]["status"] == "passed"
+
+    def test_nested_aggregated_status(self):
+        """Subset failure propagates to parent status."""
+        reporter = Reporter()
+        reporter.set_manifest(NESTED_MANIFEST)
+        reporter.add_results([
+            TestResult(name="root_test", assertion="Root test works", status="passed", duration=1.0),
+            TestResult(name="child_test", assertion="Child test works", status="failed", duration=2.0),
+        ])
+
+        report = reporter.generate_report()
+        test_set = report["report"]["test_set"]
+        assert test_set["status"] == "failed"
+        assert test_set["subsets"][0]["status"] == "failed"
+
+    def test_backward_compat_flat_manifest(self):
+        """Old manifests without subsets field still work, with empty subsets."""
+        reporter = Reporter()
+        reporter.set_manifest(SAMPLE_MANIFEST)
+        reporter.add_results([
+            TestResult(name="auth_test", assertion="Auth works", status="passed", duration=1.0),
+        ])
+
+        report = reporter.generate_report()
+        test_set = report["report"]["test_set"]
+        assert test_set["subsets"] == []
+        assert "auth_test" in test_set["tests"]
+
+
 class TestStructuredLogInReport:
     """Tests for structured log data in reports."""
 

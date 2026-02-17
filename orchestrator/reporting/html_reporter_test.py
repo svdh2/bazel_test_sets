@@ -224,6 +224,75 @@ class TestHierarchicalReport:
         assert "PASSED" in result
 
 
+class TestNestedTestSets:
+    """Tests for hierarchical collapsible test set rendering."""
+
+    def _make_nested_report(self, child_status="passed", root_status=None):
+        if root_status is None:
+            root_status = child_status
+        return {
+            "report": {
+                "generated_at": "2026-01-01T00:00:00+00:00",
+                "summary": {"total": 2, "passed": 2, "failed": 0,
+                             "dependencies_failed": 0, "total_duration_seconds": 3.0},
+                "test_set": {
+                    "name": "root_set",
+                    "assertion": "Root passes",
+                    "status": root_status,
+                    "tests": {"test_a": {"status": "passed", "duration_seconds": 1.0}},
+                    "subsets": [
+                        {
+                            "name": "child_set",
+                            "assertion": "Child passes",
+                            "status": child_status,
+                            "tests": {"test_b": {"status": child_status,
+                                                  "duration_seconds": 2.0}},
+                            "subsets": [],
+                        },
+                    ],
+                },
+            },
+        }
+
+    def test_nested_set_in_details_element(self):
+        """Nested test sets render inside details elements."""
+        result = generate_html_report(self._make_nested_report())
+        assert 'class="test-set-details"' in result
+        assert "child_set" in result
+
+    def test_root_not_in_details(self):
+        """Root test set renders as a plain div, not details."""
+        result = generate_html_report(self._make_nested_report())
+        # Root name appears before first <details
+        before_details = result.split("<details")[0]
+        assert "root_set" in before_details
+
+    def test_nested_collapsed_by_default(self):
+        """Nested test sets without failures are collapsed."""
+        result = generate_html_report(self._make_nested_report())
+        assert '<details class="test-set-details">' in result
+        # No open attribute
+        assert 'test-set-details" open>' not in result
+
+    def test_nested_expanded_on_failure(self):
+        """Nested test sets with failures are auto-expanded."""
+        result = generate_html_report(
+            self._make_nested_report(child_status="failed", root_status="failed")
+        )
+        assert '<details class="test-set-details" open>' in result
+
+    def test_test_list_container_present(self):
+        """Direct tests are wrapped in a test-list container."""
+        result = generate_html_report(self._make_nested_report())
+        assert 'class="test-list"' in result
+
+    def test_nested_tests_rendered(self):
+        """Tests inside nested subsets are rendered."""
+        result = generate_html_report(self._make_nested_report())
+        assert "test_a" in result
+        assert "test_b" in result
+
+
 class TestExpandableSections:
     """Tests for expandable log and measurement sections."""
 
@@ -235,7 +304,7 @@ class TestExpandableSections:
         }]
         report = _make_flat_report(tests=tests)
         result = generate_html_report(report)
-        assert "<details>" in result
+        assert "<details" in result
         assert "Hello from test" in result
         assert "Logs" in result
 

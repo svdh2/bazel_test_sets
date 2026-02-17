@@ -82,9 +82,14 @@ body {
     gap: 10px;
     margin-bottom: 8px;
 }
-.test-set-header h2 {
+.test-set-header h2, .test-set-header h3 {
     margin: 0;
+}
+.test-set-header h2 {
     font-size: 18px;
+}
+.test-set-header h3 {
+    font-size: 16px;
 }
 .status-badge {
     display: inline-block;
@@ -94,11 +99,17 @@ body {
     font-weight: 600;
     color: #333;
 }
+.test-list {
+    background: #f5f5f5;
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-top: 8px;
+}
 .test-entry {
     border-left: 4px solid #ddd;
-    margin: 8px 0 8px 16px;
+    margin: 8px 0;
     padding: 8px 12px;
-    background: #fafafa;
+    background: #fff;
     border-radius: 0 6px 6px 0;
 }
 .test-name {
@@ -110,16 +121,48 @@ body {
     color: #666;
     margin-top: 4px;
 }
-details {
+details.test-set-details {
+    margin: 10px 0 10px 12px;
+}
+details.test-set-details > summary {
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 600;
+    color: #333;
+    list-style: none;
+    padding: 8px 0;
+}
+details.test-set-details > summary::-webkit-details-marker {
+    display: none;
+}
+details.test-set-details > summary::before {
+    content: '\\25B6';
+    display: inline-block;
+    margin-right: 8px;
+    font-size: 11px;
+    transition: transform 0.15s;
+}
+details.test-set-details[open] > summary::before {
+    transform: rotate(90deg);
+}
+details.test-set-details > .test-set-nested {
+    background: #fff;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-top: 4px;
+    border-left: 3px solid #ddd;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+details.log-details {
     margin-top: 8px;
 }
-summary {
+details.log-details > summary {
     cursor: pointer;
     font-size: 13px;
     color: #555;
     font-weight: 500;
 }
-summary:hover {
+details.log-details > summary:hover {
     color: #000;
 }
 pre {
@@ -327,10 +370,31 @@ def _render_header(report: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+def _has_descendant_failure(test_set: dict[str, Any]) -> bool:
+    """Return True if any test or nested subset has a failure."""
+    status = test_set.get("status", "")
+    if "failed" in status:
+        return True
+    for test_data in test_set.get("tests", {}).values():
+        if "failed" in test_data.get("status", ""):
+            return True
+    for subset in test_set.get("subsets", []):
+        if _has_descendant_failure(subset):
+            return True
+    return False
+
+
 def _render_test_set(
-    test_set: dict[str, Any], history: dict[str, list[dict[str, Any]]]
+    test_set: dict[str, Any],
+    history: dict[str, list[dict[str, Any]]],
+    is_root: bool = True,
 ) -> str:
-    """Render a hierarchical test set section."""
+    """Render a test set section, recursing into subsets.
+
+    Root renders as a plain ``<div>``; nested sets render inside
+    collapsible ``<details>`` elements (collapsed by default,
+    auto-expanded when they contain a failure).
+    """
     parts: list[str] = []
     name = test_set.get("name", "Test Set")
     status = test_set.get("status", "no_tests")
@@ -338,23 +402,56 @@ def _render_test_set(
     color = STATUS_COLORS.get(status, "#e8e8e8")
     label = STATUS_LABELS.get(status, status.upper())
 
-    parts.append('<div class="test-set">')
-    parts.append('<div class="test-set-header">')
-    parts.append(f"<h2>{html.escape(name)}</h2>")
-    parts.append(
+    badge = (
         f'<span class="status-badge" style="background:{color}">'
         f"{html.escape(label)}</span>"
     )
-    parts.append("</div>")
 
-    if assertion:
-        parts.append(f'<div class="test-meta">Assertion: {html.escape(assertion)}</div>')
+    if is_root:
+        # Root: always-visible card
+        parts.append('<div class="test-set">')
+        parts.append('<div class="test-set-header">')
+        parts.append(f"<h2>{html.escape(name)}</h2>")
+        parts.append(badge)
+        parts.append("</div>")
+        if assertion:
+            parts.append(
+                f'<div class="test-meta">Assertion: {html.escape(assertion)}</div>'
+            )
+    else:
+        # Nested: collapsible <details>
+        open_attr = " open" if _has_descendant_failure(test_set) else ""
+        parts.append(f'<details class="test-set-details"{open_attr}>')
+        parts.append(
+            f"<summary>{html.escape(name)} {badge}</summary>"
+        )
+        parts.append('<div class="test-set-nested">')
+        if assertion:
+            parts.append(
+                f'<div class="test-meta">Assertion: {html.escape(assertion)}</div>'
+            )
 
+    # Direct tests inside a test-list container
     tests = test_set.get("tests", {})
-    for test_name, test_data in tests.items():
-        parts.append(_render_test_entry(test_name, test_data, history.get(test_name, [])))
+    if tests:
+        parts.append('<div class="test-list">')
+        for test_name, test_data in tests.items():
+            parts.append(
+                _render_test_entry(test_name, test_data, history.get(test_name, []))
+            )
+        parts.append("</div>")
 
-    parts.append("</div>")
+    # Recurse into subsets
+    for subset in test_set.get("subsets", []):
+        parts.append(_render_test_set(subset, history, is_root=False))
+
+    # Close wrappers
+    if is_root:
+        parts.append("</div>")
+    else:
+        parts.append("</div>")   # .test-set-nested
+        parts.append("</details>")
+
     return "\n".join(parts)
 
 
@@ -394,7 +491,7 @@ def _render_test_entry(
     stdout = data.get("stdout", "")
     stderr = data.get("stderr", "")
     if stdout or stderr:
-        parts.append("<details>")
+        parts.append('<details class="log-details">')
         parts.append("<summary>Logs</summary>")
         if stdout:
             parts.append(f"<pre>{html.escape(stdout)}</pre>")
@@ -425,7 +522,7 @@ def _render_test_entry(
 def _render_structured_log(log_data: dict[str, Any]) -> str:
     """Render structured log data as expandable section."""
     parts: list[str] = []
-    parts.append("<details>")
+    parts.append('<details class="log-details">')
     parts.append("<summary>Structured Log Data</summary>")
 
     # Block sequence
@@ -521,7 +618,7 @@ def _render_burn_in(burn_in: dict[str, Any]) -> str:
 def _render_inferred_deps(deps: list[dict[str, Any]]) -> str:
     """Render inferred dependencies section."""
     parts: list[str] = []
-    parts.append("<details>")
+    parts.append('<details class="log-details">')
     parts.append("<summary>Inferred Dependencies</summary>")
     parts.append("<ul>")
     for dep in deps:
