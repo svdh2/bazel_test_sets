@@ -142,7 +142,7 @@ bazel run //orchestrator:main -- [OPTIONS]
 |------|------|---------|-------------|
 | `--manifest` | path | required | Path to the JSON manifest file |
 | `--mode` | string | `diagnostic` | Execution mode: `diagnostic`, `detection` |
-| `--regression` | flag | off | Enable regression selection (narrows test scope to changed-file correlations) |
+| `--effort` | string | - | Effort mode: `regression`, `converge`, `max` |
 | `--max-parallel` | int | CPU count | Maximum parallel test executions |
 | `--max-failures` | int | unlimited | Stop after N failures |
 | `--output` | path | - | Path to write JSON report |
@@ -150,8 +150,9 @@ bazel run //orchestrator:main -- [OPTIONS]
 | `--diff-base` | string | - | Git ref for regression diff |
 | `--changed-files` | string | - | Comma-separated changed files (regression) |
 | `--co-occurrence-graph` | path | `.tests/co_occurrence_graph.json` | Path to co-occurrence graph |
-| `--max-test-percentage` | float | `0.10` | Max fraction of stable tests for regression |
+| `--max-test-percentage` | float | `0.10` | Max fraction of stable tests for `--effort regression` |
 | `--max-hops` | int | `2` | Max BFS hops in regression expansion |
+| `--max-reruns` | int | `100` | Max reruns per test for converge/max effort modes |
 
 ## CLI: CI Tool
 

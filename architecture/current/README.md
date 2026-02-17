@@ -80,9 +80,10 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 | [test_set rule](components/test-set-rule.md) | `rules/` | Groups test_set_test targets and subsets into hierarchical sets; generates JSON manifest |
 | [matrix_test_set macro](components/matrix-test-set-macro.md) | `macros/` | Generates parameterized tests from a matrix of parameter combinations |
 | [parameterized_test_set macro](components/parameterized-test-set-macro.md) | `macros/` | Generates variant-specific tests with environment variables and args |
-| [Orchestrator Main](components/orchestrator-main.md) | `orchestrator/` | CLI entry point; parses args, loads manifest, dispatches to executor or regression flow |
+| [Orchestrator Main](components/orchestrator-main.md) | `orchestrator/` | CLI entry point; parses args, loads manifest, dispatches to executor or effort mode |
 | [DAG](components/dag.md) | `orchestrator/execution/` | TestNode/TestDAG data structures with topological sort and BFS ordering |
 | [Executor](components/executor.md) | `orchestrator/execution/` | Sequential and async parallel test execution with dependency gating |
+| [Effort Runner](components/effort.md) | `orchestrator/execution/` | SPRT-based rerun engine for converge/max effort modes with per-test classification |
 | [Burn-in](components/burnin.md) | `orchestrator/lifecycle/` | Sweep loop for burning_in tests and stable demotion logic |
 | [SPRT](components/sprt.md) | `orchestrator/lifecycle/` | Sequential Probability Ratio Test for burn-in accept/reject and demotion decisions |
 | [E-values](components/e-values.md) | `orchestrator/lifecycle/` | E-value based test set verdicts with aggregate Type II error control |
@@ -115,8 +116,9 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 | [Manifest Generation](flows/manifest-generation.md) | Build-time flow from Starlark rules to JSON manifest to orchestrator |
 | [Report Generation](flows/report-generation.md) | Post-execution JSON and HTML report generation with structured log integration |
 | [E-value Verdict](flows/e-value-verdict.md) | E-value based test set verdict computation with quick and high-fidelity modes |
+| [Effort Execution](flows/effort-execution.md) | SPRT rerun loop for converge/max modes with per-test classification and hifi verdict |
 
 ## Git Sync
 
-- **Commit**: `7861e60b8033851e586d56c44366269b549e64ff`
-- **Last updated**: 2026-02-16
+- **Commit**: `f9367dc7d91b73ee1410e5d59ce3958c51187831`
+- **Last updated**: 2026-02-17

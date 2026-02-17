@@ -1,7 +1,7 @@
 # Regression Guide
 
-The `--regression` flag narrows any execution mode to a subset of tests most
-likely to catch regressions based on which source files changed. It uses a
+The `--effort regression` mode narrows any execution mode to a subset of tests
+most likely to catch regressions based on which source files changed. It uses a
 co-occurrence graph built from git history to identify tests historically
 associated with changed code.
 
@@ -81,7 +81,7 @@ bazel run //ci_tool:main -- build-graph --output .tests/co_occurrence_graph.json
 bazel run //orchestrator:main -- \
     --manifest manifest.json \
     --mode diagnostic \
-    --regression \
+    --effort regression \
     --diff-base main \
     --co-occurrence-graph .tests/co_occurrence_graph.json
 ```
@@ -92,7 +92,7 @@ bazel run //orchestrator:main -- \
 bazel run //orchestrator:main -- \
     --manifest manifest.json \
     --mode detection \
-    --regression \
+    --effort regression \
     --changed-files "src/auth.py,src/payment.py"
 ```
 
@@ -192,7 +192,7 @@ Only `stable` tests are candidates for regression selection. Tests in
 
 ## Report Integration
 
-When using the `--regression` flag, the JSON report includes a
+When using `--effort regression`, the JSON report includes a
 `regression_selection` section:
 
 ```json

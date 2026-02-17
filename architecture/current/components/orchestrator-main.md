@@ -6,7 +6,7 @@
 
 ## Purpose
 
-CLI entry point for the test set orchestrator. Parses command-line arguments, loads the JSON manifest, builds the test DAG, and dispatches execution to the appropriate executor. Supports diagnostic and detection modes, with an optional regression flag to filter tests by co-occurrence analysis before execution.
+CLI entry point for the test set orchestrator. Parses command-line arguments, loads the JSON manifest, builds the test DAG, and dispatches execution to the appropriate executor. Supports diagnostic and detection modes, with an optional `--effort` flag that controls test execution thoroughness: regression (co-occurrence selection + quick verdict), converge (SPRT reruns on failures + hifi verdict), or max (SPRT reruns on all tests + hifi verdict).
 
 ## Interface
 
@@ -16,7 +16,7 @@ CLI entry point for the test set orchestrator. Parses command-line arguments, lo
 |----------|------|---------|-------------|
 | `--manifest` | Path | Required | Path to the JSON manifest file |
 | `--mode` | Choice | `diagnostic` | Execution mode: `diagnostic` or `detection` |
-| `--regression` | Flag | `false` | Enable regression test selection |
+| `--effort` | Choice | None | Effort mode: `regression`, `converge`, or `max` |
 | `--max-parallel` | int | CPU count | Maximum parallel test executions |
 | `--max-failures` | int | Unlimited | Stop after N failures |
 | `--output` | Path | None | Path for JSON report output |
@@ -24,12 +24,9 @@ CLI entry point for the test set orchestrator. Parses command-line arguments, lo
 | `--diff-base` | string | None | Git ref for regression diff (e.g., `main`) |
 | `--changed-files` | string | None | Comma-separated changed files (alternative to `--diff-base`) |
 | `--co-occurrence-graph` | Path | `.tests/co_occurrence_graph.json` | Co-occurrence graph path |
-| `--max-test-percentage` | float | `0.10` | Max fraction of stable tests for regression |
+| `--max-test-percentage` | float | `0.10` | Max fraction of stable tests for `--effort regression` |
 | `--max-hops` | int | `2` | Max BFS hops in co-occurrence expansion |
-| `--verdict` | Choice | `off` | E-value verdict mode: `quick`, `hifi`, or `off` |
-| `--alpha-set` | float | `0.05` | Type I error rate for RED verdict |
-| `--beta-set` | float | `0.05` | Type II error rate for GREEN verdict |
-| `--max-reruns` | int | `100` | Max reruns per test for hifi verdict mode |
+| `--max-reruns` | int | `100` | Max reruns per test for converge/max effort modes |
 
 ### Public Function
 
@@ -45,9 +42,10 @@ Returns exit code 0 if all tests pass, 1 if any test fails.
 - **Executor** (`orchestrator.execution.executor`): `SequentialExecutor` and `AsyncExecutor` for test execution
 - **Reporter** (`orchestrator.reporting.reporter.Reporter`): Generates JSON reports
 - **HTML Reporter** (`orchestrator.reporting.html_reporter`): Generates HTML reports
-- **Co-occurrence** (`orchestrator.regression.co_occurrence`): Loads co-occurrence graph (lazy import for regression)
+- **Effort Runner** (`orchestrator.execution.effort.EffortRunner`): SPRT-based rerun engine for converge/max modes (lazy import)
+- **Co-occurrence** (`orchestrator.regression.co_occurrence`): Loads co-occurrence graph (lazy import for `--effort regression`)
 - **Regression Selector** (`orchestrator.regression.regression_selector`): Selects tests for regression runs (lazy import)
-- **E-values** (`orchestrator.lifecycle.e_values`): Computes test set verdict (lazy import when `--verdict` is enabled)
+- **E-values** (`orchestrator.lifecycle.e_values`): Computes test set verdict (lazy import when effort mode implies a verdict)
 
 ## Dependents
 
@@ -55,12 +53,14 @@ Returns exit code 0 if all tests pass, 1 if any test fails.
 
 ## Key Design Decisions
 
-1. **Lazy imports for regression**: Co-occurrence and regression selector modules are imported only when `--regression` is used, keeping the default path lightweight.
+1. **Lazy imports for effort modes**: Co-occurrence, regression selector, effort runner, and E-value modules are imported only when the corresponding `--effort` mode is used, keeping the default path lightweight.
 
 2. **Executor selection**: `max_parallel == 1` uses SequentialExecutor (simpler, no asyncio overhead); all other values use AsyncExecutor with a semaphore-based sliding window.
 
-3. **Manifest filtering for regression**: When the `--regression` flag selects a subset of tests, the manifest is filtered to include only selected tests, with depends_on edges pruned to the selected set. A new DAG is then built from the filtered manifest.
+3. **Manifest filtering for regression**: When `--effort regression` selects a subset of tests, the manifest is filtered to include only selected tests, with depends_on edges pruned to the selected set. A new DAG is then built from the filtered manifest.
 
 4. **Dual report output**: When `--output` is specified, both JSON and HTML reports are written (same path, different extensions).
 
-5. **E-value verdict is opt-in**: The `--verdict` flag defaults to `off`. When enabled, the verdict is computed after status file updates and included in reports. It does not currently override the execution-based exit code.
+5. **Verdict mode derived from effort**: The verdict mode is determined by the `--effort` flag rather than a separate CLI argument. No effort = no verdict, regression = quick verdict, converge/max = hifi verdict. Uses default alpha_set=0.05, beta_set=0.05.
+
+6. **Effort mode dispatch**: `--effort converge` reruns only failed tests via SPRT; `--effort max` reruns all tests. Both require `--status-file` and git context. The EffortRunner classifies each test as true_pass, true_fail, flake, or undecided. Flakes cause exit code 1 (block CI).

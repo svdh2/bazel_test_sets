@@ -2,7 +2,7 @@
 
 Parses command-line arguments and orchestrates test execution based on the
 mode and manifest. Supports diagnostic and detection modes, with an optional
-regression flag to filter tests by co-occurrence analysis.
+effort flag to control test execution thoroughness.
 """
 
 from __future__ import annotations
@@ -38,10 +38,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Execution mode (default: diagnostic)",
     )
     parser.add_argument(
-        "--regression",
-        action="store_true",
-        default=False,
-        help="Enable regression option: select a subset of pre-existing tests by co-occurrence analysis",
+        "--effort",
+        choices=["regression", "converge", "max"],
+        default=None,
+        help="Effort mode: regression (co-occurrence selection, quick verdict), "
+             "converge (SPRT reruns on failures, hifi verdict), "
+             "max (SPRT reruns on all tests, hifi verdict)",
     )
     parser.add_argument(
         "--max-parallel",
@@ -103,7 +105,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--max-test-percentage",
         type=float,
         default=0.10,
-        help="Max fraction of stable tests to select with --regression (default: 0.10)",
+        help="Max fraction of stable tests to select with --effort regression (default: 0.10)",
     )
     parser.add_argument(
         "--max-hops",
@@ -112,31 +114,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Max BFS hops in regression co-occurrence expansion (default: 2)",
     )
 
-    # E-value verdict flags
-    parser.add_argument(
-        "--verdict",
-        choices=["quick", "hifi", "off"],
-        default="off",
-        help="E-value test set verdict mode: quick (pool evidence across commits), "
-             "hifi (current commit only, rerun until decided), off (disabled, default)",
-    )
-    parser.add_argument(
-        "--alpha-set",
-        type=float,
-        default=0.05,
-        help="Type I error rate for RED verdict (default: 0.05)",
-    )
-    parser.add_argument(
-        "--beta-set",
-        type=float,
-        default=0.05,
-        help="Type II error rate for GREEN verdict (default: 0.05)",
-    )
+    # Effort rerun budget
     parser.add_argument(
         "--max-reruns",
         type=int,
         default=100,
-        help="Max reruns per test for hifi verdict mode (default: 100)",
+        help="Max SPRT reruns per test for --effort converge/max (default: 100)",
     )
 
     return parser.parse_args(argv)
@@ -274,11 +257,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Disabled tests excluded from execution: {len(removed)}")
         print()
 
-    # Handle regression option
-    if args.regression:
+    # Dispatch based on effort mode
+    if args.effort == "regression":
         return _run_regression(args, manifest, dag, commit_sha)
+    elif args.effort in ("converge", "max"):
+        return _run_effort(args, manifest, dag, commit_sha)
 
-    # Execute tests (use AsyncExecutor for parallel, SequentialExecutor as fallback)
+    # Default: run all tests once, no verdict
     executor: SequentialExecutor | AsyncExecutor
     if args.max_parallel == 1:
         executor = SequentialExecutor(
@@ -301,8 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     _update_status_file(results, args, commit_sha)
-    verdict_data = _compute_verdict(args, dag, commit_sha)
-    demoted = _print_results(results, args, commit_sha, manifest, verdict_data)
+    demoted = _print_results(results, args, commit_sha, manifest)
     has_failure = any(r.status == "failed" for r in results)
     return 1 if (has_failure or demoted) else 0
 
@@ -353,7 +337,7 @@ def _run_regression(
             return 1
     else:
         print(
-            "Error: --regression requires --diff-base or --changed-files",
+            "Error: --effort regression requires --diff-base or --changed-files",
             file=sys.stderr,
         )
         return 1
@@ -419,9 +403,106 @@ def _run_regression(
 
     _update_status_file(results, args, commit_sha)
     verdict_data = _compute_verdict(args, filtered_dag, commit_sha)
-    demoted = _print_results(results, args, commit_sha, filtered_manifest, verdict_data)
+    demoted = _print_results(
+        results, args, commit_sha, filtered_manifest, verdict_data,
+    )
     has_failure = any(r.status == "failed" for r in results)
     return 1 if (has_failure or demoted) else 0
+
+
+def _run_effort(
+    args: argparse.Namespace,
+    manifest: dict,
+    dag: TestDAG,
+    commit_sha: str | None = None,
+) -> int:
+    """Execute with effort converge/max: run tests then SPRT-rerun for classification.
+
+    Args:
+        args: Parsed CLI arguments.
+        manifest: Parsed manifest dict.
+        dag: Constructed test DAG.
+        commit_sha: Resolved git commit SHA (or None).
+
+    Returns:
+        Exit code.
+    """
+    from orchestrator.execution.effort import EffortRunner
+    from orchestrator.lifecycle.status import StatusFile
+
+    if not args.status_file:
+        print(
+            "Error: --effort converge/max requires --status-file",
+            file=sys.stderr,
+        )
+        return 1
+
+    if commit_sha is None:
+        commit_sha = _resolve_git_context(args.allow_dirty)
+        if commit_sha is None:
+            print(
+                "Error: --effort converge/max requires git context",
+                file=sys.stderr,
+            )
+            return 1
+
+    sf = StatusFile(args.status_file, config_path=args.config_file)
+
+    # Phase 1: Execute all tests once
+    executor: SequentialExecutor | AsyncExecutor
+    if args.max_parallel == 1:
+        executor = SequentialExecutor(
+            dag,
+            mode=args.mode,
+            max_failures=args.max_failures,
+        )
+    else:
+        executor = AsyncExecutor(
+            dag,
+            mode=args.mode,
+            max_failures=args.max_failures,
+            max_parallel=args.max_parallel,
+        )
+
+    try:
+        initial_results = executor.execute()
+    except ValueError as e:
+        print(f"Error during execution: {e}", file=sys.stderr)
+        return 1
+
+    # Record initial results in status file
+    for r in initial_results:
+        if r.status == "dependencies_failed":
+            continue
+        passed = r.status == "passed"
+        sf.record_run(r.name, passed, commit=commit_sha)
+    sf.save()
+
+    # Phase 2: SPRT rerun loop
+    runner = EffortRunner(
+        dag=dag,
+        status_file=sf,
+        commit_sha=commit_sha,
+        max_reruns=args.max_reruns,
+        effort_mode=args.effort,
+        initial_results=initial_results,
+    )
+    effort_result = runner.run()
+
+    # Phase 3: Verdict
+    verdict_data = _compute_verdict(args, dag, commit_sha)
+
+    # Phase 4: Print results
+    _print_effort_results(
+        initial_results, effort_result, args, commit_sha, manifest, verdict_data,
+    )
+
+    # Exit code: 1 if any true_fail or flake
+    has_bad = any(
+        c.classification in ("true_fail", "flake")
+        for c in effort_result.classifications.values()
+    )
+    return 1 if has_bad else 0
 
 
 def _filter_manifest(
@@ -462,12 +543,17 @@ def _compute_verdict(
     dag: TestDAG,
     commit_sha: str | None,
 ) -> dict[str, Any] | None:
-    """Compute E-value test set verdict if --verdict is enabled.
+    """Compute E-value test set verdict based on effort mode.
+
+    Verdict mode is implied by --effort:
+      - None (no effort): no verdict
+      - regression: quick (pool evidence across commits)
+      - converge/max: hifi (current commit only, rerun until decided)
 
     Returns:
         Verdict dict for the reporter, or None if disabled.
     """
-    if args.verdict == "off" or not args.status_file:
+    if args.effort is None or not args.status_file:
         return None
 
     from orchestrator.lifecycle.e_values import (
@@ -480,25 +566,28 @@ def _compute_verdict(
     sf = StatusFile(args.status_file, config_path=args.config_file)
     test_names = list(dag.nodes.keys())
 
-    if args.verdict == "quick":
+    alpha_set = 0.05
+    beta_set = 0.05
+
+    if args.effort == "regression":
         verdict = evaluate_test_set(
             test_names, sf,
             mode="quick",
-            alpha_set=args.alpha_set,
-            beta_set=args.beta_set,
+            alpha_set=alpha_set,
+            beta_set=beta_set,
         )
         verdict_data = verdict_to_dict(verdict)
     else:
-        # hifi
+        # converge / max -> hifi
         if commit_sha is None:
-            print("Warning: --verdict=hifi requires git context; skipping verdict",
+            print("Warning: hifi verdict requires git context; skipping verdict",
                   file=sys.stderr)
             return None
         evaluator = HiFiEvaluator(
             dag, sf,
             commit_sha=commit_sha,
-            alpha_set=args.alpha_set,
-            beta_set=args.beta_set,
+            alpha_set=alpha_set,
+            beta_set=beta_set,
             max_reruns=args.max_reruns,
         )
         hifi_result = evaluator.evaluate(test_names)
@@ -550,8 +639,8 @@ def _print_results(
         List of test names that were reliability-demoted to flaky.
     """
     mode_label = args.mode
-    if args.regression:
-        mode_label += " + regression"
+    if args.effort:
+        mode_label += f" + effort:{args.effort}"
     print(f"Mode: {mode_label}")
     print(f"Tests executed: {len(results)}")
     print()
@@ -624,6 +713,140 @@ def _print_results(
         return reporter.reliability_demoted_tests
 
     return []
+
+
+def _print_effort_results(
+    initial_results: list,
+    effort_result: Any,
+    args: argparse.Namespace,
+    commit_sha: str | None = None,
+    manifest: dict | None = None,
+    verdict_data: dict[str, Any] | None = None,
+) -> None:
+    """Print effort mode results with per-test SPRT classifications."""
+    mode_label = f"{args.mode} + effort:{args.effort}"
+    print(f"Mode: {mode_label}")
+    print(f"Tests executed: {len(initial_results)} (initial), "
+          f"{effort_result.total_reruns} reruns")
+    print()
+
+    _CLASSIFICATION_ICONS = {
+        "true_pass": "TRUE_PASS",
+        "true_fail": "TRUE_FAIL",
+        "flake": "FLAKE",
+        "undecided": "UNDECIDED",
+    }
+
+    true_pass = 0
+    true_fail = 0
+    flake = 0
+    undecided = 0
+    skipped = 0
+
+    for r in initial_results:
+        if r.status == "dependencies_failed":
+            skipped += 1
+            print(f"  [SKIP] {r.name} - {r.assertion} (dependencies_failed)")
+            continue
+
+        c = effort_result.classifications.get(r.name)
+        if c is None:
+            print(f"  [???] {r.name} - {r.assertion}")
+            continue
+
+        icon = _CLASSIFICATION_ICONS.get(c.classification, c.classification.upper())
+
+        detail = f"{c.passes}/{c.runs} passed"
+        if c.sprt_decision not in ("not_evaluated",):
+            detail += f", SPRT: {c.sprt_decision}"
+
+        print(f"  [{icon}] {r.name} - {r.assertion} ({r.duration:.2f}s, {detail})")
+
+        if r.status == "failed" and c.classification == "true_fail" and r.stderr:
+            for line in r.stderr.strip().splitlines():
+                print(f"         {line}")
+
+        if c.classification == "true_pass":
+            true_pass += 1
+        elif c.classification == "true_fail":
+            true_fail += 1
+        elif c.classification == "flake":
+            flake += 1
+        elif c.classification == "undecided":
+            undecided += 1
+
+    print()
+    parts = []
+    if true_pass:
+        parts.append(f"{true_pass} true_pass")
+    if true_fail:
+        parts.append(f"{true_fail} true_fail")
+    if flake:
+        parts.append(f"{flake} flake")
+    if undecided:
+        parts.append(f"{undecided} undecided")
+    if skipped:
+        parts.append(f"{skipped} skipped")
+    print(f"Results: {', '.join(parts)}")
+    print(f"Total reruns: {effort_result.total_reruns} "
+          f"(budget: {args.max_reruns} per test)")
+
+    # Generate reports
+    if args.output:
+        reporter = Reporter()
+        if manifest is not None:
+            reporter.set_manifest(manifest)
+        reporter.add_results(initial_results)
+        if commit_sha:
+            reporter.set_commit_hash(commit_sha)
+
+        if verdict_data:
+            reporter.set_e_value_verdict(verdict_data)
+
+        # Add effort classifications to report
+        effort_data = {
+            "mode": args.effort,
+            "total_reruns": effort_result.total_reruns,
+            "max_reruns_per_test": args.max_reruns,
+            "classifications": {
+                name: {
+                    "classification": c.classification,
+                    "initial_status": c.initial_status,
+                    "runs": c.runs,
+                    "passes": c.passes,
+                    "sprt_decision": c.sprt_decision,
+                }
+                for name, c in effort_result.classifications.items()
+            },
+        }
+        reporter.set_effort_data(effort_data)
+
+        if args.status_file and args.status_file.exists():
+            from orchestrator.lifecycle.status import StatusFile
+
+            sf = StatusFile(args.status_file, config_path=args.config_file)
+            lifecycle_data: dict[str, dict[str, Any]] = {}
+            for test_name, entry in sf.get_all_tests().items():
+                lifecycle_data[test_name] = {
+                    "state": entry.get("state", "new"),
+                }
+            reporter.set_lifecycle_data(lifecycle_data)
+            reporter.set_lifecycle_config({
+                "min_reliability": sf.min_reliability,
+                "statistical_significance": sf.statistical_significance,
+            })
+
+        existing = args.output if args.output.exists() else None
+        report_data = reporter.generate_report_with_history(existing)
+
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.output, "w") as f:
+            json.dump(report_data, f, indent=2)
+        print(f"Report written to: {args.output}")
+
+        html_path = args.output.with_suffix(".html")
+        write_html_report(report_data, html_path)
+        print(f"HTML report written to: {html_path}")
 
 
 if __name__ == "__main__":
