@@ -25,6 +25,7 @@ class Reporter:
     def add_burn_in_progress(self, test_name, progress)
     def set_regression_selection(self, selection_data)
     def add_inferred_dependencies(self, test_name, deps)
+    def set_e_value_verdict(self, verdict_data)
 
     # Report generation
     def generate_report(self) -> dict
@@ -60,6 +61,15 @@ report:
         burn_in: {...}
         inferred_dependencies: [...]
   regression_selection: {...}  # When --regression flag was used
+  e_value_verdict:              # When --verdict flag was used
+    verdict: "GREEN"            # GREEN, RED, or UNDECIDED
+    e_set: 0.001
+    min_s_value: 1000.0
+    red_threshold: 20.0
+    green_threshold: 40.0
+    n_tests: 2
+    weakest_test: "//test:b"
+    per_test: [...]
   history:                     # When using generate_report_with_history
     "//test:a":
       - status: "passed"
@@ -95,4 +105,4 @@ report:
 
 3. **Five-status model**: The reporter supports all five statuses including the combined race-condition statuses (`passed+dependencies_failed`, `failed+dependencies_failed`), ensuring no information is lost during reporting.
 
-4. **Optional enrichment**: Structured logs, burn-in progress, inferred dependencies, and regression selection data are all optional additions. The reporter works with just TestResult objects for simple use cases.
+4. **Optional enrichment**: Structured logs, burn-in progress, inferred dependencies, regression selection, and E-value verdict data are all optional additions. The reporter works with just TestResult objects for simple use cases.

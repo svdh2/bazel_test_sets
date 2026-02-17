@@ -238,6 +238,38 @@ pre {
     margin: 0 0 12px 0;
     font-size: 18px;
 }
+.e-value-verdict {
+    background: #fff;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.e-value-verdict h2 {
+    margin: 0 0 12px 0;
+    font-size: 18px;
+}
+.verdict-badge {
+    display: inline-block;
+    padding: 6px 16px;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 12px;
+}
+.e-value-stats {
+    font-size: 13px;
+    color: #555;
+    margin: 8px 0;
+    line-height: 1.6;
+}
+.e-value-stats code {
+    background: #f0f0f0;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 12px;
+}
 """
 
 
@@ -274,6 +306,10 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
         parts.append(_render_test_set(report["test_set"], history))
     elif "tests" in report:
         parts.append(_render_flat_tests(report["tests"], history))
+
+    # E-value verdict section
+    if "e_value_verdict" in report:
+        parts.append(_render_e_value_verdict(report["e_value_verdict"]))
 
     # Regression selection section
     if "regression_selection" in report:
@@ -639,6 +675,82 @@ def _render_flat_tests(
     for test in tests:
         name = test.get("name", "unknown")
         parts.append(_render_test_entry(name, test, history.get(name, [])))
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+_VERDICT_COLORS: dict[str, str] = {
+    "GREEN": "#90EE90",
+    "RED": "#FFB6C1",
+    "UNDECIDED": "#FFFFAD",
+}
+
+
+def _render_e_value_verdict(verdict_data: dict[str, Any]) -> str:
+    """Render E-value test set verdict section."""
+    parts: list[str] = []
+    parts.append('<div class="e-value-verdict">')
+    parts.append("<h2>Test Set Verdict (E-values)</h2>")
+
+    verdict = verdict_data.get("verdict", "UNDECIDED")
+    color = _VERDICT_COLORS.get(verdict, "#FFFFAD")
+    parts.append(
+        f'<div class="verdict-badge" style="background:{color}">'
+        f"{html.escape(verdict)}</div>"
+    )
+
+    parts.append('<div class="e-value-stats">')
+    e_set = verdict_data.get("e_set", 0)
+    red_thresh = verdict_data.get("red_threshold", 0)
+    min_s = verdict_data.get("min_s_value", 0)
+    green_thresh = verdict_data.get("green_threshold", 0)
+    n_tests = verdict_data.get("n_tests", 0)
+    weakest = verdict_data.get("weakest_test", "")
+
+    parts.append(
+        f"<strong>Tests evaluated:</strong> {n_tests}<br>"
+        f"<strong>RED evidence:</strong> "
+        f"<code>E_set = {e_set:.4f}</code> "
+        f"(threshold: <code>{red_thresh:.4f}</code>)<br>"
+        f"<strong>GREEN evidence:</strong> "
+        f"<code>min(S_i) = {min_s:.4f}</code> "
+        f"(threshold: <code>{green_thresh:.4f}</code>)"
+    )
+
+    if weakest:
+        parts.append(f"<br><strong>Weakest test:</strong> {html.escape(str(weakest))}")
+
+    total_reruns = verdict_data.get("total_reruns")
+    if total_reruns is not None:
+        parts.append(f"<br><strong>HiFi reruns:</strong> {total_reruns}")
+
+    parts.append("</div>")
+
+    # Per-test E-value table
+    per_test = verdict_data.get("per_test", [])
+    if per_test:
+        parts.append("<details>")
+        parts.append(f"<summary>Per-test E-values ({len(per_test)})</summary>")
+        parts.append('<table class="measurements-table">')
+        parts.append(
+            "<tr><th>Test</th><th>E_i</th><th>S_i</th>"
+            "<th>Runs</th><th>Passes</th><th>Commits</th></tr>"
+        )
+        for tv in per_test:
+            tname = html.escape(str(tv.get("test_name", "")))
+            e_val = tv.get("e_value", 0)
+            s_val = tv.get("s_value", 0)
+            runs = tv.get("runs", 0)
+            passes = tv.get("passes", 0)
+            commits = tv.get("commits_included", 0)
+            parts.append(
+                f"<tr><td>{tname}</td><td>{e_val:.4f}</td>"
+                f"<td>{s_val:.4f}</td><td>{runs}</td>"
+                f"<td>{passes}</td><td>{commits}</td></tr>"
+            )
+        parts.append("</table>")
+        parts.append("</details>")
+
     parts.append("</div>")
     return "\n".join(parts)
 

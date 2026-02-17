@@ -49,6 +49,7 @@ class Reporter:
         self.burn_in_data: dict[str, dict[str, Any]] = {}
         self.regression_selection: dict[str, Any] | None = None
         self.inferred_deps: dict[str, list[dict[str, Any]]] = {}
+        self.e_value_verdict: dict[str, Any] | None = None
 
     def set_manifest(self, manifest: dict[str, Any]) -> None:
         """Set the manifest for hierarchical report generation.
@@ -109,6 +110,17 @@ class Reporter:
         """
         self.inferred_deps[test_name] = deps
 
+    def set_e_value_verdict(
+        self, verdict_data: dict[str, Any]
+    ) -> None:
+        """Set E-value test set verdict data for the report.
+
+        Args:
+            verdict_data: Dict from ``verdict_to_dict()`` with verdict,
+                e_set, per_test, etc.
+        """
+        self.e_value_verdict = verdict_data
+
     def add_result(self, result: TestResult) -> None:
         """Add a test result to the report.
 
@@ -153,6 +165,9 @@ class Reporter:
 
         if self.regression_selection:
             report["regression_selection"] = self.regression_selection
+
+        if self.e_value_verdict:
+            report["e_value_verdict"] = self.e_value_verdict
 
         return {"report": report}
 
