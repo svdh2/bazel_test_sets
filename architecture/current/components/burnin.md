@@ -81,7 +81,7 @@ stable  -------->  burning_in
 (suspicious: SPRT inconclusive after failure)
 
 flaky  -------->  burning_in
-(CI tool deflake, counters reset)
+(CI tool deflake, history cleared)
 
 any  ---------->  disabled
 (BUILD: disabled=True, sync at orchestrator start)

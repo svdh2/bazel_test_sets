@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 
-from orchestrator.lifecycle.status import StatusFile
+from orchestrator.lifecycle.status import StatusFile, runs_and_passes_from_history
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -164,7 +164,7 @@ def cmd_burn_in(args: argparse.Namespace) -> int:
                 continue
 
             if current_state is None or current_state == "new":
-                sf.set_test_state(test_name, "burning_in", runs=0, passes=0)
+                sf.set_test_state(test_name, "burning_in", clear_history=True)
                 transitioned.append(test_name)
                 print(f"  {test_name}: {current_state or 'new'} -> burning_in")
             else:
@@ -186,9 +186,8 @@ def cmd_burn_in(args: argparse.Namespace) -> int:
         if burning_in:
             print(f"Tests in burning_in state ({len(burning_in)}):")
             for name in sorted(burning_in):
-                entry = sf.get_test_entry(name)
-                runs = entry["runs"] if entry else 0
-                passes = entry["passes"] if entry else 0
+                history = sf.get_test_history(name)
+                runs, passes = runs_and_passes_from_history(history)
                 print(f"  {name}: {runs} runs, {passes} passes")
         else:
             print("No tests in burning_in state")
@@ -198,7 +197,7 @@ def cmd_burn_in(args: argparse.Namespace) -> int:
 def cmd_deflake(args: argparse.Namespace) -> int:
     """Handle deflake subcommand.
 
-    Transitions flaky tests back to burning_in with reset counters.
+    Transitions flaky tests back to burning_in with cleared history.
 
     Returns:
         Exit code (0 for success, 1 for errors).
@@ -210,8 +209,8 @@ def cmd_deflake(args: argparse.Namespace) -> int:
         current_state = sf.get_test_state(test_name)
 
         if current_state == "flaky":
-            sf.set_test_state(test_name, "burning_in", runs=0, passes=0)
-            print(f"  {test_name}: flaky -> burning_in (counters reset)")
+            sf.set_test_state(test_name, "burning_in", clear_history=True)
+            print(f"  {test_name}: flaky -> burning_in (history reset)")
         elif current_state is None:
             print(
                 f"  {test_name}: not found in status file",
@@ -272,8 +271,8 @@ def cmd_test_status(args: argparse.Namespace) -> int:
     for name in sorted(all_tests):
         entry = all_tests[name]
         state = entry.get("state", "unknown")
-        runs = entry.get("runs", 0)
-        passes = entry.get("passes", 0)
+        history = entry.get("history", [])
+        runs, passes = runs_and_passes_from_history(history)
         last_updated = entry.get("last_updated", "N/A")
         # Truncate timestamp to date portion if ISO format
         if "T" in str(last_updated):

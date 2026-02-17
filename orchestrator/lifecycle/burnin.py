@@ -25,7 +25,7 @@ from typing import Any
 from orchestrator.execution.dag import TestDAG
 from orchestrator.execution.executor import TestResult
 from orchestrator.lifecycle.sprt import demotion_evaluate, sprt_evaluate
-from orchestrator.lifecycle.status import StatusFile
+from orchestrator.lifecycle.status import StatusFile, runs_and_passes_from_history
 
 
 @dataclass
@@ -103,34 +103,23 @@ class BurnInSweep:
                 self.status_file.save()  # Incremental save for crash recovery
 
                 # Evaluate SPRT
-                entry = self.status_file.get_test_entry(test_name)
-                if entry is None:
-                    continue
+                history = self.status_file.get_test_history(test_name)
+                runs, passes = runs_and_passes_from_history(history)
 
                 decision = sprt_evaluate(
-                    entry["runs"],
-                    entry["passes"],
+                    runs,
+                    passes,
                     self.status_file.min_reliability,
                     self.status_file.statistical_significance,
                 )
 
                 if decision == "accept":
-                    self.status_file.set_test_state(
-                        test_name,
-                        "stable",
-                        runs=entry["runs"],
-                        passes=entry["passes"],
-                    )
+                    self.status_file.set_test_state(test_name, "stable")
                     self.status_file.save()
                     decided[test_name] = "stable"
                     burning_in.remove(test_name)
                 elif decision == "reject":
-                    self.status_file.set_test_state(
-                        test_name,
-                        "flaky",
-                        runs=entry["runs"],
-                        passes=entry["passes"],
-                    )
+                    self.status_file.set_test_state(test_name, "flaky")
                     self.status_file.save()
                     decided[test_name] = "flaky"
                     burning_in.remove(test_name)
@@ -245,13 +234,7 @@ def handle_stable_failure(
         )
 
         if decision == "demote":
-            entry = status_file.get_test_entry(test_name)
-            status_file.set_test_state(
-                test_name,
-                "flaky",
-                runs=entry["runs"] if entry else 0,
-                passes=entry["passes"] if entry else 0,
-            )
+            status_file.set_test_state(test_name, "flaky")
             status_file.save()
             return "demote"
         elif decision == "retain":
@@ -284,10 +267,10 @@ def sync_disabled_state(
 
         if node.disabled and current_state != "disabled":
             old = current_state or "new"
-            status_file.set_test_state(name, "disabled", runs=0, passes=0)
+            status_file.set_test_state(name, "disabled", clear_history=True)
             events.append(("disabled", name, old, "disabled"))
         elif not node.disabled and current_state == "disabled":
-            status_file.set_test_state(name, "new", runs=0, passes=0)
+            status_file.set_test_state(name, "new", clear_history=True)
             events.append(("re-enabled", name, "disabled", "new"))
 
     if events:
@@ -371,31 +354,20 @@ def process_results(
         status_file.save()
 
         if state == "burning_in":
-            entry = status_file.get_test_entry(result.name)
-            if entry is None:
-                continue
+            history = status_file.get_test_history(result.name)
+            runs, passes = runs_and_passes_from_history(history)
             decision = sprt_evaluate(
-                entry["runs"],
-                entry["passes"],
+                runs,
+                passes,
                 status_file.min_reliability,
                 status_file.statistical_significance,
             )
             if decision == "accept":
-                status_file.set_test_state(
-                    result.name,
-                    "stable",
-                    runs=entry["runs"],
-                    passes=entry["passes"],
-                )
+                status_file.set_test_state(result.name, "stable")
                 status_file.save()
                 events.append(("accepted", result.name, "burning_in", "stable"))
             elif decision == "reject":
-                status_file.set_test_state(
-                    result.name,
-                    "flaky",
-                    runs=entry["runs"],
-                    passes=entry["passes"],
-                )
+                status_file.set_test_state(result.name, "flaky")
                 status_file.save()
                 events.append(("rejected", result.name, "burning_in", "flaky"))
 

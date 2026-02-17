@@ -409,8 +409,6 @@ def _setup_burnin_status(status_path: Path, email_label: str) -> None:
         "tests": {
             email_label: {
                 "state": "burning_in",
-                "runs": 27,
-                "passes": 27,
                 "history": [
                     {"passed": True, "commit": None} for _ in range(27)
                 ],
@@ -438,7 +436,6 @@ def _inject_degradation(status_path: Path, email_label: str) -> None:
         return
 
     for _ in range(5):
-        entry["runs"] += 1
         entry["history"].insert(0, {"passed": False, "commit": "bad-commit"})
 
     status_path.write_text(json_mod.dumps(data, indent=2) + "\n")
@@ -459,8 +456,6 @@ def _setup_deflake_status(status_path: Path, email_label: str) -> None:
     data = json_mod.loads(status_path.read_text())
     data["tests"][email_label] = {
         "state": "burning_in",
-        "runs": 27,
-        "passes": 27,
         "history": [
             {"passed": True, "commit": None} for _ in range(27)
         ],
@@ -492,8 +487,9 @@ def _print_lifecycle_summary(status_path: Path, phase_label: str = "") -> None:
     state_counts: dict[str, int] = {}
     for name, entry in sorted(tests.items()):
         state = entry.get("state", "unknown")
-        runs = entry.get("runs", 0)
-        passes = entry.get("passes", 0)
+        history = entry.get("history", [])
+        runs = len(history)
+        passes = sum(1 for h in history if h.get("passed", False))
         state_counts[state] = state_counts.get(state, 0) + 1
         short_name = name.split(":")[-1] if ":" in name else name
         if state == "stable":

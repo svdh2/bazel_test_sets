@@ -150,7 +150,7 @@ class TestDiagnosticEndToEnd:
             assert names.index("middle") < names.index("root")
 
     def test_all_pass_report(self):
-        """All-passing suite produces correct summary and YAML."""
+        """All-passing suite produces correct summary and JSON."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             exe = _pass_script(tmpdir)
@@ -312,10 +312,10 @@ class TestDetectionMode:
 
 
 class TestReportToHtmlPipeline:
-    """Full pipeline: execute -> YAML report -> HTML report."""
+    """Full pipeline: execute -> JSON report -> HTML report."""
 
     def test_json_to_html_roundtrip(self):
-        """Generate YAML, then convert to HTML."""
+        """Generate JSON, then convert to HTML."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             exe = _pass_script(tmpdir)
@@ -433,14 +433,15 @@ class TestBurnInLifecycle:
             status_path = Path(tmpdir) / "status.json"
             sf = StatusFile(status_path)
 
-            sf.set_test_state("test_a", "burning_in", runs=10, passes=10)
+            sf.set_test_state("test_a", "burning_in")
+            for _ in range(10):
+                sf.record_run("test_a", passed=True)
             sf.save()
 
             sf2 = StatusFile(status_path)
             assert sf2.get_test_state("test_a") == "burning_in"
-            entry = sf2.get_test_entry("test_a")
-            assert entry["runs"] == 10
-            assert entry["passes"] == 10
+            history = sf2.get_test_history("test_a")
+            assert len(history) == 10
 
 
 # ---------------------------------------------------------------------------

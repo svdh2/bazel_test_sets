@@ -89,34 +89,41 @@ report_data = {"report": {...}}
 
 ### JSON Report Structure
 
-```yaml
-report:
-  generated_at: "2026-02-16T12:00:00+00:00"
-  commit: "2f9daa5..."
-  summary:
-    total: 11
-    passed: 10
-    failed: 1
-    dependencies_failed: 0
-    passed+dependencies_failed: 0
-    failed+dependencies_failed: 0
-    total_duration_seconds: 8.234
-  test_set:
-    name: "ecommerce_tests"
-    assertion: "E-commerce platform passes all tests"
-    status: "failed"
-    tests:
-      "//ecommerce:credit_card_wrapped":
-        assertion: "Credit card payments authorized"
-        status: "passed"
-        duration_seconds: 0.420
-        exit_code: 0
-        structured_log:
-          block_sequence: ["rigging", "execution"]
-          measurements:
-            - name: "latency_ms"
-              value: 42
-              block: "execution"
+```json
+{
+  "report": {
+    "generated_at": "2026-02-16T12:00:00+00:00",
+    "commit": "2f9daa5...",
+    "summary": {
+      "total": 11,
+      "passed": 10,
+      "failed": 1,
+      "dependencies_failed": 0,
+      "passed+dependencies_failed": 0,
+      "failed+dependencies_failed": 0,
+      "total_duration_seconds": 8.234
+    },
+    "test_set": {
+      "name": "ecommerce_tests",
+      "assertion": "E-commerce platform passes all tests",
+      "status": "failed",
+      "tests": {
+        "//ecommerce:credit_card_wrapped": {
+          "assertion": "Credit card payments authorized",
+          "status": "passed",
+          "duration_seconds": 0.420,
+          "exit_code": 0,
+          "structured_log": {
+            "block_sequence": ["rigging", "execution"],
+            "measurements": [
+              {"name": "latency_ms", "value": 42, "block": "execution"}
+            ]
+          }
+        }
+      }
+    }
+  }
+}
 ```
 
 ### HTML Report Elements

@@ -40,54 +40,65 @@ class Reporter:
 
 ### Report Structure (JSON)
 
-```yaml
-report:
-  generated_at: "ISO timestamp"
-  commit: "abc123"
-  summary:
-    total: 10
-    passed: 8
-    failed: 1
-    dependencies_failed: 1
-    total_duration_seconds: 12.345
-  test_set:                    # Hierarchical (when manifest is set)
-    name: "auth_tests"
-    assertion: "..."
-    status: "failed"           # Aggregated from children
-    tests:
-      "//test:a":
-        assertion: "..."
-        status: "passed"
-        duration_seconds: 1.234
-        structured_log: {...}
-        burn_in: {...}
-        inferred_dependencies: [...]
-        lifecycle:               # When --status-file is set
-          state: "stable"        # new, burning_in, stable, flaky, disabled
-          runs: 125
-          passes: 124
-          reliability: 0.992
-    lifecycle_summary:           # Aggregated from children (when lifecycle data present)
-      total: 7
-      stable: 5
-      burning_in: 1
-      flaky: 1
-      aggregate_runs: 750
-      aggregate_passes: 745
-      aggregate_reliability: 0.9933
-  lifecycle_config:              # When --status-file is set
-    min_reliability: 0.99
-    statistical_significance: 0.95
-  regression_selection: {...}  # When --regression flag was used
-  e_value_verdict:              # When --verdict flag was used
-    verdict: "GREEN"            # GREEN, RED, or UNDECIDED
-    e_set: 0.001
-    min_s_value: 1000.0
-    red_threshold: 20.0
-    green_threshold: 40.0
-    n_tests: 2
-    weakest_test: "//test:b"
-    per_test: [...]
+```json
+{
+  "report": {
+    "generated_at": "ISO timestamp",
+    "commit": "abc123",
+    "summary": {
+      "total": 10,
+      "passed": 8,
+      "failed": 1,
+      "dependencies_failed": 1,
+      "total_duration_seconds": 12.345
+    },
+    "test_set": {                    // Hierarchical (when manifest is set)
+      "name": "auth_tests",
+      "assertion": "...",
+      "status": "failed",           // Aggregated from children
+      "tests": {
+        "//test:a": {
+          "assertion": "...",
+          "status": "passed",
+          "duration_seconds": 1.234,
+          "structured_log": {},
+          "burn_in": {},
+          "inferred_dependencies": [],
+          "lifecycle": {               // When --status-file is set
+            "state": "stable",        // new, burning_in, stable, flaky, disabled
+            "runs": 125,
+            "passes": 124,
+            "reliability": 0.992
+          }
+        }
+      },
+      "lifecycle_summary": {           // Aggregated from children (when lifecycle data present)
+        "total": 7,
+        "stable": 5,
+        "burning_in": 1,
+        "flaky": 1,
+        "aggregate_runs": 750,
+        "aggregate_passes": 745,
+        "aggregate_reliability": 0.9933
+      }
+    },
+    "lifecycle_config": {              // When --status-file is set
+      "min_reliability": 0.99,
+      "statistical_significance": 0.95
+    },
+    "regression_selection": {},  // When --regression flag was used
+    "e_value_verdict": {              // When --verdict flag was used
+      "verdict": "GREEN",            // GREEN, RED, or UNDECIDED
+      "e_set": 0.001,
+      "min_s_value": 1000.0,
+      "red_threshold": 20.0,
+      "green_threshold": 40.0,
+      "n_tests": 2,
+      "weakest_test": "//test:b",
+      "per_test": []
+    }
+  }
+}
   history:                     # When using generate_report_with_history
     "//test:a":
       - status: "passed"

@@ -195,14 +195,19 @@ Only `stable` tests are candidates for regression selection. Tests in
 When using the `--regression` flag, the JSON report includes a
 `regression_selection` section:
 
-```yaml
-report:
-  regression_selection:
-    changed_files: ["src/auth.py", "src/payment.py"]
-    scores:
-      auth_test: 0.85
-      payment_test: 0.72
-    total_stable_tests: 100
-    selected_count: 5
-    fallback_used: false
+```json
+{
+  "report": {
+    "regression_selection": {
+      "changed_files": ["src/auth.py", "src/payment.py"],
+      "scores": {
+        "auth_test": 0.85,
+        "payment_test": 0.72
+      },
+      "total_stable_tests": 100,
+      "selected_count": 5,
+      "fallback_used": false
+    }
+  }
+}
 ```

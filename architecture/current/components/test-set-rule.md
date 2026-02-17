@@ -80,6 +80,6 @@ Produces `TestSetInfo` provider with fields:
 
 2. **Manifest as the contract**: The JSON manifest is the sole interface between build time (Starlark) and run time (Python). The orchestrator has no Bazel dependency at execution time.
 
-3. **Runner generates output directory**: The runner script creates `target/reports/{name}.yaml` by default, placing reports in a predictable location.
+3. **Runner generates output directory**: The runner script creates `target/reports/{name}.json` by default, placing reports in a predictable location.
 
 4. **Orchestrator bundled as runfile**: The orchestrator binary is included in runfiles, so `bazel test` or `bazel run` on a test_set target works without additional setup.

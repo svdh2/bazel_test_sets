@@ -59,7 +59,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--output",
         type=Path,
         default=None,
-        help="Path to write the YAML report file",
+        help="Path to write the JSON report file",
     )
     parser.add_argument(
         "--status-file",

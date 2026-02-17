@@ -107,7 +107,7 @@ OUT_DIR="${{BUILD_WORKSPACE_DIRECTORY:-.}}/target/reports"
 mkdir -p "$OUT_DIR"
 exec "$R/{workspace}/{orchestrator}" \\
   --manifest "$R/{workspace}/{manifest}" \\
-  --output "$OUT_DIR/{name}.yaml" \\
+  --output "$OUT_DIR/{name}.json" \\
   "$@"
 """.format(
             name = ctx.label.name,

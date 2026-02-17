@@ -147,10 +147,7 @@ class TestBurnIn:
 
             sf2 = StatusFile(status_path)
             assert sf2.get_test_state("//test:a") == "burning_in"
-            entry = sf2.get_test_entry("//test:a")
-            assert entry is not None
-            assert entry["runs"] == 0
-            assert entry["passes"] == 0
+            assert len(sf2.get_test_history("//test:a")) == 0
 
     def test_burn_in_unknown_test(self):
         """Burn-in of test not in status file creates it as burning_in."""
@@ -175,7 +172,9 @@ class TestBurnIn:
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
             sf = StatusFile(status_path)
-            sf.set_test_state("//test:a", "burning_in", runs=5, passes=5)
+            sf.set_test_state("//test:a", "burning_in")
+            for _ in range(5):
+                sf.record_run("//test:a", passed=True)
             sf.save()
 
             args = _make_args(
@@ -187,16 +186,14 @@ class TestBurnIn:
             assert exit_code == 0
 
             sf2 = StatusFile(status_path)
-            entry = sf2.get_test_entry("//test:a")
-            assert entry is not None
-            assert entry["runs"] == 5  # Unchanged
+            assert len(sf2.get_test_history("//test:a")) == 5  # Unchanged
 
     def test_burn_in_stable_rejected(self):
         """Burn-in of stable test is rejected."""
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
             sf = StatusFile(status_path)
-            sf.set_test_state("//test:a", "stable", runs=50, passes=50)
+            sf.set_test_state("//test:a", "stable")
             sf.save()
 
             args = _make_args(
@@ -215,7 +212,7 @@ class TestBurnIn:
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
             sf = StatusFile(status_path)
-            sf.set_test_state("//test:a", "disabled", runs=0, passes=0)
+            sf.set_test_state("//test:a", "disabled", clear_history=True)
             sf.save()
 
             args = _make_args(
@@ -234,8 +231,10 @@ class TestBurnIn:
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
             sf = StatusFile(status_path)
-            sf.set_test_state("//test:a", "burning_in", runs=5, passes=5)
-            sf.set_test_state("//test:b", "stable", runs=50, passes=50)
+            sf.set_test_state("//test:a", "burning_in")
+            for _ in range(5):
+                sf.record_run("//test:a", passed=True)
+            sf.set_test_state("//test:b", "stable")
             sf.save()
 
             args = _make_args(
@@ -255,7 +254,7 @@ class TestDeflake:
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
             sf = StatusFile(status_path)
-            sf.set_test_state("//test:a", "flaky", runs=30, passes=25)
+            sf.set_test_state("//test:a", "flaky")
             sf.save()
 
             args = _make_args(
@@ -268,10 +267,7 @@ class TestDeflake:
 
             sf2 = StatusFile(status_path)
             assert sf2.get_test_state("//test:a") == "burning_in"
-            entry = sf2.get_test_entry("//test:a")
-            assert entry is not None
-            assert entry["runs"] == 0
-            assert entry["passes"] == 0
+            assert len(sf2.get_test_history("//test:a")) == 0
 
     def test_deflake_not_found(self):
         """Deflake of nonexistent test returns error."""
@@ -293,7 +289,7 @@ class TestDeflake:
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
             sf = StatusFile(status_path)
-            sf.set_test_state("//test:a", "stable", runs=50, passes=50)
+            sf.set_test_state("//test:a", "stable")
             sf.save()
 
             args = _make_args(
@@ -312,7 +308,7 @@ class TestDeflake:
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
             sf = StatusFile(status_path)
-            sf.set_test_state("//test:a", "disabled", runs=0, passes=0)
+            sf.set_test_state("//test:a", "disabled", clear_history=True)
             sf.save()
 
             args = _make_args(
@@ -331,8 +327,8 @@ class TestDeflake:
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
             sf = StatusFile(status_path)
-            sf.set_test_state("//test:a", "flaky", runs=20, passes=15)
-            sf.set_test_state("//test:b", "flaky", runs=30, passes=25)
+            sf.set_test_state("//test:a", "flaky")
+            sf.set_test_state("//test:b", "flaky")
             sf.save()
 
             args = _make_args(
@@ -371,9 +367,9 @@ class TestTestStatus:
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
             sf = StatusFile(status_path)
-            sf.set_test_state("//test:a", "stable", runs=50, passes=50)
-            sf.set_test_state("//test:b", "burning_in", runs=10, passes=10)
-            sf.set_test_state("//test:c", "flaky", runs=20, passes=15)
+            sf.set_test_state("//test:a", "stable")
+            sf.set_test_state("//test:b", "burning_in")
+            sf.set_test_state("//test:c", "flaky")
             sf.save()
 
             args = _make_args(
@@ -389,8 +385,8 @@ class TestTestStatus:
         with tempfile.TemporaryDirectory() as tmpdir:
             status_path = Path(tmpdir) / "status.json"
             sf = StatusFile(status_path)
-            sf.set_test_state("//test:a", "stable", runs=50, passes=50)
-            sf.set_test_state("//test:b", "flaky", runs=20, passes=15)
+            sf.set_test_state("//test:a", "stable")
+            sf.set_test_state("//test:b", "flaky")
             sf.save()
 
             args = _make_args(
