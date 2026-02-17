@@ -737,6 +737,8 @@ class TestMainModuleIntegration:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_p = Path(tmpdir)
             exe = _pass_script(tmpdir_p)
+            config_path = tmpdir_p / ".test_set_config"
+            config_path.write_text(json.dumps({"max_parallel": 1}))
 
             manifest, manifest_path = _make_manifest(tmpdir_p, {
                 "t1": {"assertion": "T1", "executable": exe, "depends_on": []},
@@ -745,7 +747,7 @@ class TestMainModuleIntegration:
             exit_code = main([
                 "--manifest", str(manifest_path),
                 "--mode", "diagnostic",
-                "--max-parallel", "1",
+                "--config-file", str(config_path),
             ])
             assert exit_code == 0
 
@@ -756,6 +758,8 @@ class TestMainModuleIntegration:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_p = Path(tmpdir)
             exe = _fail_script(tmpdir_p)
+            config_path = tmpdir_p / ".test_set_config"
+            config_path.write_text(json.dumps({"max_parallel": 1}))
 
             manifest, manifest_path = _make_manifest(tmpdir_p, {
                 "t1": {"assertion": "T1", "executable": exe, "depends_on": []},
@@ -764,7 +768,7 @@ class TestMainModuleIntegration:
             exit_code = main([
                 "--manifest", str(manifest_path),
                 "--mode", "diagnostic",
-                "--max-parallel", "1",
+                "--config-file", str(config_path),
             ])
             assert exit_code == 1
 
@@ -776,6 +780,8 @@ class TestMainModuleIntegration:
             tmpdir_p = Path(tmpdir)
             exe = _pass_script(tmpdir_p)
             report_path = tmpdir_p / "report.json"
+            config_path = tmpdir_p / ".test_set_config"
+            config_path.write_text(json.dumps({"max_parallel": 1}))
 
             manifest, manifest_path = _make_manifest(tmpdir_p, {
                 "t1": {"assertion": "T1", "executable": exe, "depends_on": []},
@@ -784,7 +790,7 @@ class TestMainModuleIntegration:
             exit_code = main([
                 "--manifest", str(manifest_path),
                 "--mode", "diagnostic",
-                "--max-parallel", "1",
+                "--config-file", str(config_path),
                 "--output", str(report_path),
             ])
             assert exit_code == 0

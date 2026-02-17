@@ -16,6 +16,7 @@ from typing import Any
 
 from orchestrator.execution.dag import TestDAG
 from orchestrator.execution.executor import AsyncExecutor, SequentialExecutor
+from orchestrator.lifecycle.config import TestSetConfig
 from orchestrator.reporting.html_reporter import write_html_report
 from orchestrator.reporting.reporter import Reporter
 
@@ -44,18 +45,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Effort mode: regression (co-occurrence selection, quick verdict), "
              "converge (SPRT reruns on failures, hifi verdict), "
              "max (SPRT reruns on all tests, hifi verdict)",
-    )
-    parser.add_argument(
-        "--max-parallel",
-        type=int,
-        default=None,
-        help="Maximum parallel test executions (default: CPU count)",
-    )
-    parser.add_argument(
-        "--max-failures",
-        type=int,
-        default=None,
-        help="Stop after this many failures (default: unlimited)",
     )
     parser.add_argument(
         "--output",
@@ -101,27 +90,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=Path(".tests/co_occurrence_graph.json"),
         help="Path to co-occurrence graph JSON (default: .tests/co_occurrence_graph.json)",
     )
-    parser.add_argument(
-        "--max-test-percentage",
-        type=float,
-        default=0.10,
-        help="Max fraction of stable tests to select with --effort regression (default: 0.10)",
-    )
-    parser.add_argument(
-        "--max-hops",
-        type=int,
-        default=2,
-        help="Max BFS hops in regression co-occurrence expansion (default: 2)",
-    )
-
-    # Effort rerun budget
-    parser.add_argument(
-        "--max-reruns",
-        type=int,
-        default=100,
-        help="Max SPRT reruns per test for --effort converge/max (default: 100)",
-    )
-
     return parser.parse_args(argv)
 
 
@@ -214,6 +182,9 @@ def main(argv: list[str] | None = None) -> int:
     """Main entry point."""
     args = parse_args(argv)
 
+    # Load config (used for execution tuning parameters)
+    config = TestSetConfig(args.config_file)
+
     # Load manifest
     try:
         manifest = json.loads(args.manifest.read_text())
@@ -259,24 +230,24 @@ def main(argv: list[str] | None = None) -> int:
 
     # Dispatch based on effort mode
     if args.effort == "regression":
-        return _run_regression(args, manifest, dag, commit_sha)
+        return _run_regression(args, config, manifest, dag, commit_sha)
     elif args.effort in ("converge", "max"):
-        return _run_effort(args, manifest, dag, commit_sha)
+        return _run_effort(args, config, manifest, dag, commit_sha)
 
     # Default: run all tests once, no verdict
     executor: SequentialExecutor | AsyncExecutor
-    if args.max_parallel == 1:
+    if config.max_parallel == 1:
         executor = SequentialExecutor(
             dag,
             mode=args.mode,
-            max_failures=args.max_failures,
+            max_failures=config.max_failures,
         )
     else:
         executor = AsyncExecutor(
             dag,
             mode=args.mode,
-            max_failures=args.max_failures,
-            max_parallel=args.max_parallel,
+            max_failures=config.max_failures,
+            max_parallel=config.max_parallel,
         )
 
     try:
@@ -293,6 +264,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run_regression(
     args: argparse.Namespace,
+    config: TestSetConfig,
     manifest: dict,
     dag: TestDAG,
     commit_sha: str | None = None,
@@ -301,6 +273,7 @@ def _run_regression(
 
     Args:
         args: Parsed CLI arguments.
+        config: Loaded test set configuration.
         manifest: Parsed manifest dict.
         dag: Constructed test DAG.
         commit_sha: Resolved git commit SHA (or None).
@@ -347,16 +320,16 @@ def _run_regression(
         return 0
 
     # Configure and run regression selection
-    config = RegressionConfig(
-        max_test_percentage=args.max_test_percentage,
-        max_hops=args.max_hops,
+    regression_config = RegressionConfig(
+        max_test_percentage=config.max_test_percentage,
+        max_hops=config.max_hops,
     )
 
     selection = select_regression_tests(
         changed_files=changed_files,
         graph=graph,
         manifest=manifest,
-        config=config,
+        config=regression_config,
     )
 
     # Print selection summary
@@ -381,18 +354,18 @@ def _run_regression(
 
     # Execute in the chosen mode (diagnostic or detection)
     executor: SequentialExecutor | AsyncExecutor
-    if args.max_parallel == 1:
+    if config.max_parallel == 1:
         executor = SequentialExecutor(
             filtered_dag,
             mode=args.mode,
-            max_failures=args.max_failures,
+            max_failures=config.max_failures,
         )
     else:
         executor = AsyncExecutor(
             filtered_dag,
             mode=args.mode,
-            max_failures=args.max_failures,
-            max_parallel=args.max_parallel,
+            max_failures=config.max_failures,
+            max_parallel=config.max_parallel,
         )
 
     try:
@@ -402,7 +375,7 @@ def _run_regression(
         return 1
 
     _update_status_file(results, args, commit_sha)
-    verdict_data = _compute_verdict(args, filtered_dag, commit_sha)
+    verdict_data = _compute_verdict(args, config, filtered_dag, commit_sha)
     demoted = _print_results(
         results, args, commit_sha, filtered_manifest, verdict_data,
     )
@@ -412,6 +385,7 @@ def _run_regression(
 
 def _run_effort(
     args: argparse.Namespace,
+    config: TestSetConfig,
     manifest: dict,
     dag: TestDAG,
     commit_sha: str | None = None,
@@ -420,6 +394,7 @@ def _run_effort(
 
     Args:
         args: Parsed CLI arguments.
+        config: Loaded test set configuration.
         manifest: Parsed manifest dict.
         dag: Constructed test DAG.
         commit_sha: Resolved git commit SHA (or None).
@@ -450,18 +425,18 @@ def _run_effort(
 
     # Phase 1: Execute all tests once
     executor: SequentialExecutor | AsyncExecutor
-    if args.max_parallel == 1:
+    if config.max_parallel == 1:
         executor = SequentialExecutor(
             dag,
             mode=args.mode,
-            max_failures=args.max_failures,
+            max_failures=config.max_failures,
         )
     else:
         executor = AsyncExecutor(
             dag,
             mode=args.mode,
-            max_failures=args.max_failures,
-            max_parallel=args.max_parallel,
+            max_failures=config.max_failures,
+            max_parallel=config.max_parallel,
         )
 
     try:
@@ -483,18 +458,19 @@ def _run_effort(
         dag=dag,
         status_file=sf,
         commit_sha=commit_sha,
-        max_reruns=args.max_reruns,
+        max_reruns=config.max_reruns,
         effort_mode=args.effort,
         initial_results=initial_results,
     )
     effort_result = runner.run()
 
     # Phase 3: Verdict
-    verdict_data = _compute_verdict(args, dag, commit_sha)
+    verdict_data = _compute_verdict(args, config, dag, commit_sha)
 
     # Phase 4: Print results
     _print_effort_results(
-        initial_results, effort_result, args, commit_sha, manifest, verdict_data,
+        initial_results, effort_result, args, config, commit_sha, manifest,
+        verdict_data,
     )
 
     # Exit code: 1 if any true_fail or flake
@@ -540,6 +516,7 @@ def _filter_manifest(
 
 def _compute_verdict(
     args: argparse.Namespace,
+    config: TestSetConfig,
     dag: TestDAG,
     commit_sha: str | None,
 ) -> dict[str, Any] | None:
@@ -588,7 +565,7 @@ def _compute_verdict(
             commit_sha=commit_sha,
             alpha_set=alpha_set,
             beta_set=beta_set,
-            max_reruns=args.max_reruns,
+            max_reruns=config.max_reruns,
         )
         hifi_result = evaluator.evaluate(test_names)
         verdict_data = verdict_to_dict(hifi_result.verdict)
@@ -719,6 +696,7 @@ def _print_effort_results(
     initial_results: list,
     effort_result: Any,
     args: argparse.Namespace,
+    config: TestSetConfig,
     commit_sha: str | None = None,
     manifest: dict | None = None,
     verdict_data: dict[str, Any] | None = None,
@@ -789,7 +767,7 @@ def _print_effort_results(
         parts.append(f"{skipped} skipped")
     print(f"Results: {', '.join(parts)}")
     print(f"Total reruns: {effort_result.total_reruns} "
-          f"(budget: {args.max_reruns} per test)")
+          f"(budget: {config.max_reruns} per test)")
 
     # Generate reports
     if args.output:
@@ -807,7 +785,7 @@ def _print_effort_results(
         effort_data = {
             "mode": args.effort,
             "total_reruns": effort_result.total_reruns,
-            "max_reruns_per_test": args.max_reruns,
+            "max_reruns_per_test": config.max_reruns,
             "classifications": {
                 name: {
                     "classification": c.classification,

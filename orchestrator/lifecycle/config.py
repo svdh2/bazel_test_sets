@@ -12,9 +12,14 @@ from pathlib import Path
 from typing import Any
 
 # Default configuration values
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: dict[str, Any] = {
     "min_reliability": 0.99,
     "statistical_significance": 0.95,
+    "max_test_percentage": 0.10,
+    "max_hops": 2,
+    "max_reruns": 100,
+    "max_failures": None,
+    "max_parallel": None,
 }
 
 
@@ -68,6 +73,42 @@ class TestSetConfig:
                 DEFAULT_CONFIG["statistical_significance"],
             )
         )
+
+    @property
+    def max_test_percentage(self) -> float:
+        """Get the max fraction of stable tests for regression selection."""
+        return float(
+            self._data.get(
+                "max_test_percentage",
+                DEFAULT_CONFIG["max_test_percentage"],
+            )
+        )
+
+    @property
+    def max_hops(self) -> int:
+        """Get the max BFS hops for co-occurrence expansion."""
+        return int(
+            self._data.get("max_hops", DEFAULT_CONFIG["max_hops"])
+        )
+
+    @property
+    def max_reruns(self) -> int:
+        """Get the max SPRT reruns per test."""
+        return int(
+            self._data.get("max_reruns", DEFAULT_CONFIG["max_reruns"])
+        )
+
+    @property
+    def max_failures(self) -> int | None:
+        """Get the max failures threshold (None = unlimited)."""
+        val = self._data.get("max_failures", DEFAULT_CONFIG["max_failures"])
+        return int(val) if val is not None else None
+
+    @property
+    def max_parallel(self) -> int | None:
+        """Get the max parallel test executions (None = CPU count)."""
+        val = self._data.get("max_parallel", DEFAULT_CONFIG["max_parallel"])
+        return int(val) if val is not None else None
 
     def set_config(
         self,
