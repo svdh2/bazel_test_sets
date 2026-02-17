@@ -65,7 +65,7 @@ class Reporter:
           "duration_seconds": 1.234,
           "burn_in": {},
           "inferred_dependencies": [],
-          "lifecycle": {               // When --status-file is set
+          "lifecycle": {               // When status_file is configured
             "state": "stable",        // new, burning_in, stable, flaky, disabled
             "runs": 125,
             "passes": 124,
@@ -83,7 +83,7 @@ class Reporter:
         "aggregate_reliability": 0.9933
       }
     },
-    "lifecycle_config": {              // When --status-file is set
+    "lifecycle_config": {              // When status_file is configured
       "min_reliability": 0.99,
       "statistical_significance": 0.95
     },

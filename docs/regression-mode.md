@@ -78,8 +78,7 @@ bazel run //ci_tool:main -- build-graph --output .tests/co_occurrence_graph.json
 ### Using git diff
 
 ```bash
-bazel run //orchestrator:main -- \
-    --manifest manifest.json \
+bazel run //path/to:my_tests -- \
     --mode diagnostic \
     --effort regression \
     --diff-base main \
@@ -89,8 +88,7 @@ bazel run //orchestrator:main -- \
 ### Using explicit file list
 
 ```bash
-bazel run //orchestrator:main -- \
-    --manifest manifest.json \
+bazel run //path/to:my_tests -- \
     --mode detection \
     --effort regression \
     --changed-files "src/auth.py,src/payment.py"
@@ -138,10 +136,17 @@ score = sum(frequency * recency_weight * hop_decay)
 
 ## Configuration Parameters
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `--max-test-percentage` | 0.10 | Maximum fraction of stable tests to select |
-| `--max-hops` | 2 | Maximum BFS expansion hops |
+The following are set in `.test_set_config`:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `max_test_percentage` | 0.10 | Maximum fraction of stable tests to select |
+| `max_hops` | 2 | Maximum BFS expansion hops |
+
+The co-occurrence graph path is a CLI flag:
+
+| Flag | Default | Description |
+|------|---------|-------------|
 | `--co-occurrence-graph` | `.tests/co_occurrence_graph.json` | Graph file path |
 
 ### Tuning max-test-percentage

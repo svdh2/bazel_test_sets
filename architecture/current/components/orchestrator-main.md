@@ -17,16 +17,14 @@ CLI entry point for the test set orchestrator. Parses command-line arguments, lo
 | `--manifest` | Path | Required | Path to the JSON manifest file |
 | `--mode` | Choice | `diagnostic` | Execution mode: `diagnostic` or `detection` |
 | `--effort` | Choice | None | Effort mode: `regression`, `converge`, or `max` |
-| `--max-parallel` | int | CPU count | Maximum parallel test executions |
-| `--max-failures` | int | Unlimited | Stop after N failures |
 | `--output` | Path | None | Path for JSON report output |
-| `--status-file` | Path | None | Path to burn-in status file |
+| `--config-file` | Path | None | Path to `.test_set_config` JSON file |
+| `--allow-dirty` | flag | false | Allow running with uncommitted changes |
 | `--diff-base` | string | None | Git ref for regression diff (e.g., `main`) |
 | `--changed-files` | string | None | Comma-separated changed files (alternative to `--diff-base`) |
 | `--co-occurrence-graph` | Path | `.tests/co_occurrence_graph.json` | Co-occurrence graph path |
-| `--max-test-percentage` | float | `0.10` | Max fraction of stable tests for `--effort regression` |
-| `--max-hops` | int | `2` | Max BFS hops in co-occurrence expansion |
-| `--max-reruns` | int | `100` | Max reruns per test for converge/max effort modes |
+
+Execution tuning parameters and the status file path are read from `.test_set_config` (see [Test Set Config](test-set-config.md)).
 
 ### Public Function
 
@@ -63,4 +61,4 @@ Returns exit code 0 if all tests pass, 1 if any test fails.
 
 5. **Verdict mode derived from effort**: The verdict mode is determined by the `--effort` flag rather than a separate CLI argument. No effort = no verdict, regression = quick verdict, converge/max = hifi verdict. Uses default alpha_set=0.05, beta_set=0.05.
 
-6. **Effort mode dispatch**: `--effort converge` reruns only failed tests via SPRT; `--effort max` reruns all tests. Both require `--status-file` and git context. The EffortRunner classifies each test as true_pass, true_fail, flake, or undecided. Flakes cause exit code 1 (block CI).
+6. **Effort mode dispatch**: `--effort converge` reruns only failed tests via SPRT; `--effort max` reruns all tests. Both require `status_file` in `.test_set_config` and git context. The EffortRunner classifies each test as true_pass, true_fail, flake, or undecided. Flakes cause exit code 1 (block CI).

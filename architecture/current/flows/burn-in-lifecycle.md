@@ -93,7 +93,7 @@ There are two paths for demotion evaluation:
 
 ### Path A: Via Orchestrator (process_results)
 
-When the orchestrator runs with `--status-file`, each result is processed without re-execution:
+When the orchestrator runs with `status_file` configured, each result is processed without re-execution:
 
 ```
 1. Stable test fails during orchestrator run
@@ -158,7 +158,7 @@ Tests can be disabled by setting `disabled = True` on their `test_set_test` targ
 
 ### Disabling
 
-When the orchestrator starts with `--status-file`, `sync_disabled_state` compares the DAG (from manifest) with the status file:
+When the orchestrator starts with `status_file` configured, `sync_disabled_state` compares the DAG (from manifest) with the status file:
 - Tests with `disabled=True` in the manifest that are not in "disabled" state are transitioned to "disabled" (counters and history reset).
 - Disabled tests are then removed from the DAG so they are excluded from all execution.
 
@@ -173,10 +173,10 @@ When `disabled=True` is removed from the BUILD file:
 
 ## Flow: Orchestrator Integration
 
-When the orchestrator is invoked with `--status-file`, it auto-detects the HEAD commit SHA from git, verifies the working tree is clean (no uncommitted changes), and records all test results with the commit SHA. Use `--allow-dirty` to bypass the clean-tree check.
+When the orchestrator is invoked with `status_file` configured in `.test_set_config`, it auto-detects the HEAD commit SHA from git, verifies the working tree is clean (no uncommitted changes), and records all test results with the commit SHA. Use `--allow-dirty` to bypass the clean-tree check.
 
 ```
-orchestrator main(--status-file path [--allow-dirty])
+orchestrator main(status_file from config [--allow-dirty])
     |
     +---> _resolve_git_context(): verify clean tree, get HEAD SHA
     +---> sync_disabled_state(dag, status_file): sync disabled flags
@@ -201,7 +201,7 @@ orchestrator main(--status-file path [--allow-dirty])
               +---> return lifecycle events
 ```
 
-This also applies to the regression path (`--regression --status-file`).
+This also applies to the regression path (`--effort regression` with `status_file` configured).
 
 **Components**: Orchestrator Main, Burn-in (`process_results`), SPRT, Status File
 

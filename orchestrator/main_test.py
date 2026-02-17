@@ -381,7 +381,7 @@ class TestEffortConvergeRequiresStatusFile:
     """Tests for effort converge/max validation."""
 
     def test_converge_requires_status_file(self):
-        """--effort converge without --status-file returns error."""
+        """--effort converge without status_file in config returns error."""
         from orchestrator.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -398,7 +398,7 @@ class TestEffortConvergeRequiresStatusFile:
             assert exit_code == 1
 
     def test_max_requires_status_file(self):
-        """--effort max without --status-file returns error."""
+        """--effort max without status_file in config returns error."""
         from orchestrator.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:

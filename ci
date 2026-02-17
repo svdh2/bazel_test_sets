@@ -395,7 +395,8 @@ def test_examples(ctx):
     # Phase 4: Generate reports for other examples
     console.print("[bold]--- Phase 4: Other example reports ---[/bold]")
     run_cmd(
-        ["bazel", "run", "//macros_demo:deployment_validation"],
+        ["bazel", "run", "//macros_demo:deployment_validation", "--",
+         "--allow-dirty"],
         cwd=str(examples_dir),
     )
 
@@ -409,6 +410,7 @@ def _create_status_config(status_path: Path) -> None:
     config = {
         "min_reliability": 0.99,
         "statistical_significance": 0.95,
+        "status_file": str(status_path),
     }
     config_path.write_text(json_mod.dumps(config, indent=2) + "\n")
     console.print("[dim]  Created .test_set_config[/dim]")
@@ -446,7 +448,7 @@ def _run_orchestrator_quiet(
 ) -> subprocess.CompletedProcess[str]:
     """Run the ecommerce_tests orchestrator, suppressing output.
 
-    Uses bazel run to invoke the orchestrator with --status-file.
+    Uses bazel run to invoke the orchestrator with status_file from config.
     Output is captured so the demo shows clean progress counters.
     """
     run_env = dict(os.environ)
@@ -455,7 +457,7 @@ def _run_orchestrator_quiet(
     return subprocess.run(
         [
             "bazel", "run", "//ecommerce:ecommerce_tests", "--",
-            "--status-file", str(status_path), "--allow-dirty",
+            "--allow-dirty",
         ],
         cwd=str(examples_dir),
         env=run_env,

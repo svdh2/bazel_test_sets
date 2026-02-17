@@ -4,7 +4,7 @@ Computes the aggregate test set verdict (GREEN/RED/UNDECIDED) using E-values wit
 
 ## Trigger
 
-Orchestrator `main()` when `--verdict` is `quick` or `hifi` and `--status-file` is provided.
+Orchestrator `main()` when `--effort` implies a verdict mode and `status_file` is configured in `.test_set_config`.
 
 ## Quick Mode Flow
 

@@ -19,6 +19,12 @@ class TestSetConfig:
     # Properties
     min_reliability: float           # Default 0.99
     statistical_significance: float  # Default 0.95
+    max_test_percentage: float       # Default 0.10
+    max_hops: int                    # Default 2
+    max_reruns: int                  # Default 100
+    max_failures: int | None         # Default None (unlimited)
+    max_parallel: int | None         # Default None (CPU count)
+    status_file: Path | None         # Default None (lifecycle tracking disabled)
     config: dict[str, Any]           # Full config dict (copy)
 
     # Mutation
@@ -33,7 +39,13 @@ class TestSetConfig:
 ```json
 {
   "min_reliability": 0.99,
-  "statistical_significance": 0.95
+  "statistical_significance": 0.95,
+  "status_file": ".tests/status",
+  "max_parallel": null,
+  "max_failures": null,
+  "max_reruns": 100,
+  "max_test_percentage": 0.10,
+  "max_hops": 2
 }
 ```
 
