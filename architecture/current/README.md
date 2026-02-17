@@ -86,6 +86,7 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 | [Burn-in](components/burnin.md) | `orchestrator/lifecycle/` | Sweep loop for burning_in tests and stable demotion logic |
 | [SPRT](components/sprt.md) | `orchestrator/lifecycle/` | Sequential Probability Ratio Test for burn-in accept/reject and demotion decisions |
 | [E-values](components/e-values.md) | `orchestrator/lifecycle/` | E-value based test set verdicts with aggregate Type II error control |
+| [Test Set Config](components/test-set-config.md) | `orchestrator/lifecycle/` | JSON config file manager for reliability thresholds at workspace root |
 | [Status File](components/status-file.md) | `orchestrator/lifecycle/` | JSON state file manager for test maturity lifecycle (new/burning_in/stable/flaky) |
 | [Co-occurrence Graph](components/co-occurrence.md) | `orchestrator/regression/` | Git history analysis to build file-commit bidirectional index |
 | [Regression Selector](components/regression-selector.md) | `orchestrator/regression/` | Selects tests by co-occurrence scoring with hop decay and dependency closure |

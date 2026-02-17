@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Manages the `.tests/status` JSON state file that tracks test maturity states and configuration. This is the persistent storage layer for the burn-in lifecycle.
+Manages the `.tests/status` JSON state file that tracks test maturity states. This is the persistent storage layer for the burn-in lifecycle. Configuration is delegated to a separate [TestSetConfig](test-set-config.md) instance.
 
 ## Interface
 
@@ -14,9 +14,9 @@ Manages the `.tests/status` JSON state file that tracks test maturity states and
 
 ```python
 class StatusFile:
-    def __init__(self, path: str | Path)
+    def __init__(self, path: str | Path, config_path: Path | None = None)
 
-    # Configuration
+    # Configuration (delegated to TestSetConfig)
     min_reliability: float      # Property, default 0.99
     statistical_significance: float  # Property, default 0.95
     def set_config(min_reliability=None, statistical_significance=None)
@@ -50,10 +50,6 @@ def runs_and_passes_from_history(history: list[dict]) -> tuple[int, int]
 
 ```json
 {
-  "config": {
-    "min_reliability": 0.99,
-    "statistical_significance": 0.95
-  },
   "tests": {
     "//test:a": {
       "state": "stable",
@@ -67,11 +63,13 @@ def runs_and_passes_from_history(history: list[dict]) -> tuple[int, int]
 }
 ```
 
+Configuration (`min_reliability`, `statistical_significance`) is stored separately in a `.test_set_config` file at the Bazel workspace root. See [TestSetConfig](test-set-config.md).
+
 The `history` array is ordered newest-first and capped at 200 entries (`HISTORY_CAP`). Each entry records a pass/fail result and the git commit SHA (or `null` if unavailable). Oldest entries are dropped when the cap is exceeded.
 
 ## Dependencies
 
-- None (pure Python with standard library JSON and pathlib)
+- [TestSetConfig](test-set-config.md) (`orchestrator/lifecycle/config.py`): Configuration is delegated to this component
 
 ## Dependents
 

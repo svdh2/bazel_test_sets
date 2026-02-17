@@ -104,10 +104,12 @@ else
   echo "Cannot find runfiles" >&2; exit 1
 fi
 OUT_DIR="${{BUILD_WORKSPACE_DIRECTORY:-.}}/target/reports"
+CONFIG="${{BUILD_WORKSPACE_DIRECTORY:-.}}/.test_set_config"
 mkdir -p "$OUT_DIR"
 exec "$R/{workspace}/{orchestrator}" \\
   --manifest "$R/{workspace}/{manifest}" \\
   --output "$OUT_DIR/{name}.json" \\
+  --config-file "$CONFIG" \\
   "$@"
 """.format(
             name = ctx.label.name,
