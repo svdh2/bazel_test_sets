@@ -14,6 +14,7 @@ from orchestrator.lifecycle.burnin import (
     filter_tests_by_state,
     handle_stable_failure,
     process_results,
+    sync_disabled_state,
 )
 from orchestrator.execution.dag import TestDAG
 from orchestrator.execution.executor import TestResult
@@ -672,3 +673,156 @@ class TestProcessResultsDemotion:
             assert events == []
             assert sf.get_test_state("a") == "stable"
             assert sf.get_test_entry("a")["runs"] == 51
+
+
+class TestProcessResultsDisabled:
+    """Tests for process_results skipping disabled tests."""
+
+    def test_disabled_test_skipped(self):
+        """Disabled test result is not recorded."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("a", "disabled", runs=0, passes=0)
+            sf.save()
+
+            results = [_result("a", "passed")]
+            events = process_results(results, sf)
+
+            assert events == []
+            # Runs should NOT be incremented
+            entry = sf.get_test_entry("a")
+            assert entry is not None
+            assert entry["runs"] == 0
+
+
+class TestSyncDisabledState:
+    """Tests for sync_disabled_state()."""
+
+    def test_sync_disables_test(self):
+        """Test marked disabled in DAG transitions to disabled state."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            manifest["test_set_tests"]["a"]["disabled"] = True
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "stable", runs=50, passes=50)
+                sf.save()
+
+                events = sync_disabled_state(dag, sf)
+                assert len(events) == 1
+                assert events[0] == ("disabled", "a", "stable", "disabled")
+                assert sf.get_test_state("a") == "disabled"
+        finally:
+            os.unlink(pass_exe)
+
+    def test_sync_re_enables_test(self):
+        """Test no longer disabled in DAG transitions from disabled to new."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "disabled", runs=0, passes=0)
+                sf.save()
+
+                events = sync_disabled_state(dag, sf)
+                assert len(events) == 1
+                assert events[0] == ("re-enabled", "a", "disabled", "new")
+                assert sf.get_test_state("a") == "new"
+        finally:
+            os.unlink(pass_exe)
+
+    def test_sync_idempotent_already_disabled(self):
+        """Already disabled test stays disabled without generating events."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            manifest["test_set_tests"]["a"]["disabled"] = True
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "disabled", runs=0, passes=0)
+                sf.save()
+
+                events = sync_disabled_state(dag, sf)
+                assert events == []
+        finally:
+            os.unlink(pass_exe)
+
+    def test_sync_no_change_for_active_test(self):
+        """Non-disabled test in active state generates no events."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "stable", runs=50, passes=50)
+                sf.save()
+
+                events = sync_disabled_state(dag, sf)
+                assert events == []
+                assert sf.get_test_state("a") == "stable"
+        finally:
+            os.unlink(pass_exe)
+
+    def test_sync_new_disabled_test(self):
+        """Newly added disabled test (not in status file) gets disabled state."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            manifest["test_set_tests"]["a"]["disabled"] = True
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.save()
+
+                events = sync_disabled_state(dag, sf)
+                assert len(events) == 1
+                assert events[0] == ("disabled", "a", "new", "disabled")
+                assert sf.get_test_state("a") == "disabled"
+        finally:
+            os.unlink(pass_exe)
+
+
+class TestFilterDisabled:
+    """Tests for filter_tests_by_state excluding disabled tests."""
+
+    def test_disabled_excluded_from_stable_filter(self):
+        """Disabled tests are excluded from default stable filter."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+                "b": {"executable": pass_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "stable")
+                sf.set_test_state("b", "disabled")
+                sf.save()
+
+                result = filter_tests_by_state(dag, sf)
+                assert result == ["a"]
+        finally:
+            os.unlink(pass_exe)

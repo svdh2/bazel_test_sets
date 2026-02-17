@@ -13,7 +13,7 @@ from typing import Any
 
 
 # Valid burn-in states
-VALID_STATES = frozenset({"new", "burning_in", "stable", "flaky"})
+VALID_STATES = frozenset({"new", "burning_in", "stable", "flaky", "disabled"})
 
 # Default configuration values
 DEFAULT_CONFIG = {

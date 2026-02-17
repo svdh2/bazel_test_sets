@@ -68,7 +68,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     status_parser.add_argument(
         "--state",
-        choices=["new", "burning_in", "stable", "flaky"],
+        choices=["new", "burning_in", "stable", "flaky", "disabled"],
         default=None,
         help="Filter by state",
     )
@@ -155,6 +155,14 @@ def cmd_burn_in(args: argparse.Namespace) -> int:
                 print(f"  {test_name}: already burning_in")
                 continue
 
+            if current_state == "disabled":
+                print(
+                    f"  {test_name}: cannot burn-in from state 'disabled' "
+                    f"(remove disabled=True from BUILD file first)",
+                    file=sys.stderr,
+                )
+                continue
+
             if current_state is None or current_state == "new":
                 sf.set_test_state(test_name, "burning_in", runs=0, passes=0)
                 transitioned.append(test_name)
@@ -207,6 +215,13 @@ def cmd_deflake(args: argparse.Namespace) -> int:
         elif current_state is None:
             print(
                 f"  {test_name}: not found in status file",
+                file=sys.stderr,
+            )
+            errors = True
+        elif current_state == "disabled":
+            print(
+                f"  {test_name}: cannot deflake from state 'disabled' "
+                f"(remove disabled=True from BUILD file first)",
                 file=sys.stderr,
             )
             errors = True

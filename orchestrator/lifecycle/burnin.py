@@ -260,6 +260,42 @@ def handle_stable_failure(
     return "inconclusive"
 
 
+def sync_disabled_state(
+    dag: TestDAG,
+    status_file: StatusFile,
+) -> list[tuple[str, str, str, str]]:
+    """Synchronize disabled flags from the DAG with the status file.
+
+    For each test in the DAG:
+    - If disabled in DAG and state != "disabled": transition to "disabled".
+    - If NOT disabled in DAG but state == "disabled": transition to "new".
+
+    Args:
+        dag: Test DAG with disabled flags from the manifest.
+        status_file: StatusFile for state management.
+
+    Returns:
+        List of (event_type, test_name, old_state, new_state) tuples.
+    """
+    events: list[tuple[str, str, str, str]] = []
+
+    for name, node in dag.nodes.items():
+        current_state = status_file.get_test_state(name)
+
+        if node.disabled and current_state != "disabled":
+            old = current_state or "new"
+            status_file.set_test_state(name, "disabled", runs=0, passes=0)
+            events.append(("disabled", name, old, "disabled"))
+        elif not node.disabled and current_state == "disabled":
+            status_file.set_test_state(name, "new", runs=0, passes=0)
+            events.append(("re-enabled", name, "disabled", "new"))
+
+    if events:
+        status_file.save()
+
+    return events
+
+
 def filter_tests_by_state(
     dag: TestDAG,
     status_file: StatusFile,
@@ -325,6 +361,9 @@ def process_results(
 
         # Look up state BEFORE recording (record_run creates "new" entries)
         state = status_file.get_test_state(result.name)
+
+        if state == "disabled":
+            continue
 
         # Record the run
         passed = result.status == "passed"

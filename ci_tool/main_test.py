@@ -63,6 +63,12 @@ class TestParseArgs:
         assert args.command == "test-status"
         assert args.state == "stable"
 
+    def test_test_status_disabled_filter(self):
+        """Parse test-status with disabled state filter."""
+        args = parse_args(["test-status", "--state", "disabled"])
+        assert args.command == "test-status"
+        assert args.state == "disabled"
+
     def test_custom_status_file(self):
         """Parse custom status file path."""
         args = parse_args(["test-status", "--status-file", "/custom/path"])
@@ -204,6 +210,25 @@ class TestBurnIn:
             sf2 = StatusFile(status_path)
             assert sf2.get_test_state("//test:a") == "stable"
 
+    def test_burn_in_disabled_rejected(self):
+        """Burn-in of disabled test is rejected."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("//test:a", "disabled", runs=0, passes=0)
+            sf.save()
+
+            args = _make_args(
+                command="burn-in",
+                status_file=status_path,
+                tests=["//test:a"],
+            )
+            exit_code = cmd_burn_in(args)
+            assert exit_code == 0  # Not an error, just warns
+
+            sf2 = StatusFile(status_path)
+            assert sf2.get_test_state("//test:a") == "disabled"
+
     def test_burn_in_list_all(self):
         """Burn-in with no tests lists all burning_in tests."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -281,6 +306,25 @@ class TestDeflake:
 
             sf2 = StatusFile(status_path)
             assert sf2.get_test_state("//test:a") == "stable"
+
+    def test_deflake_disabled_rejected(self):
+        """Deflake of disabled test is rejected."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("//test:a", "disabled", runs=0, passes=0)
+            sf.save()
+
+            args = _make_args(
+                command="deflake",
+                status_file=status_path,
+                tests=["//test:a"],
+            )
+            exit_code = cmd_deflake(args)
+            assert exit_code == 1
+
+            sf2 = StatusFile(status_path)
+            assert sf2.get_test_state("//test:a") == "disabled"
 
     def test_deflake_multiple(self):
         """Deflake multiple tests at once."""

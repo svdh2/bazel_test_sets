@@ -246,7 +246,7 @@ class TestStatusFileValidation:
 
     def test_valid_states_constant(self):
         """VALID_STATES contains expected values."""
-        assert VALID_STATES == {"new", "burning_in", "stable", "flaky"}
+        assert VALID_STATES == {"new", "burning_in", "stable", "flaky", "disabled"}
 
 
 class TestStatusFileCorrupted:
@@ -405,3 +405,40 @@ class TestStatusFileHistory:
             history = sf.get_test_history("//test:a")
             history.clear()
             assert len(sf.get_test_history("//test:a")) == 1
+
+
+class TestStatusFileDisabled:
+    """Tests for the disabled state."""
+
+    def test_disabled_state_roundtrip(self):
+        """Disabled state survives save/load."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "status.json"
+            sf1 = StatusFile(path)
+            sf1.set_test_state("//test:a", "disabled", runs=0, passes=0)
+            sf1.save()
+
+            sf2 = StatusFile(path)
+            assert sf2.get_test_state("//test:a") == "disabled"
+
+    def test_get_tests_by_state_disabled(self):
+        """Filter tests by disabled state."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable", runs=50, passes=50)
+            sf.set_test_state("//test:b", "disabled", runs=0, passes=0)
+            sf.set_test_state("//test:c", "disabled", runs=0, passes=0)
+
+            disabled = sf.get_tests_by_state("disabled")
+            assert sorted(disabled) == ["//test:b", "//test:c"]
+
+    def test_disabled_resets_history(self):
+        """Setting state to disabled with reset counters clears history."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable", runs=50, passes=50)
+            sf.record_run("//test:a", passed=True, commit="abc")
+            assert len(sf.get_test_history("//test:a")) == 1
+
+            sf.set_test_state("//test:a", "disabled", runs=0, passes=0)
+            assert sf.get_test_history("//test:a") == []

@@ -9,28 +9,32 @@ Manages test maturity through a state machine driven by SPRT (Sequential Probabi
 ```
                  CI tool: burn-in
     new  --------------------------->  burning_in
-                                          |
-                              +-----------+-----------+
-                              |                       |
-                        SPRT accept              SPRT reject
-                              |                       |
-                              v                       v
-                           stable                   flaky
-                              |                       |
-                     failure + SPRT              CI tool: deflake
-                     evaluation                       |
-                              |                       |
-                    +---------+---------+             |
-                    |         |         |             |
-                 demote   inconclusive retain         |
-                    |         |         |             |
-                    v         v      (no change)      |
-                  flaky   burning_in                   |
-                    ^     (suspicious,                 |
-                    |      counters                    |
-                    |      preserved)                  |
-                    +----------------------------------+
-                                             (counters reset)
+     ^                                    |
+     |                        +-----------+-----------+
+     |                        |                       |
+     |                  SPRT accept              SPRT reject
+     |                        |                       |
+     |                        v                       v
+     |                     stable                   flaky
+     |                        |                       |
+     |               failure + SPRT              CI tool: deflake
+     |               evaluation                       |
+     |                        |                       |
+     |              +---------+---------+             |
+     |              |         |         |             |
+     |           demote   inconclusive retain         |
+     |              |         |         |             |
+     |              v         v      (no change)      |
+     |            flaky   burning_in                   |
+     |              ^     (suspicious,                 |
+     |              |      counters                    |
+     |              |      preserved)                  |
+     |              +----------------------------------+
+     |                                       (counters reset)
+     |
+     |     BUILD: disabled=True removed (sync)
+ disabled  <-----  any state
+               BUILD: disabled=True set (sync)
 ```
 
 ## States
@@ -41,6 +45,7 @@ Manages test maturity through a state machine driven by SPRT (Sequential Probabi
 | `burning_in` | Test is being repeatedly run for SPRT evaluation | Diagnostic only |
 | `stable` | SPRT accepted the test as reliable | All modes |
 | `flaky` | SPRT rejected the test or demotion occurred | Excluded from detection/regression |
+| `disabled` | Test is disabled via `disabled=True` in BUILD file | Excluded from all execution |
 
 ## Flow: New Test Entering Burn-in
 
@@ -147,6 +152,25 @@ Transitions from `flaky` to `burning_in` with counters reset to `runs=0, passes=
 
 The test goes through the normal burn-in process again.
 
+## Flow: Disabling and Re-enabling Tests
+
+Tests can be disabled by setting `disabled = True` on their `test_set_test` target in the BUILD file. The orchestrator synchronizes this flag with the status file at startup.
+
+### Disabling
+
+When the orchestrator starts with `--status-file`, `sync_disabled_state` compares the DAG (from manifest) with the status file:
+- Tests with `disabled=True` in the manifest that are not in "disabled" state are transitioned to "disabled" (counters and history reset).
+- Disabled tests are then removed from the DAG so they are excluded from all execution.
+
+### Re-enabling
+
+When `disabled=True` is removed from the BUILD file:
+- The manifest no longer marks the test as disabled.
+- `sync_disabled_state` detects the test is in "disabled" state but not disabled in the DAG.
+- The test transitions to "new" (counters reset) and must go through burn-in again.
+
+**Components**: Burn-in (`sync_disabled_state`), DAG (`remove_disabled`), Status File
+
 ## Flow: Orchestrator Integration
 
 When the orchestrator is invoked with `--status-file`, it auto-detects the HEAD commit SHA from git, verifies the working tree is clean (no uncommitted changes), and records all test results with the commit SHA. Use `--allow-dirty` to bypass the clean-tree check.
@@ -155,6 +179,8 @@ When the orchestrator is invoked with `--status-file`, it auto-detects the HEAD 
 orchestrator main(--status-file path [--allow-dirty])
     |
     +---> _resolve_git_context(): verify clean tree, get HEAD SHA
+    +---> sync_disabled_state(dag, status_file): sync disabled flags
+    +---> dag.remove_disabled(): exclude disabled tests from DAG
     +---> execute tests (DAG order)
     |
     +---> process_results(results, status_file, commit_sha)

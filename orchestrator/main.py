@@ -222,6 +222,24 @@ def main(argv: list[str] | None = None) -> int:
         # Best-effort: tag report history with commit SHA without enforcing clean tree
         commit_sha = _resolve_git_context(allow_dirty=True)
 
+    # Sync disabled state from manifest and remove disabled tests from DAG
+    if args.status_file:
+        from orchestrator.lifecycle.burnin import sync_disabled_state
+        from orchestrator.lifecycle.status import StatusFile
+
+        sf = StatusFile(args.status_file)
+        sync_events = sync_disabled_state(dag, sf)
+        if sync_events:
+            print("Disabled state sync:")
+            for etype, name, old_state, new_state in sync_events:
+                print(f"  {name}: {old_state} \u2192 {new_state} ({etype})")
+            print()
+
+    removed = dag.remove_disabled()
+    if removed:
+        print(f"Disabled tests excluded from execution: {len(removed)}")
+        print()
+
     # Handle regression option
     if args.regression:
         return _run_regression(args, manifest, dag, commit_sha)
