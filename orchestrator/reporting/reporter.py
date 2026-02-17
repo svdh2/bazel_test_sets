@@ -52,6 +52,7 @@ class Reporter:
         self.e_value_verdict: dict[str, Any] | None = None
         self.lifecycle_data: dict[str, dict[str, Any]] = {}
         self.lifecycle_config: dict[str, Any] | None = None
+        self.reliability_demoted_tests: list[str] = []
 
     def set_manifest(self, manifest: dict[str, Any]) -> None:
         """Set the manifest for hierarchical report generation.
@@ -300,7 +301,13 @@ class Reporter:
 
         Updates direct test entries first, then recurses into child
         subsets so their summaries are recomputed bottom-up.
+
+        When a test's rolling reliability falls below min_reliability,
+        its lifecycle state is overridden to ``flaky`` and the test
+        counts as failed for test-set status aggregation.
         """
+        min_rel = (self.lifecycle_config or {}).get("min_reliability", 1.0)
+
         # Update direct test entries
         tests = node.get("tests", {})
         for test_name, test_data in tests.items():
@@ -310,8 +317,16 @@ class Reporter:
                 lifecycle["runs"] = hr["runs"]
                 lifecycle["passes"] = hr["passes"]
                 lifecycle["reliability"] = hr["reliability"]
+                # Override state to flaky if reliability is below threshold
+                if (
+                    lifecycle.get("state") != "disabled"
+                    and hr["runs"] > 0
+                    and hr["reliability"] < min_rel
+                ):
+                    lifecycle["state"] = "flaky"
+                    self.reliability_demoted_tests.append(test_name)
 
-        # Recurse into subsets (so their summaries update first)
+        # Recurse into subsets (so their summaries and statuses update first)
         for subset in node.get("subsets", []):
             self._update_node_lifecycle(subset, history_reliability)
 
@@ -323,6 +338,27 @@ class Reporter:
             node["lifecycle_summary"] = lifecycle_summary
         elif "lifecycle_summary" in node:
             del node["lifecycle_summary"]
+
+        # Re-aggregate status: tests below min_reliability count as failed
+        direct_statuses: list[str] = []
+        for test_name, test_data in tests.items():
+            if "status" not in test_data:
+                continue
+            lifecycle = test_data.get("lifecycle")
+            if (
+                lifecycle
+                and test_name in history_reliability
+                and lifecycle.get("state") != "disabled"
+                and history_reliability[test_name]["runs"] > 0
+                and history_reliability[test_name]["reliability"] < min_rel
+            ):
+                direct_statuses.append("failed")
+            else:
+                direct_statuses.append(test_data["status"])
+        subset_statuses = [
+            s.get("status", "no_tests") for s in node.get("subsets", [])
+        ]
+        node["status"] = _aggregate_status(direct_statuses + subset_statuses)
 
     def write_report(self, path: Path) -> None:
         """Write the report as a JSON file.

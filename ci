@@ -336,69 +336,68 @@ def test_examples(ctx):
             console.print(f"[dim]Removed stale symlink examples/{item.name}[/dim]")
 
     status_path = examples_dir / "ecommerce" / ".tests" / "status"
-    email_label = "@@//ecommerce:email_notification_raw_test"
+
+    BURNIN_RUNS = 30
+    DEGRADATION_RUNS = 20
 
     # Phase 1: Clean start + Bazel validation
     console.print("[bold]--- Phase 1: Clean start + Bazel validation ---[/bold]")
     shutil.rmtree(status_path.parent, ignore_errors=True)
     console.print("[dim]Removed .tests/ directory[/dim]")
+    reports_dir = examples_dir / "target" / "reports"
+    if reports_dir.exists():
+        shutil.rmtree(reports_dir)
+        console.print("[dim]Removed target/reports/ directory[/dim]")
     run_cmd(["bazel", "test", "//..."], cwd=str(examples_dir))
 
-    # Phase 2: Burn-in acceptance (email: burning_in → stable)
-    # Pre-seed 27/27 passes; one orchestrator run tips SPRT to accept.
-    console.print("[bold]--- Phase 2: Burn-in acceptance ---[/bold]")
-    _setup_burnin_status(status_path, email_label)
-    run_cmd(
-        [
-            "bazel", "run", "//ecommerce:ecommerce_tests", "--",
-            "--status-file", str(status_path), "--allow-dirty",
-        ],
-        cwd=str(examples_dir),
-    )
+    # Phase 2: Burn-in acceptance (all tests: new → burning_in → stable)
+    # Run the orchestrator many times so the report accumulates a visible
+    # timeline. All tests pass during this phase; SPRT accepts after ~28 runs.
+    console.print(f"[bold]--- Phase 2: Burn-in acceptance ({BURNIN_RUNS} runs) ---[/bold]")
+    _create_status_config(status_path)
+
+    # First run populates the status file with "new" entries for all tests
+    _run_orchestrator_quiet(examples_dir, status_path)
+    console.print(f"[dim]  Run 1/{BURNIN_RUNS}[/dim]")
+
+    # Transition all tests to burning_in so SPRT evaluates them
+    _transition_all_to_burnin(status_path)
+
+    for i in range(2, BURNIN_RUNS + 1):
+        _run_orchestrator_quiet(examples_dir, status_path)
+        if i % 10 == 0 or i == BURNIN_RUNS:
+            console.print(f"[dim]  Run {i}/{BURNIN_RUNS}[/dim]")
+
     _print_lifecycle_summary(status_path, "after burn-in acceptance")
 
     # Phase 3: Degradation → demotion (email: stable → flaky)
-    # Inject failure history (simulating bad CI runs), then run with degraded
-    # reliability so the current run also fails → demotion triggers.
-    console.print("[bold]--- Phase 3: Degradation and demotion ---[/bold]")
-    _inject_degradation(status_path, email_label)
-    env = dict(os.environ)
-    env["TST_EMAIL_RELIABILITY"] = "0.0"
-    run_cmd(
-        [
-            "bazel", "run", "//ecommerce:ecommerce_tests", "--",
-            "--status-file", str(status_path), "--allow-dirty",
-        ],
-        cwd=str(examples_dir),
-        env=env,
-        check=False,  # email_notification will fail — expect non-zero exit
+    # Run with degraded email reliability so it fails sporadically.
+    # SPRT detects the degradation and demotes email_notification to flaky.
+    # The report timeline shows the sporadic failures accumulating.
+    console.print(
+        f"[bold]--- Phase 3: Degradation and demotion ({DEGRADATION_RUNS} runs) ---[/bold]"
     )
+    for i in range(1, DEGRADATION_RUNS + 1):
+        _run_orchestrator_quiet(
+            examples_dir, status_path,
+            env={"TST_EMAIL_RELIABILITY": "0.6"},
+            check=False,
+        )
+        if i % 10 == 0 or i == DEGRADATION_RUNS:
+            console.print(f"[dim]  Run {i}/{DEGRADATION_RUNS}[/dim]")
+
     _print_lifecycle_summary(status_path, "after degradation")
 
-    # Phase 4: Fix + re-burn-in (email: burning_in → stable again)
-    # Simulate: developer fixes root cause, CI tool deflakes the test,
-    # 27 clean burn-in runs accumulate, then this run tips acceptance.
-    console.print("[bold]--- Phase 4: Fix and re-stabilization ---[/bold]")
-    _setup_deflake_status(status_path, email_label)
-    run_cmd(
-        [
-            "bazel", "run", "//ecommerce:ecommerce_tests", "--",
-            "--status-file", str(status_path), "--allow-dirty",
-        ],
-        cwd=str(examples_dir),
-    )
-    _print_lifecycle_summary(status_path, "after re-stabilization")
-
-    # Phase 5: Generate reports for other examples
-    console.print("[bold]--- Phase 5: Other example reports ---[/bold]")
+    # Phase 4: Generate reports for other examples
+    console.print("[bold]--- Phase 4: Other example reports ---[/bold]")
     run_cmd(
         ["bazel", "run", "//macros_demo:deployment_validation"],
         cwd=str(examples_dir),
     )
 
 
-def _setup_burnin_status(status_path: Path, email_label: str) -> None:
-    """Create status file with email_notification in burn-in, one pass from SPRT accept."""
+def _create_status_config(status_path: Path) -> None:
+    """Create a status file with config only (no test entries)."""
     import json as json_mod
 
     status = {
@@ -406,65 +405,55 @@ def _setup_burnin_status(status_path: Path, email_label: str) -> None:
             "min_reliability": 0.99,
             "statistical_significance": 0.95,
         },
-        "tests": {
-            email_label: {
-                "state": "burning_in",
-                "history": [
-                    {"passed": True, "commit": None} for _ in range(27)
-                ],
-                "last_updated": "2026-02-16T12:00:00+00:00",
-            },
-        },
+        "tests": {},
     }
-
     status_path.parent.mkdir(parents=True, exist_ok=True)
     status_path.write_text(json_mod.dumps(status, indent=2) + "\n")
-    console.print(f"[dim]  {email_label}: burning_in (27/27 — one pass from acceptance)[/dim]")
+    console.print("[dim]  Created status file with config[/dim]")
 
 
-def _inject_degradation(status_path: Path, email_label: str) -> None:
-    """Inject recent failures into email_notification history.
+def _transition_all_to_burnin(status_path: Path) -> None:
+    """Transition all 'new' tests in the status file to 'burning_in'.
 
-    Simulates several CI runs where a bad commit caused the test to fail.
+    The orchestrator creates 'new' entries on first run but doesn't evaluate
+    SPRT for them. Transitioning to 'burning_in' enables SPRT acceptance.
     """
     import json as json_mod
 
     data = json_mod.loads(status_path.read_text())
-    entry = data["tests"].get(email_label)
-    if entry is None:
-        console.print(f"[red]Warning: {email_label} not found in status file[/red]")
-        return
-
-    for _ in range(5):
-        entry["history"].insert(0, {"passed": False, "commit": "bad-commit"})
-
+    count = 0
+    for entry in data.get("tests", {}).values():
+        if entry.get("state") == "new":
+            entry["state"] = "burning_in"
+            count += 1
     status_path.write_text(json_mod.dumps(data, indent=2) + "\n")
-    console.print(
-        f"[dim]  Injected 5 failures into {email_label} history "
-        f"(simulating degraded CI runs)[/dim]"
-    )
+    console.print(f"[dim]  Transitioned {count} tests from new → burning_in[/dim]")
 
 
-def _setup_deflake_status(status_path: Path, email_label: str) -> None:
-    """Reset email_notification to burning_in for re-stabilization.
+def _run_orchestrator_quiet(
+    examples_dir: Path,
+    status_path: Path,
+    env: dict[str, str] | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    """Run the ecommerce_tests orchestrator, suppressing output.
 
-    Simulates: developer fixes root cause, CI tool deflakes the test,
-    then 27 successful burn-in runs accumulate in subsequent CI runs.
+    Uses bazel run to invoke the orchestrator with --status-file.
+    Output is captured so the demo shows clean progress counters.
     """
-    import json as json_mod
-
-    data = json_mod.loads(status_path.read_text())
-    data["tests"][email_label] = {
-        "state": "burning_in",
-        "history": [
-            {"passed": True, "commit": None} for _ in range(27)
+    run_env = dict(os.environ)
+    if env:
+        run_env.update(env)
+    return subprocess.run(
+        [
+            "bazel", "run", "//ecommerce:ecommerce_tests", "--",
+            "--status-file", str(status_path), "--allow-dirty",
         ],
-        "last_updated": "2026-02-16T14:00:00+00:00",
-    }
-    status_path.write_text(json_mod.dumps(data, indent=2) + "\n")
-    console.print(
-        f"[dim]  {email_label}: reset to burning_in "
-        f"(27/27 — simulating deflake + re-burn-in)[/dim]"
+        cwd=str(examples_dir),
+        env=run_env,
+        check=check,
+        capture_output=True,
+        text=True,
     )
 
 

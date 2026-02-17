@@ -296,8 +296,9 @@ def main(argv: list[str] | None = None) -> int:
 
     _update_status_file(results, args, commit_sha)
     verdict_data = _compute_verdict(args, dag, commit_sha)
-    _print_results(results, args, commit_sha, manifest, verdict_data)
-    return 1 if any(r.status == "failed" for r in results) else 0
+    demoted = _print_results(results, args, commit_sha, manifest, verdict_data)
+    has_failure = any(r.status == "failed" for r in results)
+    return 1 if (has_failure or demoted) else 0
 
 
 def _run_regression(
@@ -412,8 +413,9 @@ def _run_regression(
 
     _update_status_file(results, args, commit_sha)
     verdict_data = _compute_verdict(args, filtered_dag, commit_sha)
-    _print_results(results, args, commit_sha, filtered_manifest, verdict_data)
-    return 1 if any(r.status == "failed" for r in results) else 0
+    demoted = _print_results(results, args, commit_sha, filtered_manifest, verdict_data)
+    has_failure = any(r.status == "failed" for r in results)
+    return 1 if (has_failure or demoted) else 0
 
 
 def _filter_manifest(
@@ -535,8 +537,12 @@ def _print_results(
     commit_sha: str | None = None,
     manifest: dict | None = None,
     verdict_data: dict[str, Any] | None = None,
-) -> None:
-    """Print test execution results summary."""
+) -> list[str]:
+    """Print test execution results summary.
+
+    Returns:
+        List of test names that were reliability-demoted to flaky.
+    """
     mode_label = args.mode
     if args.regression:
         mode_label += " + regression"
@@ -603,6 +609,15 @@ def _print_results(
         html_path = args.output.with_suffix(".html")
         write_html_report(report_data, html_path)
         print(f"HTML report written to: {html_path}")
+
+        if reporter.reliability_demoted_tests:
+            print(f"\nReliability demotions ({len(reporter.reliability_demoted_tests)}):")
+            for name in reporter.reliability_demoted_tests:
+                print(f"  {name}: reliability below threshold")
+
+        return reporter.reliability_demoted_tests
+
+    return []
 
 
 if __name__ == "__main__":

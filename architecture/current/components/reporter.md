@@ -16,6 +16,9 @@ Collects test execution results and generates JSON reports. Supports both flat a
 class Reporter:
     def __init__(self)
 
+    # Output (populated after report generation)
+    reliability_demoted_tests: list[str]  # Tests demoted to flaky by reliability check
+
     # Data collection
     def add_result(self, result: TestResult)
     def add_results(self, results: list[TestResult])
@@ -138,4 +141,8 @@ class Reporter:
 
 5. **Lifecycle aggregation**: When `set_lifecycle_data()` is called, each test set node includes a `lifecycle_summary` with state counts and aggregate reliability computed bottom-up through the tree. The `lifecycle_config` thresholds are included at the report top level so readers understand what "stable" and "flaky" mean quantitatively.
 
-6. **History-based reliability**: When `generate_report_with_history()` is used, lifecycle `runs`/`passes`/`reliability` are recomputed from the accumulated rolling history rather than using StatusFile counters. StatusFile counters reset on lifecycle transitions (e.g. flaky → burning_in resets to 0/0), but the rolling history accumulates across all runs. Recomputing from history ensures the displayed reliability percentage matches the visible timeline. The lifecycle `state` still comes from the StatusFile. Statuses `dependencies_failed` are excluded from reliability counts (test wasn't executed).
+6. **History-based reliability**: When `generate_report_with_history()` is used, lifecycle `runs`/`passes`/`reliability` are recomputed from the accumulated rolling history rather than using StatusFile counters. StatusFile counters reset on lifecycle transitions (e.g. flaky → burning_in resets to 0/0), but the rolling history accumulates across all runs. Recomputing from history ensures the displayed reliability percentage matches the visible timeline. The lifecycle `state` still comes from the StatusFile (but may be overridden by reliability demotion — see below). Statuses `dependencies_failed` are excluded from reliability counts (test wasn't executed).
+
+7. **Reliability-based flaky demotion**: After updating lifecycle data from rolling history, `_update_node_lifecycle()` checks each test's computed reliability against `min_reliability` from `lifecycle_config`. If a test has `runs > 0`, is not `disabled`, and its reliability falls below the threshold, its lifecycle state is overridden to `"flaky"` regardless of the StatusFile state. Demoted test names are tracked in `Reporter.reliability_demoted_tests` so callers (e.g. `main.py`) can report them and set a non-zero exit code.
+
+8. **Status re-aggregation after demotion**: After lifecycle updates, `_update_node_lifecycle()` re-aggregates each test set node's status. Tests whose rolling history reliability is below `min_reliability` are counted as `"failed"` for aggregation purposes, overriding their execution status. This ensures that a test set containing an unreliable test shows `"failed"` even if all individual test executions passed. The check uses `reliability < min_reliability` (not `state == "flaky"`), so a test marked flaky in the StatusFile but with improved reliability above the threshold will not drag down the set.
