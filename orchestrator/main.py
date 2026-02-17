@@ -68,6 +68,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to the .tests/status JSON state file",
     )
     parser.add_argument(
+        "--config-file",
+        type=Path,
+        default=None,
+        help="Path to the .test_set_config JSON file",
+    )
+    parser.add_argument(
         "--allow-dirty",
         action="store_true",
         default=False,
@@ -255,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
         from orchestrator.lifecycle.burnin import sync_disabled_state
         from orchestrator.lifecycle.status import StatusFile
 
-        sf = StatusFile(args.status_file)
+        sf = StatusFile(args.status_file, config_path=args.config_file)
         sync_events = sync_disabled_state(dag, sf)
         if sync_events:
             print("Disabled state sync:")
@@ -471,7 +477,7 @@ def _compute_verdict(
     )
     from orchestrator.lifecycle.status import StatusFile
 
-    sf = StatusFile(args.status_file)
+    sf = StatusFile(args.status_file, config_path=args.config_file)
     test_names = list(dag.nodes.keys())
 
     if args.verdict == "quick":
@@ -524,7 +530,7 @@ def _update_status_file(
     from orchestrator.lifecycle.burnin import process_results
     from orchestrator.lifecycle.status import StatusFile
 
-    sf = StatusFile(args.status_file)
+    sf = StatusFile(args.status_file, config_path=args.config_file)
     events = process_results(results, sf, commit_sha=commit_sha)
     if events:
         print("\nLifecycle events:")
@@ -585,7 +591,7 @@ def _print_results(
         if args.status_file and args.status_file.exists():
             from orchestrator.lifecycle.status import StatusFile
 
-            sf = StatusFile(args.status_file)
+            sf = StatusFile(args.status_file, config_path=args.config_file)
             lifecycle_data: dict[str, dict[str, Any]] = {}
             for test_name, entry in sf.get_all_tests().items():
                 lifecycle_data[test_name] = {

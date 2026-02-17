@@ -344,6 +344,10 @@ def test_examples(ctx):
     console.print("[bold]--- Phase 1: Clean start + Bazel validation ---[/bold]")
     shutil.rmtree(status_path.parent, ignore_errors=True)
     console.print("[dim]Removed .tests/ directory[/dim]")
+    config_path = examples_dir / ".test_set_config"
+    if config_path.exists():
+        config_path.unlink()
+        console.print("[dim]Removed .test_set_config[/dim]")
     reports_dir = examples_dir / "target" / "reports"
     if reports_dir.exists():
         shutil.rmtree(reports_dir)
@@ -397,19 +401,23 @@ def test_examples(ctx):
 
 
 def _create_status_config(status_path: Path) -> None:
-    """Create a status file with config only (no test entries)."""
+    """Create .test_set_config at workspace root and empty status file."""
     import json as json_mod
 
-    status = {
-        "config": {
-            "min_reliability": 0.99,
-            "statistical_significance": 0.95,
-        },
-        "tests": {},
+    # Create .test_set_config at the workspace root (parent of ecommerce/)
+    config_path = status_path.parent.parent.parent / ".test_set_config"
+    config = {
+        "min_reliability": 0.99,
+        "statistical_significance": 0.95,
     }
+    config_path.write_text(json_mod.dumps(config, indent=2) + "\n")
+    console.print("[dim]  Created .test_set_config[/dim]")
+
+    # Create empty status file
+    status = {"tests": {}}
     status_path.parent.mkdir(parents=True, exist_ok=True)
     status_path.write_text(json_mod.dumps(status, indent=2) + "\n")
-    console.print("[dim]  Created status file with config[/dim]")
+    console.print("[dim]  Created status file[/dim]")
 
 
 def _transition_all_to_burnin(status_path: Path) -> None:
