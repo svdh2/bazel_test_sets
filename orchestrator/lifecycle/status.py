@@ -1,7 +1,7 @@
 """State file management for the burn-in lifecycle.
 
 Reads and writes the .tests/status JSON file that tracks test maturity
-states and configuration.
+states. Configuration is managed separately by TestSetConfig.
 """
 
 from __future__ import annotations
@@ -11,15 +11,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+from orchestrator.lifecycle.config import DEFAULT_CONFIG, TestSetConfig
+
 
 # Valid burn-in states
 VALID_STATES = frozenset({"new", "burning_in", "stable", "flaky", "disabled"})
-
-# Default configuration values
-DEFAULT_CONFIG = {
-    "min_reliability": 0.99,
-    "statistical_significance": 0.95,
-}
 
 # Maximum per-test history entries (newest-first, oldest dropped when exceeded)
 HISTORY_CAP = 200
@@ -44,14 +40,16 @@ def runs_and_passes_from_history(
 class StatusFile:
     """Manages the .tests/status JSON state file.
 
-    The state file tracks:
-    - Configuration (min_reliability, statistical_significance)
-    - Per-test state (state, runs, passes, last_updated)
+    The state file tracks per-test state (state, history, last_updated).
+    Configuration is delegated to a TestSetConfig instance.
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(
+        self, path: str | Path, config_path: Path | None = None
+    ) -> None:
         self.path = Path(path)
-        self._data: dict[str, Any] = {"config": dict(DEFAULT_CONFIG), "tests": {}}
+        self._data: dict[str, Any] = {"tests": {}}
+        self._config = TestSetConfig(config_path)
         if self.path.exists():
             self._load()
 
@@ -62,44 +60,34 @@ class StatusFile:
             self._data = json.loads(text)
         except (json.JSONDecodeError, OSError):
             # If file is corrupted, start fresh
-            self._data = {"config": dict(DEFAULT_CONFIG), "tests": {}}
+            self._data = {"tests": {}}
 
         # Ensure required sections exist
-        if "config" not in self._data:
-            self._data["config"] = dict(DEFAULT_CONFIG)
         if "tests" not in self._data:
             self._data["tests"] = {}
 
     def save(self) -> None:
         """Write state to the file."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        save_data = {"tests": self._data.get("tests", {})}
         with open(self.path, "w") as f:
-            json.dump(self._data, f, indent=2)
+            json.dump(save_data, f, indent=2)
             f.write("\n")
 
     @property
     def config(self) -> dict[str, Any]:
         """Get the configuration section."""
-        return self._data["config"]
+        return self._config.config
 
     @property
     def min_reliability(self) -> float:
         """Get the minimum reliability threshold."""
-        return float(
-            self._data["config"].get(
-                "min_reliability", DEFAULT_CONFIG["min_reliability"]
-            )
-        )
+        return self._config.min_reliability
 
     @property
     def statistical_significance(self) -> float:
         """Get the statistical significance level."""
-        return float(
-            self._data["config"].get(
-                "statistical_significance",
-                DEFAULT_CONFIG["statistical_significance"],
-            )
-        )
+        return self._config.statistical_significance
 
     def set_config(
         self,
@@ -112,12 +100,10 @@ class StatusFile:
             min_reliability: New minimum reliability threshold.
             statistical_significance: New significance level.
         """
-        if min_reliability is not None:
-            self._data["config"]["min_reliability"] = min_reliability
-        if statistical_significance is not None:
-            self._data["config"]["statistical_significance"] = (
-                statistical_significance
-            )
+        self._config.set_config(
+            min_reliability=min_reliability,
+            statistical_significance=statistical_significance,
+        )
 
     def get_test_state(self, test_name: str) -> str | None:
         """Get the burn-in state of a test.

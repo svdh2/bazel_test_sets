@@ -42,7 +42,7 @@ class TestStatusFileCreate:
 
             assert path.exists()
             data = json.loads(path.read_text())
-            assert "config" in data
+            assert "config" not in data
             assert "tests" in data
 
     def test_save_creates_parent_dirs(self):
@@ -108,33 +108,34 @@ class TestStatusFileReadWrite:
 
 
 class TestStatusFileConfig:
-    """Tests for configuration management."""
+    """Tests for configuration management via TestSetConfig."""
 
     def test_default_config(self):
-        """Default config matches expected values."""
+        """Default config matches expected values when no config file exists."""
         with tempfile.TemporaryDirectory() as tmpdir:
             sf = StatusFile(Path(tmpdir) / "status.json")
             assert sf.min_reliability == 0.99
             assert sf.statistical_significance == 0.95
 
+    def test_config_from_file(self):
+        """Config is read from a .test_set_config file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".test_set_config"
+            config_path.write_text(json.dumps({
+                "min_reliability": 0.95,
+                "statistical_significance": 0.90,
+            }))
+            sf = StatusFile(Path(tmpdir) / "status.json", config_path=config_path)
+            assert sf.min_reliability == 0.95
+            assert sf.statistical_significance == 0.90
+
     def test_set_config(self):
-        """Config can be updated."""
+        """Config can be updated in memory."""
         with tempfile.TemporaryDirectory() as tmpdir:
             sf = StatusFile(Path(tmpdir) / "status.json")
             sf.set_config(min_reliability=0.95, statistical_significance=0.99)
             assert sf.min_reliability == 0.95
             assert sf.statistical_significance == 0.99
-
-    def test_config_roundtrip(self):
-        """Config survives save/load."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
-            sf1 = StatusFile(path)
-            sf1.set_config(min_reliability=0.95)
-            sf1.save()
-
-            sf2 = StatusFile(path)
-            assert sf2.min_reliability == 0.95
 
     def test_partial_config_update(self):
         """Updating one config value doesn't affect others."""
@@ -365,7 +366,6 @@ class TestStatusFileHistory:
             path = Path(tmpdir) / "status.json"
             # Write a status file in the old format (no history)
             data = {
-                "config": {"min_reliability": 0.99, "statistical_significance": 0.95},
                 "tests": {
                     "//test:a": {
                         "state": "stable",
