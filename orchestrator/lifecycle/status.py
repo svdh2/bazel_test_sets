@@ -89,6 +89,31 @@ class StatusFile:
         """Get the statistical significance level."""
         return self._config.statistical_significance
 
+    @property
+    def max_test_percentage(self) -> float:
+        """Get the max fraction of stable tests for regression selection."""
+        return self._config.max_test_percentage
+
+    @property
+    def max_hops(self) -> int:
+        """Get the max BFS hops for co-occurrence expansion."""
+        return self._config.max_hops
+
+    @property
+    def max_reruns(self) -> int:
+        """Get the max SPRT reruns per test."""
+        return self._config.max_reruns
+
+    @property
+    def max_failures(self) -> int | None:
+        """Get the max failures threshold (None = unlimited)."""
+        return self._config.max_failures
+
+    @property
+    def max_parallel(self) -> int | None:
+        """Get the max parallel test executions (None = CPU count)."""
+        return self._config.max_parallel
+
     def set_config(
         self,
         min_reliability: float | None = None,

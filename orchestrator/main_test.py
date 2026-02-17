@@ -96,30 +96,6 @@ class TestParseArgsEffort:
         ])
         assert args.co_occurrence_graph == Path("/custom/graph.json")
 
-    def test_max_test_percentage_flag(self):
-        """--max-test-percentage flag parsed correctly."""
-        args = parse_args([
-            "--manifest", "/path/manifest.json",
-            "--max-test-percentage", "0.25",
-        ])
-        assert args.max_test_percentage == 0.25
-
-    def test_max_hops_flag(self):
-        """--max-hops flag parsed correctly."""
-        args = parse_args([
-            "--manifest", "/path/manifest.json",
-            "--max-hops", "3",
-        ])
-        assert args.max_hops == 3
-
-    def test_max_reruns_flag(self):
-        """--max-reruns flag parsed correctly."""
-        args = parse_args([
-            "--manifest", "/path/manifest.json",
-            "--max-reruns", "50",
-        ])
-        assert args.max_reruns == 50
-
     def test_default_values(self):
         """Default values for effort-related flags."""
         args = parse_args(["--manifest", "/path/manifest.json"])
@@ -127,9 +103,6 @@ class TestParseArgsEffort:
         assert args.changed_files is None
         assert args.effort is None
         assert args.co_occurrence_graph == Path(".tests/co_occurrence_graph.json")
-        assert args.max_test_percentage == 0.10
-        assert args.max_hops == 2
-        assert args.max_reruns == 100
         assert args.allow_dirty is False
 
     def test_allow_dirty_flag(self):
@@ -273,6 +246,10 @@ class TestEffortRegressionEndToEnd:
                 },
             }))
 
+            # Create config with max_parallel=1
+            config_path = Path(tmpdir) / ".test_set_config"
+            config_path.write_text(json.dumps({"max_parallel": 1}))
+
             # Create co-occurrence graph
             from datetime import datetime, timezone
             ts = datetime.now(timezone.utc).isoformat()
@@ -305,7 +282,7 @@ class TestEffortRegressionEndToEnd:
                 "--effort", "regression",
                 "--changed-files", "src/auth.py",
                 "--co-occurrence-graph", str(graph_path),
-                "--max-parallel", "1",
+                "--config-file", str(config_path),
             ])
             assert exit_code == 0
 
@@ -332,6 +309,10 @@ class TestEffortRegressionEndToEnd:
                     },
                 },
             }))
+
+            # Create config with max_parallel=1
+            config_path = Path(tmpdir) / ".test_set_config"
+            config_path.write_text(json.dumps({"max_parallel": 1}))
 
             # Create co-occurrence graph
             from datetime import datetime, timezone
@@ -365,7 +346,7 @@ class TestEffortRegressionEndToEnd:
                 "--effort", "regression",
                 "--changed-files", "src/auth.py",
                 "--co-occurrence-graph", str(graph_path),
-                "--max-parallel", "1",
+                "--config-file", str(config_path),
             ])
             assert exit_code == 0
 

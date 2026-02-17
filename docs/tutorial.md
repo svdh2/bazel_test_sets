@@ -6,8 +6,6 @@ to a hierarchical DAG of test sets with dependencies.
 ## Prerequisites
 
 - Bazel 9.x with Bzlmod enabled
-- Python 3.12
-- The `test_sets_bazel_rules` repository cloned
 
 ## Step 1: Create a Simple Test
 

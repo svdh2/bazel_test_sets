@@ -17,6 +17,11 @@ class TestTestSetConfigCreate:
         cfg = TestSetConfig(None)
         assert cfg.min_reliability == DEFAULT_CONFIG["min_reliability"]
         assert cfg.statistical_significance == DEFAULT_CONFIG["statistical_significance"]
+        assert cfg.max_test_percentage == 0.10
+        assert cfg.max_hops == 2
+        assert cfg.max_reruns == 100
+        assert cfg.max_failures is None
+        assert cfg.max_parallel is None
 
     def test_nonexistent_path_uses_defaults(self):
         """Nonexistent file path gives default config values."""
@@ -123,3 +128,53 @@ class TestTestSetConfigSetConfig:
         d = cfg.config
         d["min_reliability"] = 0.0
         assert cfg.min_reliability == 0.99  # unchanged
+
+
+class TestTestSetConfigExecutionProperties:
+    """Tests for execution tuning config properties."""
+
+    def test_load_execution_properties_from_file(self):
+        """Execution properties are loaded from config file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / ".test_set_config"
+            path.write_text(json.dumps({
+                "max_test_percentage": 0.25,
+                "max_hops": 3,
+                "max_reruns": 50,
+                "max_failures": 5,
+                "max_parallel": 8,
+            }))
+            cfg = TestSetConfig(path)
+            assert cfg.max_test_percentage == 0.25
+            assert cfg.max_hops == 3
+            assert cfg.max_reruns == 50
+            assert cfg.max_failures == 5
+            assert cfg.max_parallel == 8
+
+    def test_partial_execution_properties_fill_defaults(self):
+        """Missing execution properties fall back to defaults."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / ".test_set_config"
+            path.write_text(json.dumps({"max_reruns": 200}))
+            cfg = TestSetConfig(path)
+            assert cfg.max_reruns == 200
+            assert cfg.max_test_percentage == 0.10  # default
+            assert cfg.max_hops == 2  # default
+            assert cfg.max_failures is None  # default
+            assert cfg.max_parallel is None  # default
+
+    def test_null_max_failures_is_none(self):
+        """Explicit null in config gives None for max_failures."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / ".test_set_config"
+            path.write_text(json.dumps({"max_failures": None}))
+            cfg = TestSetConfig(path)
+            assert cfg.max_failures is None
+
+    def test_null_max_parallel_is_none(self):
+        """Explicit null in config gives None for max_parallel."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / ".test_set_config"
+            path.write_text(json.dumps({"max_parallel": None}))
+            cfg = TestSetConfig(path)
+            assert cfg.max_parallel is None
