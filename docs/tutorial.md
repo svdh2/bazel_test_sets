@@ -137,19 +137,22 @@ is automatically marked as `dependencies_failed`.
 
 ## Step 6: Run with the Orchestrator
 
-Use the orchestrator to execute with DAG ordering:
+The `test_set` target bundles the manifest, orchestrator, and all test
+executables together. Run it directly — no need to build the manifest
+separately:
 
 ```bash
-# Diagnostic mode (all tests, leaves-first order)
-bazel run //orchestrator:main -- \
-    --manifest bazel-bin/tests/service_tests_manifest.json \
-    --mode diagnostic
+# Diagnostic mode (default — all tests, leaves-first order)
+bazel run //tests:service_tests
+
+# Diagnostic mode with explicit flag
+bazel run //tests:service_tests -- --mode diagnostic
 
 # Detection mode (fast failure, roots-first order)
-bazel run //orchestrator:main -- \
-    --manifest bazel-bin/tests/service_tests_manifest.json \
-    --mode detection
+bazel run //tests:service_tests -- --mode detection
 ```
+
+Any extra flags after `--` are forwarded to the orchestrator.
 
 ## Step 7: Add Structured Logging
 

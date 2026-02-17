@@ -80,14 +80,8 @@ test_set(
 # Runs the orchestrator in diagnostic mode (default)
 bazel test //path/to:auth_tests
 
-# Pass extra flags to the orchestrator
-bazel test //path/to:auth_tests -- --mode detection --max-failures 3
-
-# Or invoke the orchestrator directly with a pre-built manifest
-bazel run @test_sets_bazel_rules//orchestrator:main -- \
-    --manifest bazel-bin/path/to/auth_tests_manifest.json \
-    --mode diagnostic \
-    --output results.json
+# Pass extra flags to the orchestrator (use `bazel run`, not `bazel test`)
+bazel run //path/to:auth_tests -- --mode detection
 ```
 
 ## Execution modes

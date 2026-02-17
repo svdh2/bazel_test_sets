@@ -20,6 +20,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "max_reruns": 100,
     "max_failures": None,
     "max_parallel": None,
+    "status_file": None,
 }
 
 
@@ -109,6 +110,12 @@ class TestSetConfig:
         """Get the max parallel test executions (None = CPU count)."""
         val = self._data.get("max_parallel", DEFAULT_CONFIG["max_parallel"])
         return int(val) if val is not None else None
+
+    @property
+    def status_file(self) -> Path | None:
+        """Get the status file path (None = lifecycle tracking disabled)."""
+        val = self._data.get("status_file", DEFAULT_CONFIG["status_file"])
+        return Path(val) if val is not None else None
 
     def set_config(
         self,

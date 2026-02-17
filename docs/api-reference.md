@@ -134,25 +134,36 @@ parameterized_test_set(
 
 ## CLI: Orchestrator
 
+Run a test set target directly — the manifest, orchestrator, and all test
+executables are built and wired together automatically:
+
 ```bash
-bazel run //orchestrator:main -- [OPTIONS]
+bazel run //path/to:my_tests -- [OPTIONS]
 ```
+
+Any flags after `--` are forwarded to the orchestrator.
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--manifest` | path | required | Path to the JSON manifest file |
 | `--mode` | string | `diagnostic` | Execution mode: `diagnostic`, `detection` |
 | `--effort` | string | - | Effort mode: `regression`, `converge`, `max` |
-| `--max-parallel` | int | CPU count | Maximum parallel test executions |
-| `--max-failures` | int | unlimited | Stop after N failures |
 | `--output` | path | - | Path to write JSON report |
-| `--status-file` | path | - | Path to `.tests/status` JSON state file |
+| `--config-file` | path | - | Path to `.test_set_config` JSON file |
+| `--allow-dirty` | flag | false | Allow running with uncommitted changes |
 | `--diff-base` | string | - | Git ref for regression diff |
 | `--changed-files` | string | - | Comma-separated changed files (regression) |
 | `--co-occurrence-graph` | path | `.tests/co_occurrence_graph.json` | Path to co-occurrence graph |
-| `--max-test-percentage` | float | `0.10` | Max fraction of stable tests for `--effort regression` |
-| `--max-hops` | int | `2` | Max BFS hops in regression expansion |
-| `--max-reruns` | int | `100` | Max reruns per test for converge/max effort modes |
+
+Execution tuning parameters are set in `.test_set_config` (JSON):
+
+| Setting | Type | Default | Description |
+|---------|------|---------|-------------|
+| `status_file` | string | null | Path to `.tests/status` JSON lifecycle state file |
+| `max_parallel` | int | CPU count | Maximum parallel test executions |
+| `max_failures` | int | unlimited | Stop after N failures |
+| `max_reruns` | int | `100` | Max reruns per test for converge/max effort modes |
+| `max_test_percentage` | float | `0.10` | Max fraction of stable tests for `--effort regression` |
+| `max_hops` | int | `2` | Max BFS hops in regression expansion |
 
 ## CLI: CI Tool
 

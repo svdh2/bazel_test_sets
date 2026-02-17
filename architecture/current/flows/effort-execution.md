@@ -12,7 +12,7 @@ User invokes the orchestrator with `--effort converge` or `--effort max`.
 
 ```
 1. Validate prerequisites
-   - Require --status-file
+   - Require status_file in .test_set_config
    - Resolve git context (commit SHA)
 
 2. Initial execution (phase 1)

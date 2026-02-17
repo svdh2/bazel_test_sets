@@ -22,6 +22,7 @@ class TestTestSetConfigCreate:
         assert cfg.max_reruns == 100
         assert cfg.max_failures is None
         assert cfg.max_parallel is None
+        assert cfg.status_file is None
 
     def test_nonexistent_path_uses_defaults(self):
         """Nonexistent file path gives default config values."""
@@ -178,3 +179,19 @@ class TestTestSetConfigExecutionProperties:
             path.write_text(json.dumps({"max_parallel": None}))
             cfg = TestSetConfig(path)
             assert cfg.max_parallel is None
+
+    def test_status_file_from_config(self):
+        """status_file string is converted to Path."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / ".test_set_config"
+            path.write_text(json.dumps({"status_file": ".tests/status"}))
+            cfg = TestSetConfig(path)
+            assert cfg.status_file == Path(".tests/status")
+
+    def test_null_status_file_is_none(self):
+        """Explicit null in config gives None for status_file."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / ".test_set_config"
+            path.write_text(json.dumps({"status_file": None}))
+            cfg = TestSetConfig(path)
+            assert cfg.status_file is None

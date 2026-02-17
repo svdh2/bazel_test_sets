@@ -53,12 +53,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to write the JSON report file",
     )
     parser.add_argument(
-        "--status-file",
-        type=Path,
-        default=None,
-        help="Path to the .tests/status JSON state file",
-    )
-    parser.add_argument(
         "--config-file",
         type=Path,
         default=None,
@@ -165,7 +159,7 @@ def _resolve_git_context(allow_dirty: bool) -> str | None:
     if is_dirty and not allow_dirty:
         print(
             "Error: working tree has uncommitted changes.\n"
-            "Commit your changes before running with --status-file so that\n"
+            "Commit your changes before running with status_file so that\n"
             "test results can be attributed to a specific commit.\n"
             "Use --allow-dirty to bypass this check.",
             file=sys.stderr,
@@ -204,18 +198,18 @@ def main(argv: list[str] | None = None) -> int:
 
     # Resolve git context when status file tracking is enabled
     commit_sha: str | None = None
-    if args.status_file:
+    if config.status_file:
         commit_sha = _resolve_git_context(args.allow_dirty)
     elif args.output:
         # Best-effort: tag report history with commit SHA without enforcing clean tree
         commit_sha = _resolve_git_context(allow_dirty=True)
 
     # Sync disabled state from manifest and remove disabled tests from DAG
-    if args.status_file:
+    if config.status_file:
         from orchestrator.lifecycle.burnin import sync_disabled_state
         from orchestrator.lifecycle.status import StatusFile
 
-        sf = StatusFile(args.status_file, config_path=args.config_file)
+        sf = StatusFile(config.status_file, config_path=config.path)
         sync_events = sync_disabled_state(dag, sf)
         if sync_events:
             print("Disabled state sync:")
@@ -256,8 +250,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error during execution: {e}", file=sys.stderr)
         return 1
 
-    _update_status_file(results, args, commit_sha)
-    demoted = _print_results(results, args, commit_sha, manifest)
+    _update_status_file(results, config, commit_sha)
+    demoted = _print_results(results, args, config, commit_sha, manifest)
     has_failure = any(r.status == "failed" for r in results)
     return 1 if (has_failure or demoted) else 0
 
@@ -374,10 +368,10 @@ def _run_regression(
         print(f"Error during execution: {e}", file=sys.stderr)
         return 1
 
-    _update_status_file(results, args, commit_sha)
+    _update_status_file(results, config, commit_sha)
     verdict_data = _compute_verdict(args, config, filtered_dag, commit_sha)
     demoted = _print_results(
-        results, args, commit_sha, filtered_manifest, verdict_data,
+        results, args, config, commit_sha, filtered_manifest, verdict_data,
     )
     has_failure = any(r.status == "failed" for r in results)
     return 1 if (has_failure or demoted) else 0
@@ -405,9 +399,9 @@ def _run_effort(
     from orchestrator.execution.effort import EffortRunner
     from orchestrator.lifecycle.status import StatusFile
 
-    if not args.status_file:
+    if not config.status_file:
         print(
-            "Error: --effort converge/max requires --status-file",
+            "Error: --effort converge/max requires status_file in .test_set_config",
             file=sys.stderr,
         )
         return 1
@@ -421,7 +415,7 @@ def _run_effort(
             )
             return 1
 
-    sf = StatusFile(args.status_file, config_path=args.config_file)
+    sf = StatusFile(config.status_file, config_path=config.path)
 
     # Phase 1: Execute all tests once
     executor: SequentialExecutor | AsyncExecutor
@@ -530,7 +524,7 @@ def _compute_verdict(
     Returns:
         Verdict dict for the reporter, or None if disabled.
     """
-    if args.effort is None or not args.status_file:
+    if args.effort is None or not config.status_file:
         return None
 
     from orchestrator.lifecycle.e_values import (
@@ -540,7 +534,7 @@ def _compute_verdict(
     )
     from orchestrator.lifecycle.status import StatusFile
 
-    sf = StatusFile(args.status_file, config_path=args.config_file)
+    sf = StatusFile(config.status_file, config_path=config.path)
     test_names = list(dag.nodes.keys())
 
     alpha_set = 0.05
@@ -587,16 +581,16 @@ def _compute_verdict(
 
 
 def _update_status_file(
-    results: list, args: argparse.Namespace, commit_sha: str | None
+    results: list, config: TestSetConfig, commit_sha: str | None
 ) -> None:
-    """Update the status file with test results if --status-file is set."""
-    if not args.status_file:
+    """Update the status file with test results if status_file is configured."""
+    if not config.status_file:
         return
 
     from orchestrator.lifecycle.burnin import process_results
     from orchestrator.lifecycle.status import StatusFile
 
-    sf = StatusFile(args.status_file, config_path=args.config_file)
+    sf = StatusFile(config.status_file, config_path=config.path)
     events = process_results(results, sf, commit_sha=commit_sha)
     if events:
         print("\nLifecycle events:")
@@ -606,6 +600,7 @@ def _update_status_file(
 
 def _print_results(
     results: list, args: argparse.Namespace,
+    config: TestSetConfig,
     commit_sha: str | None = None,
     manifest: dict | None = None,
     verdict_data: dict[str, Any] | None = None,
@@ -654,10 +649,10 @@ def _print_results(
             reporter.set_e_value_verdict(verdict_data)
 
         # Feed lifecycle data from status file to reporter
-        if args.status_file and args.status_file.exists():
+        if config.status_file and config.status_file.exists():
             from orchestrator.lifecycle.status import StatusFile
 
-            sf = StatusFile(args.status_file, config_path=args.config_file)
+            sf = StatusFile(config.status_file, config_path=config.path)
             lifecycle_data: dict[str, dict[str, Any]] = {}
             for test_name, entry in sf.get_all_tests().items():
                 lifecycle_data[test_name] = {
@@ -799,10 +794,10 @@ def _print_effort_results(
         }
         reporter.set_effort_data(effort_data)
 
-        if args.status_file and args.status_file.exists():
+        if config.status_file and config.status_file.exists():
             from orchestrator.lifecycle.status import StatusFile
 
-            sf = StatusFile(args.status_file, config_path=args.config_file)
+            sf = StatusFile(config.status_file, config_path=config.path)
             lifecycle_data: dict[str, dict[str, Any]] = {}
             for test_name, entry in sf.get_all_tests().items():
                 lifecycle_data[test_name] = {
