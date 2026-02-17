@@ -450,6 +450,10 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     if "e_value_verdict" in report:
         parts.append(_render_e_value_verdict(report["e_value_verdict"]))
 
+    # Effort classification section
+    if "effort" in report:
+        parts.append(_render_effort_section(report["effort"]))
+
     # Regression selection section
     if "regression_selection" in report:
         parts.append(_render_regression_selection(report["regression_selection"]))
@@ -1001,6 +1005,66 @@ def _render_e_value_verdict(verdict_data: dict[str, Any]) -> str:
             )
         parts.append("</table>")
         parts.append("</details>")
+
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+_CLASSIFICATION_COLORS: dict[str, str] = {
+    "true_pass": "#90EE90",
+    "true_fail": "#FFB6C1",
+    "flake": "#FFFFAD",
+    "undecided": "#D3D3D3",
+}
+
+
+def _render_effort_section(effort_data: dict[str, Any]) -> str:
+    """Render effort mode SPRT classification section."""
+    parts: list[str] = []
+    parts.append('<div class="e-value-verdict">')
+    parts.append(f"<h2>Effort: {html.escape(str(effort_data.get('mode', '')))}</h2>")
+
+    total_reruns = effort_data.get("total_reruns", 0)
+    max_reruns = effort_data.get("max_reruns_per_test", 0)
+    parts.append(
+        f"<strong>Total reruns:</strong> {total_reruns} "
+        f"(budget: {max_reruns} per test)<br>"
+    )
+
+    classifications = effort_data.get("classifications", {})
+    if classifications:
+        parts.append(f"<strong>Tests classified:</strong> {len(classifications)}<br>")
+
+        # Summary counts
+        counts: dict[str, int] = {}
+        for c in classifications.values():
+            cls = c.get("classification", "unknown")
+            counts[cls] = counts.get(cls, 0) + 1
+        summary_parts = [f"{count} {cls}" for cls, count in sorted(counts.items())]
+        parts.append(f"<strong>Summary:</strong> {', '.join(summary_parts)}")
+
+        # Classification table
+        parts.append('<table class="measurements-table">')
+        parts.append(
+            "<tr><th>Test</th><th>Classification</th>"
+            "<th>Initial</th><th>Runs</th><th>Passes</th><th>SPRT</th></tr>"
+        )
+        for test_name, c in sorted(classifications.items()):
+            tname = html.escape(str(test_name))
+            cls = c.get("classification", "")
+            color = _CLASSIFICATION_COLORS.get(cls, "#FFFFFF")
+            initial = c.get("initial_status", "")
+            runs = c.get("runs", 0)
+            passes = c.get("passes", 0)
+            sprt = c.get("sprt_decision", "")
+            parts.append(
+                f"<tr><td>{tname}</td>"
+                f'<td style="background:{color}">{html.escape(cls)}</td>'
+                f"<td>{html.escape(initial)}</td>"
+                f"<td>{runs}</td><td>{passes}</td>"
+                f"<td>{html.escape(sprt)}</td></tr>"
+            )
+        parts.append("</table>")
 
     parts.append("</div>")
     return "\n".join(parts)

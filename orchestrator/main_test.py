@@ -1,4 +1,4 @@
-"""Tests for the orchestrator main entry point, focused on the regression option."""
+"""Tests for the orchestrator main entry point, focused on the effort option."""
 
 from __future__ import annotations
 
@@ -17,36 +17,60 @@ from orchestrator.main import (
 )
 
 
-class TestParseArgsRegression:
-    """Tests for regression option argument parsing."""
+class TestParseArgsEffort:
+    """Tests for effort option argument parsing."""
 
-    def test_regression_flag_accepted(self):
-        """--regression is a valid flag combinable with any mode."""
+    def test_effort_regression_accepted(self):
+        """--effort regression is a valid flag combinable with any mode."""
         args = parse_args([
             "--manifest", "/path/manifest.json",
             "--mode", "diagnostic",
-            "--regression",
+            "--effort", "regression",
             "--diff-base", "main",
         ])
         assert args.mode == "diagnostic"
-        assert args.regression is True
+        assert args.effort == "regression"
         assert args.diff_base == "main"
 
-    def test_regression_with_detection_mode(self):
-        """--regression combines with --mode=detection."""
+    def test_effort_regression_with_detection_mode(self):
+        """--effort regression combines with --mode=detection."""
         args = parse_args([
             "--manifest", "/path/manifest.json",
             "--mode", "detection",
-            "--regression",
+            "--effort", "regression",
             "--diff-base", "main",
         ])
         assert args.mode == "detection"
-        assert args.regression is True
+        assert args.effort == "regression"
 
-    def test_regression_default_false(self):
-        """--regression defaults to False."""
+    def test_effort_default_none(self):
+        """--effort defaults to None."""
         args = parse_args(["--manifest", "/path/manifest.json"])
-        assert args.regression is False
+        assert args.effort is None
+
+    def test_effort_converge_accepted(self):
+        """--effort converge is a valid choice."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--effort", "converge",
+        ])
+        assert args.effort == "converge"
+
+    def test_effort_max_accepted(self):
+        """--effort max is a valid choice."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--effort", "max",
+        ])
+        assert args.effort == "max"
+
+    def test_effort_invalid_choice_rejected(self):
+        """--effort with invalid choice raises SystemExit."""
+        with pytest.raises(SystemExit):
+            parse_args([
+                "--manifest", "/path/manifest.json",
+                "--effort", "invalid",
+            ])
 
     def test_diff_base_flag(self):
         """--diff-base flag parsed correctly."""
@@ -88,15 +112,24 @@ class TestParseArgsRegression:
         ])
         assert args.max_hops == 3
 
+    def test_max_reruns_flag(self):
+        """--max-reruns flag parsed correctly."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--max-reruns", "50",
+        ])
+        assert args.max_reruns == 50
+
     def test_default_values(self):
-        """Default values for regression flags."""
+        """Default values for effort-related flags."""
         args = parse_args(["--manifest", "/path/manifest.json"])
         assert args.diff_base is None
         assert args.changed_files is None
-        assert args.regression is False
+        assert args.effort is None
         assert args.co_occurrence_graph == Path(".tests/co_occurrence_graph.json")
         assert args.max_test_percentage == 0.10
         assert args.max_hops == 2
+        assert args.max_reruns == 100
         assert args.allow_dirty is False
 
     def test_allow_dirty_flag(self):
@@ -164,8 +197,8 @@ class TestFilterManifest:
         assert filtered["test_set_tests"] == {}
 
 
-class TestRegressionOptionMissingGraph:
-    """Tests for regression option with missing co-occurrence graph."""
+class TestEffortRegressionMissingGraph:
+    """Tests for effort regression with missing co-occurrence graph."""
 
     def test_regression_missing_graph(self):
         """Missing graph file produces clear error."""
@@ -180,14 +213,14 @@ class TestRegressionOptionMissingGraph:
 
             exit_code = main([
                 "--manifest", str(manifest_path),
-                "--regression",
+                "--effort", "regression",
                 "--changed-files", "src/a.py",
                 "--co-occurrence-graph", str(Path(tmpdir) / "nonexistent.json"),
             ])
             assert exit_code == 1
 
     def test_regression_no_diff_base_or_changed_files(self):
-        """--regression without --diff-base or --changed-files errors."""
+        """--effort regression without --diff-base or --changed-files errors."""
         from orchestrator.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -207,19 +240,18 @@ class TestRegressionOptionMissingGraph:
 
             exit_code = main([
                 "--manifest", str(manifest_path),
-                "--regression",
+                "--effort", "regression",
                 "--co-occurrence-graph", str(graph_path),
             ])
             assert exit_code == 1
 
 
-class TestRegressionOptionEndToEnd:
-    """End-to-end tests for regression option."""
+class TestEffortRegressionEndToEnd:
+    """End-to-end tests for effort regression."""
 
     def test_regression_diagnostic_with_changed_files(self):
-        """--regression with diagnostic mode runs selected tests."""
+        """--effort regression with diagnostic mode runs selected tests."""
         from orchestrator.main import main
-        from orchestrator.regression.co_occurrence import save_graph, build_co_occurrence_graph
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create a simple pass-script
@@ -270,7 +302,7 @@ class TestRegressionOptionEndToEnd:
             exit_code = main([
                 "--manifest", str(manifest_path),
                 "--mode", "diagnostic",
-                "--regression",
+                "--effort", "regression",
                 "--changed-files", "src/auth.py",
                 "--co-occurrence-graph", str(graph_path),
                 "--max-parallel", "1",
@@ -278,7 +310,7 @@ class TestRegressionOptionEndToEnd:
             assert exit_code == 0
 
     def test_regression_detection_with_changed_files(self):
-        """--regression with detection mode runs selected tests."""
+        """--effort regression with detection mode runs selected tests."""
         from orchestrator.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -330,7 +362,7 @@ class TestRegressionOptionEndToEnd:
             exit_code = main([
                 "--manifest", str(manifest_path),
                 "--mode", "detection",
-                "--regression",
+                "--effort", "regression",
                 "--changed-files", "src/auth.py",
                 "--co-occurrence-graph", str(graph_path),
                 "--max-parallel", "1",
@@ -338,7 +370,7 @@ class TestRegressionOptionEndToEnd:
             assert exit_code == 0
 
     def test_regression_no_changed_files_returns_zero(self):
-        """--regression with empty changed files returns 0."""
+        """--effort regression with empty changed files returns 0."""
         from orchestrator.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -357,11 +389,49 @@ class TestRegressionOptionEndToEnd:
 
             exit_code = main([
                 "--manifest", str(manifest_path),
-                "--regression",
+                "--effort", "regression",
                 "--changed-files", "",
                 "--co-occurrence-graph", str(graph_path),
             ])
             assert exit_code == 0
+
+
+class TestEffortConvergeRequiresStatusFile:
+    """Tests for effort converge/max validation."""
+
+    def test_converge_requires_status_file(self):
+        """--effort converge without --status-file returns error."""
+        from orchestrator.main import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps({
+                "test_set": {"name": "tests"},
+                "test_set_tests": {},
+            }))
+
+            exit_code = main([
+                "--manifest", str(manifest_path),
+                "--effort", "converge",
+            ])
+            assert exit_code == 1
+
+    def test_max_requires_status_file(self):
+        """--effort max without --status-file returns error."""
+        from orchestrator.main import main
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps({
+                "test_set": {"name": "tests"},
+                "test_set_tests": {},
+            }))
+
+            exit_code = main([
+                "--manifest", str(manifest_path),
+                "--effort", "max",
+            ])
+            assert exit_code == 1
 
 
 class TestResolveGitContext:

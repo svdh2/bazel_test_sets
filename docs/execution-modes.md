@@ -1,8 +1,8 @@
 # Execution Modes
 
 The orchestrator supports two execution modes, each optimized for a
-different use case. Either mode can be combined with the `--regression` flag
-to narrow the test scope.
+different use case. Either mode can be combined with the `--effort` flag
+to control test execution thoroughness.
 
 ## Diagnostic Mode
 
@@ -58,42 +58,69 @@ bazel run //orchestrator:main -- \
 - Pull request checks where fast feedback matters
 - Developer workstation testing
 
-## Regression Flag
+## Effort Modes
 
-Either mode can be combined with `--regression` to run only tests correlated
-with changed files. Co-occurrence scoring analyses git history to select the
-most relevant subset.
+The `--effort` flag controls test execution thoroughness. Each mode implies
+a verdict computation level.
 
-**Selection algorithm**:
-1. Identify changed files (via `--diff-base` or `--changed-files`)
-2. Load co-occurrence graph
-3. Find tests that historically co-occurred with changed files
-4. Score tests by frequency, recency, and hop distance
-5. Select top tests up to `--max-test-percentage` of stable tests
-6. Add dependency closure for self-containment
+| Mode | Behavior | Verdict | Use case |
+|------|----------|---------|----------|
+| *(none)* | Run all tests once | none | Local dev, quick checks |
+| `regression` | Co-occurrence test selection | quick | Feature branch CI |
+| `converge` | Run all, SPRT-rerun failures | hifi | Merge-stage CI |
+| `max` | Run all, SPRT-rerun everything | hifi | Release validation |
+
+### Regression
+
+Narrows test scope to tests correlated with changed files via co-occurrence
+scoring. See [Regression](regression-mode.md) for full details.
 
 ```bash
-# Diagnostic mode with regression selection (using git diff)
 bazel run //orchestrator:main -- \
     --manifest manifest.json \
     --mode diagnostic \
-    --regression \
+    --effort regression \
     --diff-base main
-
-# Detection mode with regression selection (using explicit file list)
-bazel run //orchestrator:main -- \
-    --manifest manifest.json \
-    --mode detection \
-    --regression \
-    --changed-files "src/auth.py,src/payment.py"
 ```
 
-**When to use**:
-- Feature branch CI where running all tests is too slow
-- Large test suites where only a subset is relevant
-- Post-commit testing with targeted coverage
+### Converge
 
-See [Regression](regression-mode.md) for full details.
+Runs all tests once, then reruns only failed tests using SPRT until each is
+classified as true_fail (genuine failure) or flake (intermittent). Passing
+tests are classified as true_pass without reruns.
+
+```bash
+bazel run //orchestrator:main -- \
+    --manifest manifest.json \
+    --effort converge \
+    --status-file .tests/status.json \
+    --max-reruns 100
+```
+
+### Max
+
+Runs all tests once, then reruns ALL tests (both passing and failing) using
+SPRT. Provides the most thorough classification of every test.
+
+```bash
+bazel run //orchestrator:main -- \
+    --manifest manifest.json \
+    --effort max \
+    --status-file .tests/status.json \
+    --max-reruns 100
+```
+
+### SPRT Classification
+
+For converge and max modes, each test is classified based on its initial
+status and SPRT outcome:
+
+| Initial status | SPRT accept (reliable) | SPRT reject (unreliable) | Budget exhausted |
+|---|---|---|---|
+| failed | flake | true_fail | undecided |
+| passed | true_pass | flake | undecided |
+
+Flakes cause exit code 1 (block CI).
 
 ## Parallel Execution
 

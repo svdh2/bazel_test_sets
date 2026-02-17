@@ -99,9 +99,15 @@ bazel run @test_sets_bazel_rules//orchestrator:main -- \
 
 Both modes support parallel execution with `--max-parallel` while still respecting DAG constraints.
 
-### Regression flag
+### Effort modes
 
-Either mode can be combined with `--regression` to narrow the test scope to tests correlated with changed files. Co-occurrence scoring analyses git history to select only the tests affected by the current changes, making it ideal for feature branch CI.
+Either mode can be combined with `--effort` to control test execution thoroughness:
+
+| Effort | Behavior | Use case |
+|--------|----------|----------|
+| **regression** | Co-occurrence test selection + quick verdict | Feature branch CI - fast feedback on likely regressions |
+| **converge** | Run all tests, SPRT-rerun failures + hifi verdict | Merge gate CI - catch less obvious errors |
+| **max** | Run all tests, SPRT-rerun all + hifi verdict | Release validation - classify every test |
 
 ## Parameterized tests
 

@@ -49,6 +49,7 @@ class Reporter:
         self.regression_selection: dict[str, Any] | None = None
         self.inferred_deps: dict[str, list[dict[str, Any]]] = {}
         self.e_value_verdict: dict[str, Any] | None = None
+        self.effort_data: dict[str, Any] | None = None
         self.lifecycle_data: dict[str, dict[str, Any]] = {}
         self.lifecycle_config: dict[str, Any] | None = None
         self.reliability_demoted_tests: list[str] = []
@@ -111,6 +112,15 @@ class Reporter:
                 e_set, per_test, etc.
         """
         self.e_value_verdict = verdict_data
+
+    def set_effort_data(self, data: dict[str, Any]) -> None:
+        """Set effort mode classification data for the report.
+
+        Args:
+            data: Dict with mode, total_reruns, max_reruns_per_test,
+                and classifications.
+        """
+        self.effort_data = data
 
     def set_lifecycle_data(
         self, data: dict[str, dict[str, Any]]
@@ -180,6 +190,9 @@ class Reporter:
 
         if self.e_value_verdict:
             report["e_value_verdict"] = self.e_value_verdict
+
+        if self.effort_data:
+            report["effort"] = self.effort_data
 
         if self.lifecycle_config:
             report["lifecycle_config"] = self.lifecycle_config
