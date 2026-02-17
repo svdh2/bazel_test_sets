@@ -23,6 +23,24 @@ STATUS_COLORS: dict[str, str] = {
     "no_tests": "#D3D3D3",
 }
 
+# Lifecycle state color mapping
+LIFECYCLE_COLORS: dict[str, str] = {
+    "new": "#87CEEB",
+    "burning_in": "#FFD700",
+    "stable": "#90EE90",
+    "flaky": "#FFB6C1",
+    "disabled": "#D3D3D3",
+}
+
+# Lifecycle state display labels
+LIFECYCLE_LABELS: dict[str, str] = {
+    "new": "NEW",
+    "burning_in": "BURNING IN",
+    "stable": "STABLE",
+    "flaky": "FLAKY",
+    "disabled": "DISABLED",
+}
+
 # Status display labels
 STATUS_LABELS: dict[str, str] = {
     "passed": "PASSED",
@@ -270,6 +288,43 @@ pre {
     border-radius: 3px;
     font-size: 12px;
 }
+.lifecycle-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #333;
+    margin-left: 6px;
+}
+.lifecycle-reliability {
+    font-size: 12px;
+    color: #555;
+    margin-left: 8px;
+}
+.lifecycle-summary {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin: 6px 0;
+    align-items: center;
+    font-size: 12px;
+}
+.lifecycle-summary-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 11px;
+    color: #333;
+}
+.lifecycle-config-note {
+    font-size: 11px;
+    color: #888;
+    margin-top: 2px;
+}
 """
 
 
@@ -300,10 +355,14 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     parts.append(_render_header(report))
 
     history = report.get("history", {})
+    lifecycle_config = report.get("lifecycle_config")
 
     # Test set (hierarchical) or flat tests
     if "test_set" in report:
-        parts.append(_render_test_set(report["test_set"], history))
+        parts.append(_render_test_set(
+            report["test_set"], history,
+            lifecycle_config=lifecycle_config,
+        ))
     elif "tests" in report:
         parts.append(_render_flat_tests(report["tests"], history))
 
@@ -424,6 +483,7 @@ def _render_test_set(
     test_set: dict[str, Any],
     history: dict[str, list[dict[str, Any]]],
     is_root: bool = True,
+    lifecycle_config: dict[str, Any] | None = None,
 ) -> str:
     """Render a test set section, recursing into subsets.
 
@@ -467,6 +527,13 @@ def _render_test_set(
                 f'<div class="test-meta">Assertion: {html.escape(assertion)}</div>'
             )
 
+    # Lifecycle summary for this test set
+    lifecycle_summary = test_set.get("lifecycle_summary")
+    if lifecycle_summary:
+        parts.append(_render_lifecycle_summary(
+            lifecycle_summary, lifecycle_config,
+        ))
+
     # Direct tests inside a test-list container
     tests = test_set.get("tests", {})
     if tests:
@@ -479,7 +546,10 @@ def _render_test_set(
 
     # Recurse into subsets
     for subset in test_set.get("subsets", []):
-        parts.append(_render_test_set(subset, history, is_root=False))
+        parts.append(_render_test_set(
+            subset, history, is_root=False,
+            lifecycle_config=lifecycle_config,
+        ))
 
     # Close wrappers
     if is_root:
@@ -504,10 +574,17 @@ def _render_test_entry(
     assertion = data.get("assertion", "")
 
     parts.append(f'<div class="test-entry" style="border-left-color:{color}">')
+
+    lifecycle_html = ""
+    lifecycle = data.get("lifecycle")
+    if lifecycle:
+        lifecycle_html = " " + _render_lifecycle_badge(lifecycle)
+
     parts.append(
         f'<div class="test-name">{html.escape(name)} '
         f'<span class="status-badge" style="background:{color}">'
-        f"{html.escape(label)}</span></div>"
+        f"{html.escape(label)}</span>"
+        f"{lifecycle_html}</div>"
     )
 
     # History timeline
@@ -662,6 +739,73 @@ def _render_inferred_deps(deps: list[dict[str, Any]]) -> str:
         parts.append(f"<li>{dep_str}</li>")
     parts.append("</ul>")
     parts.append("</details>")
+    return "\n".join(parts)
+
+
+def _render_lifecycle_badge(lifecycle: dict[str, Any]) -> str:
+    """Render a lifecycle state badge with reliability rate."""
+    state = lifecycle.get("state", "new")
+    color = LIFECYCLE_COLORS.get(state, "#e8e8e8")
+    label = LIFECYCLE_LABELS.get(state, state.upper())
+    runs = lifecycle.get("runs", 0)
+    passes = lifecycle.get("passes", 0)
+    reliability = lifecycle.get("reliability", 0.0)
+
+    parts: list[str] = []
+    parts.append(
+        f'<span class="lifecycle-badge" style="background:{color}">'
+        f"{html.escape(label)}</span>"
+    )
+    if runs > 0:
+        pct = f"{reliability * 100:.1f}%"
+        parts.append(
+            f'<span class="lifecycle-reliability">'
+            f"{html.escape(pct)} ({passes}/{runs})</span>"
+        )
+    return "".join(parts)
+
+
+def _render_lifecycle_summary(
+    summary: dict[str, Any],
+    config: dict[str, Any] | None = None,
+) -> str:
+    """Render a lifecycle summary for a test set node."""
+    parts: list[str] = []
+    parts.append('<div class="lifecycle-summary">')
+
+    for state_name in ("stable", "burning_in", "flaky", "new", "disabled"):
+        count = summary.get(state_name, 0)
+        if count > 0:
+            color = LIFECYCLE_COLORS.get(state_name, "#e8e8e8")
+            label = LIFECYCLE_LABELS.get(state_name, state_name.upper())
+            parts.append(
+                f'<span class="lifecycle-summary-item" '
+                f'style="background:{color}">'
+                f"{count} {html.escape(label)}</span>"
+            )
+
+    agg_runs = summary.get("aggregate_runs", 0)
+    agg_passes = summary.get("aggregate_passes", 0)
+    agg_reliability = summary.get("aggregate_reliability", 0.0)
+    if agg_runs > 0:
+        pct = f"{agg_reliability * 100:.1f}%"
+        parts.append(
+            f'<span class="lifecycle-reliability">'
+            f"Reliability: {html.escape(pct)} ({agg_passes}/{agg_runs})"
+            f"</span>"
+        )
+
+    parts.append("</div>")
+
+    if config:
+        min_rel = config.get("min_reliability", 0)
+        sig = config.get("statistical_significance", 0)
+        parts.append(
+            f'<div class="lifecycle-config-note">'
+            f"Threshold: {min_rel*100:.0f}% reliability "
+            f"at {sig*100:.0f}% confidence</div>"
+        )
+
     return "\n".join(parts)
 
 

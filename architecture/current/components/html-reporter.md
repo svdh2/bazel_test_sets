@@ -28,6 +28,8 @@ def write_html_report(report_data: dict, output_path: Path)
 | **Structured log** | Expandable section with block sequence, measurement table, results, errors |
 | **History timeline** | Compact horizontal bar of colored boxes showing pass/fail history; hover reveals commit hash |
 | **Burn-in info** | Blue info box with runs, passes, SPRT status |
+| **Lifecycle badge** | Per-test badge showing lifecycle state (stable/burning_in/flaky/new/disabled) with reliability rate |
+| **Lifecycle summary** | Per-test-set summary showing state counts and aggregate reliability with config thresholds |
 | **Regression section** | Changed files list, test scores table |
 
 ### Status Colors
@@ -39,6 +41,16 @@ def write_html_report(report_data: dict, output_path: Path)
 | `dependencies_failed` | `#D3D3D3` (light grey) |
 | `passed+dependencies_failed` | `#FFFFAD` (light yellow) |
 | `failed+dependencies_failed` | `#FFB6C1` (light pink) |
+
+### Lifecycle State Colors
+
+| State | Color |
+|-------|-------|
+| `new` | `#87CEEB` (light blue) |
+| `burning_in` | `#FFD700` (gold) |
+| `stable` | `#90EE90` (light green) |
+| `flaky` | `#FFB6C1` (light pink) |
+| `disabled` | `#D3D3D3` (grey) |
 
 ## Dependencies
 

@@ -752,3 +752,297 @@ class TestAggregateStatus:
 
     def test_combined_status_failed(self):
         assert _aggregate_status(["passed", "failed+dependencies_failed"]) == "failed"
+
+
+class TestLifecycleDataInReport:
+    """Tests for lifecycle data in reports."""
+
+    def test_lifecycle_included_in_test_entry(self):
+        """Lifecycle data appears in hierarchical test entries."""
+        reporter = Reporter()
+        reporter.set_manifest(SAMPLE_MANIFEST)
+        reporter.set_lifecycle_data({
+            "auth_test": {"state": "stable"},
+        })
+        reporter.add_results([
+            TestResult(
+                name="auth_test", assertion="Auth works",
+                status="passed", duration=1.0,
+            ),
+        ])
+        report = reporter.generate_report()
+        auth = report["report"]["test_set"]["tests"]["auth_test"]
+        assert "lifecycle" in auth
+        assert auth["lifecycle"]["state"] == "stable"
+
+    def test_lifecycle_omitted_when_not_set(self):
+        """No lifecycle key when lifecycle_data is empty."""
+        reporter = Reporter()
+        reporter.set_manifest(SAMPLE_MANIFEST)
+        reporter.add_results([
+            TestResult(
+                name="auth_test", assertion="Auth works",
+                status="passed", duration=1.0,
+            ),
+        ])
+        report = reporter.generate_report()
+        auth = report["report"]["test_set"]["tests"]["auth_test"]
+        assert "lifecycle" not in auth
+
+    def test_lifecycle_summary_in_nested_node(self):
+        """Lifecycle summary state counts are computed for nested nodes."""
+        reporter = Reporter()
+        reporter.set_manifest(NESTED_MANIFEST)
+        reporter.set_lifecycle_data({
+            "root_test": {"state": "stable"},
+            "child_test": {"state": "burning_in"},
+        })
+        reporter.add_results([
+            TestResult(
+                name="root_test", assertion="Root test works",
+                status="passed", duration=1.0,
+            ),
+            TestResult(
+                name="child_test", assertion="Child test works",
+                status="passed", duration=2.0,
+            ),
+        ])
+        report = reporter.generate_report()
+        root = report["report"]["test_set"]
+        assert "lifecycle_summary" in root
+        assert root["lifecycle_summary"]["total"] == 2
+        assert root["lifecycle_summary"]["stable"] == 1
+        assert root["lifecycle_summary"]["burning_in"] == 1
+
+    def test_lifecycle_summary_absent_without_data(self):
+        """No lifecycle_summary when no lifecycle data is set."""
+        reporter = Reporter()
+        reporter.set_manifest(NESTED_MANIFEST)
+        reporter.add_results([
+            TestResult(
+                name="root_test", assertion="Root test works",
+                status="passed", duration=1.0,
+            ),
+        ])
+        report = reporter.generate_report()
+        assert "lifecycle_summary" not in report["report"]["test_set"]
+
+    def test_lifecycle_config_in_report(self):
+        """Lifecycle config appears at report top level."""
+        reporter = Reporter()
+        reporter.set_lifecycle_config({
+            "min_reliability": 0.99,
+            "statistical_significance": 0.95,
+        })
+        reporter.add_results([
+            TestResult(
+                name="a", assertion="A", status="passed",
+                duration=1.0,
+            ),
+        ])
+        report = reporter.generate_report()
+        assert "lifecycle_config" in report["report"]
+        assert report["report"]["lifecycle_config"]["min_reliability"] == 0.99
+
+    def test_lifecycle_config_omitted_when_not_set(self):
+        """No lifecycle_config when not set."""
+        reporter = Reporter()
+        reporter.add_results([
+            TestResult(
+                name="a", assertion="A", status="passed",
+                duration=1.0,
+            ),
+        ])
+        report = reporter.generate_report()
+        assert "lifecycle_config" not in report["report"]
+
+    def test_lifecycle_summary_flat_manifest(self):
+        """Lifecycle summary works with flat (old-style) manifests."""
+        reporter = Reporter()
+        reporter.set_manifest(SAMPLE_MANIFEST)
+        reporter.set_lifecycle_data({
+            "auth_test": {"state": "stable"},
+            "billing_test": {"state": "flaky"},
+        })
+        reporter.add_results([
+            TestResult(
+                name="auth_test", assertion="Auth works",
+                status="passed", duration=1.0,
+            ),
+            TestResult(
+                name="billing_test", assertion="Billing works",
+                status="passed", duration=2.0,
+            ),
+        ])
+        report = reporter.generate_report()
+        summary = report["report"]["test_set"]["lifecycle_summary"]
+        assert summary["total"] == 2
+        assert summary["stable"] == 1
+        assert summary["flaky"] == 1
+
+
+class TestLifecycleReliabilityFromHistory:
+    """Tests that lifecycle reliability is recomputed from rolling history.
+
+    StatusFile counters reset on lifecycle transitions (e.g. flaky ->
+    burning_in resets runs/passes to 0/0).  The rolling report history
+    accumulates across all runs and is never reset.  When using
+    generate_report_with_history(), reliability must be computed from
+    the accumulated history so the displayed percentage matches the
+    visible timeline.
+    """
+
+    def test_reliability_updated_from_history(self):
+        """Reliability is recomputed from history, not StatusFile counters."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "report.json"
+            # Existing history: 8 passed, 2 failed = 80% reliability
+            initial = {
+                "report": {
+                    "history": {
+                        "auth_test": [
+                            {"status": "passed", "duration_seconds": 1.0, "timestamp": f"t{i}"}
+                            for i in range(8)
+                        ] + [
+                            {"status": "failed", "duration_seconds": 1.0, "timestamp": f"t{i}"}
+                            for i in range(8, 10)
+                        ],
+                    },
+                },
+            }
+            with open(path, "w") as f:
+                json.dump(initial, f)
+
+            reporter = Reporter()
+            reporter.set_manifest(SAMPLE_MANIFEST)
+            reporter.set_lifecycle_data({
+                "auth_test": {"state": "stable"},
+            })
+            reporter.add_results([
+                TestResult(
+                    name="auth_test", assertion="Auth works",
+                    status="passed", duration=1.0,
+                ),
+            ])
+
+            report = reporter.generate_report_with_history(path)
+            auth = report["report"]["test_set"]["tests"]["auth_test"]
+            # History: 8 passed + 2 failed + 1 new passed = 9/11
+            assert auth["lifecycle"]["runs"] == 11
+            assert auth["lifecycle"]["passes"] == 9
+            expected = round(9 / 11, 6)
+            assert auth["lifecycle"]["reliability"] == expected
+            # State is still from StatusFile
+            assert auth["lifecycle"]["state"] == "stable"
+
+    def test_deps_failed_excluded_from_reliability(self):
+        """dependencies_failed entries are excluded from reliability count."""
+        reporter = Reporter()
+        reporter.set_manifest(SAMPLE_MANIFEST)
+        reporter.set_lifecycle_data({
+            "auth_test": {"state": "stable"},
+        })
+        reporter.add_results([
+            TestResult(
+                name="auth_test", assertion="Auth works",
+                status="dependencies_failed", duration=0.0,
+            ),
+        ])
+
+        report = reporter.generate_report_with_history(None)
+        auth = report["report"]["test_set"]["tests"]["auth_test"]
+        # dependencies_failed should not count as a run
+        assert auth["lifecycle"]["runs"] == 0
+        assert auth["lifecycle"]["passes"] == 0
+        assert auth["lifecycle"]["reliability"] == 0.0
+
+    def test_combined_statuses_counted_correctly(self):
+        """passed+deps_failed counts as pass; failed+deps_failed as fail."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "report.json"
+            initial = {
+                "report": {
+                    "history": {
+                        "auth_test": [
+                            {"status": "passed+dependencies_failed",
+                             "duration_seconds": 1.0, "timestamp": "t0"},
+                            {"status": "failed+dependencies_failed",
+                             "duration_seconds": 1.0, "timestamp": "t1"},
+                        ],
+                    },
+                },
+            }
+            with open(path, "w") as f:
+                json.dump(initial, f)
+
+            reporter = Reporter()
+            reporter.set_manifest(SAMPLE_MANIFEST)
+            reporter.set_lifecycle_data({
+                "auth_test": {"state": "stable"},
+            })
+            reporter.add_results([
+                TestResult(
+                    name="auth_test", assertion="Auth works",
+                    status="passed", duration=1.0,
+                ),
+            ])
+
+            report = reporter.generate_report_with_history(path)
+            auth = report["report"]["test_set"]["tests"]["auth_test"]
+            # 2 existing (1 pass, 1 fail) + 1 new pass = 2/3
+            assert auth["lifecycle"]["runs"] == 3
+            assert auth["lifecycle"]["passes"] == 2
+
+    def test_lifecycle_summary_recomputed_from_history(self):
+        """Lifecycle summary uses history-based reliability."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "report.json"
+            initial = {
+                "report": {
+                    "history": {
+                        "root_test": [
+                            {"status": "passed", "duration_seconds": 1.0, "timestamp": "t0"},
+                            {"status": "failed", "duration_seconds": 1.0, "timestamp": "t1"},
+                        ],
+                        "child_test": [
+                            {"status": "passed", "duration_seconds": 1.0, "timestamp": "t0"},
+                        ],
+                    },
+                },
+            }
+            with open(path, "w") as f:
+                json.dump(initial, f)
+
+            reporter = Reporter()
+            reporter.set_manifest(NESTED_MANIFEST)
+            reporter.set_lifecycle_data({
+                "root_test": {"state": "stable"},
+                "child_test": {"state": "stable"},
+            })
+            reporter.add_results([
+                TestResult(
+                    name="root_test", assertion="Root test works",
+                    status="passed", duration=1.0,
+                ),
+                TestResult(
+                    name="child_test", assertion="Child test works",
+                    status="passed", duration=1.0,
+                ),
+            ])
+
+            report = reporter.generate_report_with_history(path)
+            root = report["report"]["test_set"]
+            # root_test: 2 passed + 1 failed = 2/3, child_test: 1 + 1 = 2/2
+            assert root["lifecycle_summary"]["aggregate_runs"] == 5
+            assert root["lifecycle_summary"]["aggregate_passes"] == 4
+
+    def test_no_lifecycle_data_skips_history_update(self):
+        """Without lifecycle_data, history update is skipped."""
+        reporter = Reporter()
+        reporter.add_results([
+            TestResult(name="a", assertion="A", status="passed", duration=1.0),
+        ])
+
+        # Should not raise even without lifecycle data
+        report = reporter.generate_report_with_history(None)
+        assert "history" in report["report"]

@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from orchestrator.reporting.html_reporter import (
+    LIFECYCLE_COLORS,
+    LIFECYCLE_LABELS,
     STATUS_COLORS,
     STATUS_LABELS,
     generate_html_from_file,
@@ -650,3 +652,135 @@ class TestHistoryTimeline:
         }
         result = generate_html_report(report)
         assert "#999" in result
+
+
+class TestLifecycleRendering:
+    """Tests for lifecycle state rendering in HTML reports."""
+
+    def test_lifecycle_badge_rendered_for_test(self):
+        """Lifecycle state badge appears on individual test entries."""
+        tests = {
+            "t": {
+                "assertion": "A", "status": "passed",
+                "duration_seconds": 1.0,
+                "lifecycle": {
+                    "state": "stable", "runs": 100, "passes": 99,
+                    "reliability": 0.99,
+                },
+            },
+        }
+        report = _make_hierarchical_report(tests=tests)
+        result = generate_html_report(report)
+        assert 'class="lifecycle-badge"' in result
+        assert "STABLE" in result
+        assert "99.0%" in result
+        assert "(99/100)" in result
+
+    def test_no_lifecycle_badge_without_data(self):
+        """No lifecycle badge element when lifecycle data is absent."""
+        tests = {
+            "t": {
+                "assertion": "A", "status": "passed",
+                "duration_seconds": 1.0,
+            },
+        }
+        report = _make_hierarchical_report(tests=tests)
+        result = generate_html_report(report)
+        # CSS class definition exists but no rendered badge element
+        assert 'class="lifecycle-badge"' not in result
+
+    def test_lifecycle_summary_rendered_for_test_set(self):
+        """Lifecycle summary appears on test set headers."""
+        report = _make_hierarchical_report()
+        report["report"]["test_set"]["lifecycle_summary"] = {
+            "total": 3, "stable": 2, "burning_in": 1, "flaky": 0,
+            "new": 0, "disabled": 0,
+            "aggregate_runs": 300, "aggregate_passes": 297,
+            "aggregate_reliability": 0.99,
+        }
+        result = generate_html_report(report)
+        assert "lifecycle-summary" in result
+        assert "2 STABLE" in result
+        assert "1 BURNING IN" in result
+        assert "99.0%" in result
+
+    def test_lifecycle_summary_omits_zero_counts(self):
+        """Zero-count states are not shown in summary."""
+        report = _make_hierarchical_report()
+        report["report"]["test_set"]["lifecycle_summary"] = {
+            "total": 2, "stable": 2, "burning_in": 0, "flaky": 0,
+            "new": 0, "disabled": 0,
+            "aggregate_runs": 200, "aggregate_passes": 200,
+            "aggregate_reliability": 1.0,
+        }
+        result = generate_html_report(report)
+        assert "FLAKY" not in result
+        assert "BURNING IN" not in result
+        assert "2 STABLE" in result
+
+    def test_lifecycle_config_note_rendered(self):
+        """Lifecycle config threshold note appears when config is set."""
+        report = _make_hierarchical_report()
+        report["report"]["test_set"]["lifecycle_summary"] = {
+            "total": 1, "stable": 1, "burning_in": 0, "flaky": 0,
+            "new": 0, "disabled": 0,
+            "aggregate_runs": 100, "aggregate_passes": 100,
+            "aggregate_reliability": 1.0,
+        }
+        report["report"]["lifecycle_config"] = {
+            "min_reliability": 0.99,
+            "statistical_significance": 0.95,
+        }
+        result = generate_html_report(report)
+        assert "lifecycle-config-note" in result
+        assert "99%" in result
+        assert "95%" in result
+
+    def test_lifecycle_badge_colors(self):
+        """Different lifecycle states use correct colors."""
+        for state, expected_color in [
+            ("stable", LIFECYCLE_COLORS["stable"]),
+            ("flaky", LIFECYCLE_COLORS["flaky"]),
+            ("burning_in", LIFECYCLE_COLORS["burning_in"]),
+            ("new", LIFECYCLE_COLORS["new"]),
+            ("disabled", LIFECYCLE_COLORS["disabled"]),
+        ]:
+            tests = {
+                "t": {
+                    "assertion": "A", "status": "passed",
+                    "duration_seconds": 1.0,
+                    "lifecycle": {
+                        "state": state, "runs": 10, "passes": 9,
+                        "reliability": 0.9,
+                    },
+                },
+            }
+            report = _make_hierarchical_report(tests=tests)
+            result = generate_html_report(report)
+            assert expected_color in result, (
+                f"Expected color {expected_color} for state {state}"
+            )
+
+    def test_lifecycle_zero_runs_no_percentage(self):
+        """Tests with zero runs show badge but no percentage."""
+        tests = {
+            "t": {
+                "assertion": "A", "status": "passed",
+                "duration_seconds": 1.0,
+                "lifecycle": {
+                    "state": "new", "runs": 0, "passes": 0,
+                    "reliability": 0.0,
+                },
+            },
+        }
+        report = _make_hierarchical_report(tests=tests)
+        result = generate_html_report(report)
+        assert 'class="lifecycle-badge"' in result
+        assert "NEW" in result
+        # No rendered reliability element (only CSS definition)
+        assert 'class="lifecycle-reliability"' not in result
+
+    def test_all_lifecycle_labels_have_colors(self):
+        """Every lifecycle state in LIFECYCLE_LABELS has a color."""
+        for state in LIFECYCLE_LABELS:
+            assert state in LIFECYCLE_COLORS

@@ -575,6 +575,22 @@ def _print_results(
         if verdict_data:
             reporter.set_e_value_verdict(verdict_data)
 
+        # Feed lifecycle data from status file to reporter
+        if args.status_file and args.status_file.exists():
+            from orchestrator.lifecycle.status import StatusFile
+
+            sf = StatusFile(args.status_file)
+            lifecycle_data: dict[str, dict[str, Any]] = {}
+            for test_name, entry in sf.get_all_tests().items():
+                lifecycle_data[test_name] = {
+                    "state": entry.get("state", "new"),
+                }
+            reporter.set_lifecycle_data(lifecycle_data)
+            reporter.set_lifecycle_config({
+                "min_reliability": sf.min_reliability,
+                "statistical_significance": sf.statistical_significance,
+            })
+
         # Use history-aware generation so the HTML timeline accumulates
         existing = args.output if args.output.exists() else None
         report_data = reporter.generate_report_with_history(existing)

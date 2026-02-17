@@ -50,6 +50,8 @@ class Reporter:
         self.regression_selection: dict[str, Any] | None = None
         self.inferred_deps: dict[str, list[dict[str, Any]]] = {}
         self.e_value_verdict: dict[str, Any] | None = None
+        self.lifecycle_data: dict[str, dict[str, Any]] = {}
+        self.lifecycle_config: dict[str, Any] | None = None
 
     def set_manifest(self, manifest: dict[str, Any]) -> None:
         """Set the manifest for hierarchical report generation.
@@ -121,6 +123,27 @@ class Reporter:
         """
         self.e_value_verdict = verdict_data
 
+    def set_lifecycle_data(
+        self, data: dict[str, dict[str, Any]]
+    ) -> None:
+        """Set lifecycle state data for all tests.
+
+        Args:
+            data: Dict mapping test_name to {state}.
+                The runs/passes/reliability fields are computed from
+                rolling history by generate_report_with_history().
+        """
+        self.lifecycle_data = data
+
+    def set_lifecycle_config(self, config: dict[str, Any]) -> None:
+        """Set lifecycle configuration for the report.
+
+        Args:
+            config: Dict with min_reliability and
+                statistical_significance.
+        """
+        self.lifecycle_config = config
+
     def add_result(self, result: TestResult) -> None:
         """Add a test result to the report.
 
@@ -168,6 +191,9 @@ class Reporter:
 
         if self.e_value_verdict:
             report["e_value_verdict"] = self.e_value_verdict
+
+        if self.lifecycle_config:
+            report["lifecycle_config"] = self.lifecycle_config
 
         return {"report": report}
 
@@ -219,7 +245,84 @@ class Reporter:
                 history[result.name] = history[result.name][-MAX_HISTORY:]
 
         report["report"]["history"] = history
+
+        # Update lifecycle reliability from accumulated history so the
+        # displayed percentage matches the visible timeline.  StatusFile
+        # counters reset on lifecycle transitions, but the rolling report
+        # history accumulates across all runs.
+        if self.lifecycle_data:
+            self._update_lifecycle_from_history(report["report"], history)
+
         return report
+
+    def _update_lifecycle_from_history(
+        self,
+        report_inner: dict[str, Any],
+        history: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        """Update lifecycle reliability using accumulated history.
+
+        StatusFile counters reset on lifecycle transitions, but the
+        rolling report history accumulates across all runs.  This method
+        recomputes reliability from history so the displayed percentage
+        matches the visible timeline.
+        """
+        # Compute reliability from history for each test
+        history_reliability: dict[str, dict[str, int | float]] = {}
+        for test_name, entries in history.items():
+            runs = 0
+            passes = 0
+            for e in entries:
+                status = e.get("status", "")
+                if status in ("passed", "passed+dependencies_failed"):
+                    runs += 1
+                    passes += 1
+                elif status in ("failed", "failed+dependencies_failed"):
+                    runs += 1
+                # dependencies_failed: test wasn't run, skip
+            history_reliability[test_name] = {
+                "runs": runs,
+                "passes": passes,
+                "reliability": round(passes / runs, 6) if runs > 0 else 0.0,
+            }
+
+        # Walk the test_set tree and update lifecycle entries
+        test_set = report_inner.get("test_set")
+        if test_set:
+            self._update_node_lifecycle(test_set, history_reliability)
+
+    def _update_node_lifecycle(
+        self,
+        node: dict[str, Any],
+        history_reliability: dict[str, dict[str, int | float]],
+    ) -> None:
+        """Recursively update lifecycle data in a report node.
+
+        Updates direct test entries first, then recurses into child
+        subsets so their summaries are recomputed bottom-up.
+        """
+        # Update direct test entries
+        tests = node.get("tests", {})
+        for test_name, test_data in tests.items():
+            lifecycle = test_data.get("lifecycle")
+            if lifecycle and test_name in history_reliability:
+                hr = history_reliability[test_name]
+                lifecycle["runs"] = hr["runs"]
+                lifecycle["passes"] = hr["passes"]
+                lifecycle["reliability"] = hr["reliability"]
+
+        # Recurse into subsets (so their summaries update first)
+        for subset in node.get("subsets", []):
+            self._update_node_lifecycle(subset, history_reliability)
+
+        # Recompute this node's summary from updated children
+        lifecycle_summary = self._compute_lifecycle_summary(
+            tests, node.get("subsets", []),
+        )
+        if lifecycle_summary is not None:
+            node["lifecycle_summary"] = lifecycle_summary
+        elif "lifecycle_summary" in node:
+            del node["lifecycle_summary"]
 
     def write_report(self, path: Path) -> None:
         """Write the report as a JSON file.
@@ -309,7 +412,7 @@ class Reporter:
 
         agg_status = _aggregate_status(direct_statuses + subset_statuses)
 
-        return {
+        node: dict[str, Any] = {
             "name": tree_node.get("name", ""),
             "assertion": tree_node.get("assertion", ""),
             "requirement_id": tree_node.get("requirement_id", ""),
@@ -317,6 +420,14 @@ class Reporter:
             "tests": test_entries,
             "subsets": subset_nodes,
         }
+
+        lifecycle_summary = self._compute_lifecycle_summary(
+            test_entries, subset_nodes,
+        )
+        if lifecycle_summary is not None:
+            node["lifecycle_summary"] = lifecycle_summary
+
+        return node
 
     def _build_flat_report_node(
         self,
@@ -340,7 +451,7 @@ class Reporter:
         ]
         agg_status = _aggregate_status(statuses)
 
-        return {
+        node: dict[str, Any] = {
             "name": test_set_info.get("name", ""),
             "assertion": test_set_info.get("assertion", ""),
             "requirement_id": test_set_info.get("requirement_id", ""),
@@ -348,6 +459,14 @@ class Reporter:
             "tests": test_entries,
             "subsets": [],
         }
+
+        lifecycle_summary = self._compute_lifecycle_summary(
+            test_entries, [],
+        )
+        if lifecycle_summary is not None:
+            node["lifecycle_summary"] = lifecycle_summary
+
+        return node
 
     def _build_test_entry(
         self,
@@ -388,7 +507,76 @@ class Reporter:
         if name in self.inferred_deps:
             entry["inferred_dependencies"] = self.inferred_deps[name]
 
+        if name in self.lifecycle_data:
+            entry["lifecycle"] = self.lifecycle_data[name]
+
         return entry
+
+    def _compute_lifecycle_summary(
+        self,
+        test_entries: dict[str, dict[str, Any]],
+        subset_nodes: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Compute lifecycle summary for a test set node.
+
+        Aggregates lifecycle state counts and reliability from direct
+        tests and child subsets.
+
+        Returns:
+            Summary dict or None if no lifecycle data is available.
+        """
+        state_counts: dict[str, int] = {
+            "new": 0,
+            "burning_in": 0,
+            "stable": 0,
+            "flaky": 0,
+            "disabled": 0,
+        }
+        total = 0
+        aggregate_runs = 0
+        aggregate_passes = 0
+
+        for _test_name, test_data in test_entries.items():
+            lifecycle = test_data.get("lifecycle")
+            if lifecycle is None:
+                continue
+            state = lifecycle.get("state", "new")
+            if state in state_counts:
+                state_counts[state] += 1
+            total += 1
+            aggregate_runs += lifecycle.get("runs", 0)
+            aggregate_passes += lifecycle.get("passes", 0)
+
+        for subset in subset_nodes:
+            child_summary = subset.get("lifecycle_summary")
+            if child_summary is None:
+                continue
+            for state_name in state_counts:
+                state_counts[state_name] += child_summary.get(
+                    state_name, 0
+                )
+            total += child_summary.get("total", 0)
+            aggregate_runs += child_summary.get("aggregate_runs", 0)
+            aggregate_passes += child_summary.get(
+                "aggregate_passes", 0
+            )
+
+        if total == 0:
+            return None
+
+        aggregate_reliability = (
+            aggregate_passes / aggregate_runs
+            if aggregate_runs > 0
+            else 0.0
+        )
+
+        return {
+            "total": total,
+            **state_counts,
+            "aggregate_runs": aggregate_runs,
+            "aggregate_passes": aggregate_passes,
+            "aggregate_reliability": round(aggregate_reliability, 6),
+        }
 
     def _compute_summary(self) -> dict[str, Any]:
         """Compute summary statistics from results.

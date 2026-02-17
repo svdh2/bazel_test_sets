@@ -26,6 +26,8 @@ class Reporter:
     def set_regression_selection(self, selection_data)
     def add_inferred_dependencies(self, test_name, deps)
     def set_e_value_verdict(self, verdict_data)
+    def set_lifecycle_data(self, data: dict)
+    def set_lifecycle_config(self, config: dict)
 
     # Report generation
     def generate_report(self) -> dict
@@ -60,6 +62,22 @@ report:
         structured_log: {...}
         burn_in: {...}
         inferred_dependencies: [...]
+        lifecycle:               # When --status-file is set
+          state: "stable"        # new, burning_in, stable, flaky, disabled
+          runs: 125
+          passes: 124
+          reliability: 0.992
+    lifecycle_summary:           # Aggregated from children (when lifecycle data present)
+      total: 7
+      stable: 5
+      burning_in: 1
+      flaky: 1
+      aggregate_runs: 750
+      aggregate_passes: 745
+      aggregate_reliability: 0.9933
+  lifecycle_config:              # When --status-file is set
+    min_reliability: 0.99
+    statistical_significance: 0.95
   regression_selection: {...}  # When --regression flag was used
   e_value_verdict:              # When --verdict flag was used
     verdict: "GREEN"            # GREEN, RED, or UNDECIDED
@@ -105,4 +123,8 @@ report:
 
 3. **Five-status model**: The reporter supports all five statuses including the combined race-condition statuses (`passed+dependencies_failed`, `failed+dependencies_failed`), ensuring no information is lost during reporting.
 
-4. **Optional enrichment**: Structured logs, burn-in progress, inferred dependencies, regression selection, and E-value verdict data are all optional additions. The reporter works with just TestResult objects for simple use cases.
+4. **Optional enrichment**: Structured logs, burn-in progress, inferred dependencies, regression selection, E-value verdict data, and lifecycle state are all optional additions. The reporter works with just TestResult objects for simple use cases.
+
+5. **Lifecycle aggregation**: When `set_lifecycle_data()` is called, each test set node includes a `lifecycle_summary` with state counts and aggregate reliability computed bottom-up through the tree. The `lifecycle_config` thresholds are included at the report top level so readers understand what "stable" and "flaky" mean quantitatively.
+
+6. **History-based reliability**: When `generate_report_with_history()` is used, lifecycle `runs`/`passes`/`reliability` are recomputed from the accumulated rolling history rather than using StatusFile counters. StatusFile counters reset on lifecycle transitions (e.g. flaky → burning_in resets to 0/0), but the rolling history accumulates across all runs. Recomputing from history ensures the displayed reliability percentage matches the visible timeline. The lifecycle `state` still comes from the StatusFile. Statuses `dependencies_failed` are excluded from reliability counts (test wasn't executed).
