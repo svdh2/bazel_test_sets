@@ -4,9 +4,9 @@ Generates JSON reports from test results, supporting the five-status model:
 passed, failed, dependencies_failed, passed+dependencies_failed,
 failed+dependencies_failed.
 
-Supports hierarchical reports mirroring the DAG structure, structured log
-data integration, burn-in progress, regression selection details, and
-rolling history for reverse-chronological SPRT.
+Supports hierarchical reports mirroring the DAG structure, burn-in
+progress, regression selection details, and rolling history for
+reverse-chronological SPRT.
 """
 
 from __future__ import annotations
@@ -37,15 +37,14 @@ class Reporter:
 
     The reporter accepts TestResult objects and produces a structured
     JSON report file containing all results with timing, status, and
-    log information. Supports hierarchical DAG structure, structured log
-    data, burn-in progress, regression selection, and rolling history.
+    log information. Supports hierarchical DAG structure, burn-in
+    progress, regression selection, and rolling history.
     """
 
     def __init__(self) -> None:
         self.results: list[TestResult] = []
         self.manifest: dict[str, Any] | None = None
         self.commit_hash: str | None = None
-        self.structured_logs: dict[str, dict[str, Any]] = {}
         self.burn_in_data: dict[str, dict[str, Any]] = {}
         self.regression_selection: dict[str, Any] | None = None
         self.inferred_deps: dict[str, list[dict[str, Any]]] = {}
@@ -69,17 +68,6 @@ class Reporter:
             commit_hash: Git commit hash string.
         """
         self.commit_hash = commit_hash
-
-    def add_structured_log(
-        self, test_name: str, parsed_output: dict[str, Any]
-    ) -> None:
-        """Add parsed structured log data for a test.
-
-        Args:
-            test_name: Test label.
-            parsed_output: Output from parse_test_output().
-        """
-        self.structured_logs[test_name] = parsed_output
 
     def add_burn_in_progress(
         self, test_name: str, progress: dict[str, Any]
@@ -524,18 +512,6 @@ class Reporter:
             result = results_by_name[name]
             entry.update(self._format_result(result))
             entry.pop("name", None)
-
-        if name in self.structured_logs:
-            log_data = self.structured_logs[name]
-            entry["structured_log"] = {
-                "block_sequence": log_data.get("block_sequence", []),
-                "measurements": log_data.get("measurements", []),
-                "results": log_data.get("results", []),
-                "errors": log_data.get("errors", []),
-                "has_rigging_failure": log_data.get(
-                    "has_rigging_failure", False
-                ),
-            }
 
         if name in self.burn_in_data:
             entry["burn_in"] = self.burn_in_data[name]

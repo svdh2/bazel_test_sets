@@ -11,6 +11,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from orchestrator.analysis.log_parser import (
+    BlockSegment,
+    TextSegment,
+    parse_stdout_segments,
+)
+
 
 # Status color mapping
 STATUS_COLORS: dict[str, str] = {
@@ -325,6 +331,80 @@ pre {
     color: #888;
     margin-top: 2px;
 }
+.block-segment {
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 6px 0;
+    border-left: 3px solid #ccc;
+    background: #fafafa;
+}
+.block-segment.block-rigging {
+    border-left-color: #6c757d;
+}
+.block-segment.block-stimulation {
+    border-left-color: #0d6efd;
+}
+.block-segment.block-checkpoint {
+    border-left-color: #ffc107;
+}
+.block-segment.block-verdict {
+    border-left-color: #198754;
+}
+.block-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+.block-type-badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+    text-transform: uppercase;
+}
+.block-type-badge.bt-rigging { background: #6c757d; }
+.block-type-badge.bt-stimulation { background: #0d6efd; }
+.block-type-badge.bt-checkpoint { background: #ffc107; color: #333; }
+.block-type-badge.bt-verdict { background: #198754; }
+.block-description {
+    font-weight: 400;
+    color: #555;
+}
+.block-features {
+    font-size: 12px;
+    color: #555;
+    margin: 4px 0;
+}
+.assertion-list {
+    list-style: none;
+    padding: 0;
+    margin: 4px 0;
+    font-size: 13px;
+}
+.assertion-list li {
+    padding: 2px 0;
+}
+.assertion-pass::before {
+    content: '\\2713 ';
+    color: #198754;
+    font-weight: 700;
+}
+.assertion-fail::before {
+    content: '\\2717 ';
+    color: #cf222e;
+    font-weight: 700;
+}
+.block-error {
+    color: #cf222e;
+    font-size: 13px;
+    font-weight: 600;
+    margin: 4px 0;
+}
 """
 
 
@@ -607,16 +687,16 @@ def _render_test_entry(
         parts.append('<details class="log-details">')
         parts.append("<summary>Logs</summary>")
         if stdout:
-            parts.append(f"<pre>{html.escape(stdout)}</pre>")
+            segments = parse_stdout_segments(stdout)
+            has_blocks = any(isinstance(s, BlockSegment) for s in segments)
+            if has_blocks:
+                parts.append(_render_stdout_segments(segments))
+            else:
+                parts.append(f"<pre>{html.escape(stdout)}</pre>")
         if stderr:
             parts.append(f'<pre style="border-left:3px solid #FFB6C1">'
                          f"{html.escape(stderr)}</pre>")
         parts.append("</details>")
-
-    # Structured log data
-    structured_log = data.get("structured_log")
-    if structured_log:
-        parts.append(_render_structured_log(structured_log))
 
     # Burn-in progress
     burn_in = data.get("burn_in")
@@ -632,52 +712,79 @@ def _render_test_entry(
     return "\n".join(parts)
 
 
-def _render_structured_log(log_data: dict[str, Any]) -> str:
-    """Render structured log data as expandable section."""
+def _render_stdout_segments(segments: list[TextSegment | BlockSegment]) -> str:
+    """Render parsed stdout segments as unified HTML."""
     parts: list[str] = []
-    parts.append('<details class="log-details">')
-    parts.append("<summary>Structured Log Data</summary>")
+    for seg in segments:
+        if isinstance(seg, TextSegment):
+            text = seg.text.strip()
+            if text:
+                parts.append(f"<pre>{html.escape(text)}</pre>")
+        elif isinstance(seg, BlockSegment):
+            parts.append(_render_block_segment(seg))
+    return "\n".join(parts)
 
-    # Block sequence
-    blocks = log_data.get("block_sequence", [])
-    if blocks:
-        parts.append(f"<p><strong>Blocks:</strong> {', '.join(html.escape(str(b)) for b in blocks)}</p>")
 
-    # Measurements
-    measurements = log_data.get("measurements", [])
-    if measurements:
+def _render_block_segment(block: BlockSegment) -> str:
+    """Render a single structured block as an HTML card."""
+    btype = block.block
+    parts: list[str] = []
+    parts.append(f'<div class="block-segment block-{html.escape(btype)}">')
+
+    # Header: block type badge + optional description
+    parts.append('<div class="block-header">')
+    parts.append(
+        f'<span class="block-type-badge bt-{html.escape(btype)}">'
+        f"{html.escape(btype)}</span>"
+    )
+    if block.description:
+        parts.append(
+            f'<span class="block-description">'
+            f"{html.escape(block.description)}</span>"
+        )
+    parts.append("</div>")
+
+    # Features
+    if block.features:
+        feat_strs = [html.escape(f.get("name", "")) for f in block.features]
+        parts.append(
+            f'<div class="block-features">Features: {", ".join(feat_strs)}</div>'
+        )
+
+    # Measurements table
+    if block.measurements:
         parts.append('<table class="measurements-table">')
         parts.append("<tr><th>Name</th><th>Value</th><th>Unit</th></tr>")
-        for m in measurements:
+        for m in block.measurements:
             mname = html.escape(str(m.get("name", "")))
             mval = html.escape(str(m.get("value", "")))
             munit = html.escape(str(m.get("unit", "")))
-            parts.append(f"<tr><td>{mname}</td><td>{mval}</td><td>{munit}</td></tr>")
+            parts.append(
+                f"<tr><td>{mname}</td><td>{mval}</td><td>{munit}</td></tr>"
+            )
         parts.append("</table>")
 
-    # Results
-    results = log_data.get("results", [])
-    if results:
-        parts.append("<p><strong>Results:</strong></p>")
-        parts.append("<ul>")
-        for r in results:
-            parts.append(f"<li>{html.escape(str(r))}</li>")
+    # Assertions
+    if block.assertions:
+        parts.append('<ul class="assertion-list">')
+        for a in block.assertions:
+            desc = html.escape(str(a.get("description", "")))
+            status = a.get("status", "unknown")
+            css_class = "assertion-pass" if status == "passed" else "assertion-fail"
+            parts.append(f'<li class="{css_class}">{desc}</li>')
         parts.append("</ul>")
 
-    # Errors
-    errors = log_data.get("errors", [])
-    if errors:
-        parts.append('<p><strong>Errors:</strong></p>')
-        parts.append("<ul>")
-        for e in errors:
-            parts.append(f"<li>{html.escape(str(e))}</li>")
-        parts.append("</ul>")
+    # Block logs (plain text emitted during the block)
+    if block.logs:
+        parts.append(f"<pre>{html.escape(block.logs)}</pre>")
 
-    # Rigging failure flag
-    if log_data.get("has_rigging_failure"):
-        parts.append('<p style="color:red"><strong>Rigging failure detected</strong></p>')
+    # Error
+    if block.error:
+        parts.append(
+            f'<div class="block-error">Error: {html.escape(block.error)}</div>'
+        )
 
-    parts.append("</details>")
+    parts.append("</div>")
     return "\n".join(parts)
 
 

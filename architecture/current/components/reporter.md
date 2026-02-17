@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Collects test execution results and generates JSON reports. Supports both flat and hierarchical (DAG-mirroring) report structures, structured log data integration, burn-in progress, regression selection details, and rolling history for reverse-chronological SPRT.
+Collects test execution results and generates JSON reports. Supports both flat and hierarchical (DAG-mirroring) report structures, burn-in progress, regression selection details, and rolling history for reverse-chronological SPRT.
 
 ## Interface
 
@@ -24,7 +24,6 @@ class Reporter:
     def add_results(self, results: list[TestResult])
     def set_manifest(self, manifest: dict)
     def set_commit_hash(self, commit_hash: str)
-    def add_structured_log(self, test_name, parsed_output)
     def add_burn_in_progress(self, test_name, progress)
     def set_regression_selection(self, selection_data)
     def add_inferred_dependencies(self, test_name, deps)
@@ -64,7 +63,6 @@ class Reporter:
           "assertion": "...",
           "status": "passed",
           "duration_seconds": 1.234,
-          "structured_log": {},
           "burn_in": {},
           "inferred_dependencies": [],
           "lifecycle": {               // When --status-file is set
@@ -137,7 +135,7 @@ class Reporter:
 
 3. **Five-status model**: The reporter supports all five statuses including the combined race-condition statuses (`passed+dependencies_failed`, `failed+dependencies_failed`), ensuring no information is lost during reporting.
 
-4. **Optional enrichment**: Structured logs, burn-in progress, inferred dependencies, regression selection, E-value verdict data, and lifecycle state are all optional additions. The reporter works with just TestResult objects for simple use cases.
+4. **Optional enrichment**: Burn-in progress, inferred dependencies, regression selection, E-value verdict data, and lifecycle state are all optional additions. The reporter works with just TestResult objects for simple use cases. Structured log data in stdout is parsed at HTML render time by the log parser's `parse_stdout_segments()` function, not stored as a separate report field.
 
 5. **Lifecycle aggregation**: When `set_lifecycle_data()` is called, each test set node includes a `lifecycle_summary` with state counts and aggregate reliability computed bottom-up through the tree. The `lifecycle_config` thresholds are included at the report top level so readers understand what "stable" and "flaky" mean quantitatively.
 

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-After test execution, generate structured reports in JSON and HTML formats. Reports include test results, timing, structured log data, burn-in progress, regression selection details, and optionally rolling history for SPRT demotion analysis.
+After test execution, generate structured reports in JSON and HTML formats. Reports include test results, timing, burn-in progress, regression selection details, and optionally rolling history for SPRT demotion analysis. Structured log data embedded in stdout (`[TST]` lines) is parsed at HTML render time.
 
 ## Trigger
 
@@ -35,7 +35,7 @@ The Reporter:
 1. Computes summary statistics (total, passed, failed, dependencies_failed, duration)
 2. If a manifest is set, builds a hierarchical report mirroring the DAG structure; otherwise, builds a flat report
 3. Formats each test result with status, duration, exit code, stdout/stderr
-4. Adds optional enrichment data (structured logs, burn-in progress, inferred dependencies)
+4. Adds optional enrichment data (burn-in progress, inferred dependencies)
 5. Serializes to JSON and writes to disk
 
 **Components**: Reporter
@@ -50,7 +50,7 @@ write_html_report(report_data, html_path)
 The HTML Reporter:
 1. Takes the same report data structure used for JSON
 2. Renders a self-contained HTML page with embedded CSS
-3. Creates color-coded status badges, expandable log sections, measurement tables
+3. Parses stdout with `parse_stdout_segments()` to detect `[TST]` structured logging and renders unified view (block cards with measurements tables, assertions, features) or falls back to raw `<pre>` for plain stdout
 4. Writes to the same path as JSON but with `.html` extension
 
 **Components**: HTML Reporter
@@ -113,12 +113,7 @@ report_data = {"report": {...}}
           "status": "passed",
           "duration_seconds": 0.420,
           "exit_code": 0,
-          "structured_log": {
-            "block_sequence": ["rigging", "execution"],
-            "measurements": [
-              {"name": "latency_ms", "value": 42, "block": "execution"}
-            ]
-          }
+          "stdout": "[TST] {\"type\": \"block_start\", \"block\": \"rigging\"}..."
         }
       }
     }
@@ -134,7 +129,7 @@ report_data = {"report": {...}}
 | Summary bar | Color-coded count badges + duration |
 | Test set block | Hierarchical with aggregated status badge |
 | Per-test entry | Status badge, assertion, duration, expandable logs |
-| Structured log | Block sequence, measurements table, errors |
+| Block segments | Structured blocks parsed from stdout: type badge, features, measurements table, assertions, errors |
 | Burn-in info | Runs, passes, SPRT status (blue info box) |
 | Regression info | Changed files, test scores table |
 

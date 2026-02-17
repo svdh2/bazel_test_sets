@@ -527,32 +527,6 @@ class TestNestedSubsets:
         assert "auth_test" in test_set["tests"]
 
 
-class TestStructuredLogInReport:
-    """Tests for structured log data in reports."""
-
-    def test_structured_log_included(self):
-        """Structured log data appears in hierarchical report."""
-        reporter = Reporter()
-        reporter.set_manifest(SAMPLE_MANIFEST)
-        reporter.add_structured_log("auth_test", {
-            "block_sequence": ["rigging", "stimulation", "verdict"],
-            "measurements": [{"name": "latency", "value": 100, "block": "checkpoint"}],
-            "results": [{"status": "pass", "message": "ok", "block": "verdict"}],
-            "errors": [],
-            "has_rigging_failure": False,
-        })
-        reporter.add_results([
-            TestResult(name="auth_test", assertion="Auth works", status="passed", duration=1.0),
-        ])
-
-        report = reporter.generate_report()
-        auth = report["report"]["test_set"]["tests"]["auth_test"]
-        assert "structured_log" in auth
-        assert auth["structured_log"]["block_sequence"] == ["rigging", "stimulation", "verdict"]
-        assert len(auth["structured_log"]["measurements"]) == 1
-        assert auth["structured_log"]["has_rigging_failure"] is False
-
-
 class TestBurnInProgressInReport:
     """Tests for burn-in progress in reports."""
 
