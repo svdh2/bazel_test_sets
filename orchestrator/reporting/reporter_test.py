@@ -918,6 +918,8 @@ class TestLifecycleReliabilityFromHistory:
             reporter.set_lifecycle_data({
                 "auth_test": {"state": "stable"},
             })
+            # Set a low threshold so 9/11 reliability doesn't trigger demotion
+            reporter.set_lifecycle_config({"min_reliability": 0.5})
             reporter.add_results([
                 TestResult(
                     name="auth_test", assertion="Auth works",
@@ -932,7 +934,7 @@ class TestLifecycleReliabilityFromHistory:
             assert auth["lifecycle"]["passes"] == 9
             expected = round(9 / 11, 6)
             assert auth["lifecycle"]["reliability"] == expected
-            # State is still from StatusFile
+            # State is still from StatusFile (reliability above threshold)
             assert auth["lifecycle"]["state"] == "stable"
 
     def test_deps_failed_excluded_from_reliability(self):
@@ -1046,3 +1048,189 @@ class TestLifecycleReliabilityFromHistory:
         # Should not raise even without lifecycle data
         report = reporter.generate_report_with_history(None)
         assert "history" in report["report"]
+
+
+class TestReliabilityDemotion:
+    """Tests for reliability-based flaky demotion and test set status propagation."""
+
+    def test_low_reliability_demotes_to_flaky(self):
+        """Test with reliability below min_reliability gets state overridden to flaky."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "report.json"
+            initial = {
+                "report": {
+                    "history": {
+                        "auth_test": [
+                            {"status": "passed", "duration_seconds": 1.0, "timestamp": "t0"},
+                            {"status": "failed", "duration_seconds": 1.0, "timestamp": "t1"},
+                            {"status": "passed", "duration_seconds": 1.0, "timestamp": "t2"},
+                            {"status": "failed", "duration_seconds": 1.0, "timestamp": "t3"},
+                        ],
+                    },
+                },
+            }
+            with open(path, "w") as f:
+                json.dump(initial, f)
+
+            reporter = Reporter()
+            reporter.set_manifest(SAMPLE_MANIFEST)
+            reporter.set_lifecycle_data({"auth_test": {"state": "stable"}})
+            reporter.set_lifecycle_config({"min_reliability": 0.99})
+            reporter.add_results([
+                TestResult(name="auth_test", assertion="Auth works",
+                           status="passed", duration=1.0),
+            ])
+
+            report = reporter.generate_report_with_history(path)
+            auth = report["report"]["test_set"]["tests"]["auth_test"]
+            # 3 passed, 2 failed out of 5 runs = 60% < 99%
+            assert auth["lifecycle"]["state"] == "flaky"
+            assert "auth_test" in reporter.reliability_demoted_tests
+
+    def test_flaky_demotion_fails_test_set(self):
+        """Test set containing a flaky-demoted test shows status 'failed'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "report.json"
+            initial = {
+                "report": {
+                    "history": {
+                        "auth_test": [
+                            {"status": "passed", "duration_seconds": 1.0, "timestamp": "t0"},
+                            {"status": "failed", "duration_seconds": 1.0, "timestamp": "t1"},
+                        ],
+                    },
+                },
+            }
+            with open(path, "w") as f:
+                json.dump(initial, f)
+
+            reporter = Reporter()
+            reporter.set_manifest(SAMPLE_MANIFEST)
+            reporter.set_lifecycle_data({"auth_test": {"state": "stable"}})
+            reporter.set_lifecycle_config({"min_reliability": 0.99})
+            reporter.add_results([
+                TestResult(name="auth_test", assertion="Auth works",
+                           status="passed", duration=1.0),
+            ])
+
+            report = reporter.generate_report_with_history(path)
+            # Test set should show failed due to flaky test
+            assert report["report"]["test_set"]["status"] == "failed"
+
+    def test_disabled_test_not_demoted(self):
+        """Disabled tests are not demoted even with low reliability."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "report.json"
+            initial = {
+                "report": {
+                    "history": {
+                        "auth_test": [
+                            {"status": "failed", "duration_seconds": 1.0, "timestamp": "t0"},
+                            {"status": "failed", "duration_seconds": 1.0, "timestamp": "t1"},
+                        ],
+                    },
+                },
+            }
+            with open(path, "w") as f:
+                json.dump(initial, f)
+
+            reporter = Reporter()
+            reporter.set_manifest(SAMPLE_MANIFEST)
+            reporter.set_lifecycle_data({"auth_test": {"state": "disabled"}})
+            reporter.set_lifecycle_config({"min_reliability": 0.99})
+            reporter.add_results([
+                TestResult(name="auth_test", assertion="Auth works",
+                           status="passed", duration=1.0),
+            ])
+
+            report = reporter.generate_report_with_history(path)
+            auth = report["report"]["test_set"]["tests"]["auth_test"]
+            assert auth["lifecycle"]["state"] == "disabled"
+            assert reporter.reliability_demoted_tests == []
+
+    def test_zero_runs_not_demoted(self):
+        """Tests with no history runs are not demoted."""
+        reporter = Reporter()
+        reporter.set_manifest(SAMPLE_MANIFEST)
+        reporter.set_lifecycle_data({"auth_test": {"state": "new"}})
+        reporter.set_lifecycle_config({"min_reliability": 0.99})
+        reporter.add_results([
+            TestResult(name="auth_test", assertion="Auth works",
+                       status="dependencies_failed", duration=0.0),
+        ])
+
+        report = reporter.generate_report_with_history(None)
+        auth = report["report"]["test_set"]["tests"]["auth_test"]
+        assert auth["lifecycle"]["state"] == "new"
+        assert reporter.reliability_demoted_tests == []
+
+    def test_above_threshold_not_demoted(self):
+        """Tests with reliability >= min_reliability keep original state."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "report.json"
+            initial = {
+                "report": {
+                    "history": {
+                        "auth_test": [
+                            {"status": "passed", "duration_seconds": 1.0, "timestamp": f"t{i}"}
+                            for i in range(100)
+                        ],
+                    },
+                },
+            }
+            with open(path, "w") as f:
+                json.dump(initial, f)
+
+            reporter = Reporter()
+            reporter.set_manifest(SAMPLE_MANIFEST)
+            reporter.set_lifecycle_data({"auth_test": {"state": "stable"}})
+            reporter.set_lifecycle_config({"min_reliability": 0.99})
+            reporter.add_results([
+                TestResult(name="auth_test", assertion="Auth works",
+                           status="passed", duration=1.0),
+            ])
+
+            report = reporter.generate_report_with_history(path)
+            auth = report["report"]["test_set"]["tests"]["auth_test"]
+            assert auth["lifecycle"]["state"] == "stable"
+            assert report["report"]["test_set"]["status"] == "passed"
+            assert reporter.reliability_demoted_tests == []
+
+    def test_nested_flaky_propagates_to_root(self):
+        """Flaky test in child subset causes root status to be 'failed'."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "report.json"
+            initial = {
+                "report": {
+                    "history": {
+                        "child_test": [
+                            {"status": "passed", "duration_seconds": 1.0, "timestamp": "t0"},
+                            {"status": "failed", "duration_seconds": 1.0, "timestamp": "t1"},
+                        ],
+                    },
+                },
+            }
+            with open(path, "w") as f:
+                json.dump(initial, f)
+
+            reporter = Reporter()
+            reporter.set_manifest(NESTED_MANIFEST)
+            reporter.set_lifecycle_data({
+                "root_test": {"state": "stable"},
+                "child_test": {"state": "stable"},
+            })
+            reporter.set_lifecycle_config({"min_reliability": 0.99})
+            reporter.add_results([
+                TestResult(name="root_test", assertion="Root test works",
+                           status="passed", duration=1.0),
+                TestResult(name="child_test", assertion="Child test works",
+                           status="passed", duration=1.0),
+            ])
+
+            report = reporter.generate_report_with_history(path)
+            root = report["report"]["test_set"]
+            child_subset = root["subsets"][0]
+            # child_test: 2 passed + 1 failed = 2/3 = 66.7% < 99%
+            assert child_subset["status"] == "failed"
+            assert root["status"] == "failed"
+            assert "child_test" in reporter.reliability_demoted_tests
