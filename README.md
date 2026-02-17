@@ -15,6 +15,20 @@ Standard test runners treat tests as independent, unordered units. In practice, 
 - **Generate parameterized tests** from matrices or variant configurations
 - **Collect structured measurements** and produce JSON/HTML reports
 
+## Strengths and limitations
+
+This workflow is well suited for large-scale testing:
+
+- **Reliability over correctness** &mdash; we reason about test results in terms of statistical reliability (burn-in, flaky detection) rather than treating every failure as a correctness signal.
+- **Test sets bridge requirements and tests** &mdash; assertions on test sets map directly to product requirements, making test outcomes meaningful beyond pass/fail.
+- **Hierarchical decomposition** &mdash; breaking large suites into nested test sets makes it easy to understand how an individual test failure affects overall product quality.
+
+However, the current implementation has serious limitations that make it unsuitable for production use at scale without further investment:
+
+- **JSON-in-repo history** &mdash; historic test data is stored as JSON files committed to the repository. At scale this should be replaced with an external results database.
+- **Monolithic HTML reports** &mdash; reports are self-contained HTML files. A proper solution would be an interactive application backed by the results database.
+- **Local execution only** &mdash; all tests run locally within this repository. For large-scale testing, Bazel remote execution should be enabled.
+
 ## Quick start
 
 ### 1. Add the dependency

@@ -18,3 +18,16 @@ jobs:
         run: ./ci test
       - name: Type check
         run: ./ci check
+      - name: Test examples
+        run: ./ci test-examples
+      - name: Upload example artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: example-reports
+          path: |
+            examples/ecommerce/.tests/status
+            examples/target/reports/deployment_validation_test.html
+            examples/target/reports/deployment_validation_test.json
+            examples/target/reports/ecommerce_tests.html
+            examples/target/reports/ecommerce_tests.json
