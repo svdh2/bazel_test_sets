@@ -26,7 +26,10 @@ def write_html_report(report_data: dict, output_path: Path)
 | **Test entry** | Name, status badge, assertion, duration, exit code, color-coded border |
 | **Logs** | Expandable `<details>` with stdout (dark theme pre) and stderr (pink border) |
 | **Structured log** | Expandable section with block sequence, measurement table, results, errors |
+| **History timeline** | Compact horizontal bar of colored boxes showing pass/fail history; hover reveals commit hash |
 | **Burn-in info** | Blue info box with runs, passes, SPRT status |
+| **Lifecycle badge** | Per-test badge showing lifecycle state (stable/burning_in/flaky/new/disabled) with reliability rate |
+| **Lifecycle summary** | Per-test-set summary showing state counts and aggregate reliability with config thresholds |
 | **Regression section** | Changed files list, test scores table |
 
 ### Status Colors
@@ -39,6 +42,16 @@ def write_html_report(report_data: dict, output_path: Path)
 | `passed+dependencies_failed` | `#FFFFAD` (light yellow) |
 | `failed+dependencies_failed` | `#FFB6C1` (light pink) |
 
+### Lifecycle State Colors
+
+| State | Color |
+|-------|-------|
+| `new` | `#87CEEB` (light blue) |
+| `burning_in` | `#FFD700` (gold) |
+| `stable` | `#90EE90` (light green) |
+| `flaky` | `#FFB6C1` (light pink) |
+| `disabled` | `#D3D3D3` (grey) |
+
 ## Dependencies
 
 - Standard library: `json` (loading reports), `html` (escaping)
@@ -49,7 +62,8 @@ def write_html_report(report_data: dict, output_path: Path)
 
 ## Key Design Decisions
 
-1. **Self-contained HTML**: All CSS is embedded inline in a `<style>` tag. No external dependencies, JavaScript frameworks, or CDN links. The report is a single file that can be opened in any browser.
+1. **Self-contained HTML**: All CSS is embedded inline in a `<style>` tag. No external dependencies, JavaScript frameworks, or CDN links. The report is a single file that can be opened in any browser. The history timeline uses pure CSS with native `title` attributes for tooltips.
+
 
 2. **Expandable sections**: Logs and structured data use HTML `<details>/<summary>` elements for progressive disclosure. Reports with many tests remain scannable.
 

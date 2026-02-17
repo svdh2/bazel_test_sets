@@ -49,6 +49,9 @@ class Reporter:
         self.burn_in_data: dict[str, dict[str, Any]] = {}
         self.regression_selection: dict[str, Any] | None = None
         self.inferred_deps: dict[str, list[dict[str, Any]]] = {}
+        self.e_value_verdict: dict[str, Any] | None = None
+        self.lifecycle_data: dict[str, dict[str, Any]] = {}
+        self.lifecycle_config: dict[str, Any] | None = None
 
     def set_manifest(self, manifest: dict[str, Any]) -> None:
         """Set the manifest for hierarchical report generation.
@@ -109,6 +112,38 @@ class Reporter:
         """
         self.inferred_deps[test_name] = deps
 
+    def set_e_value_verdict(
+        self, verdict_data: dict[str, Any]
+    ) -> None:
+        """Set E-value test set verdict data for the report.
+
+        Args:
+            verdict_data: Dict from ``verdict_to_dict()`` with verdict,
+                e_set, per_test, etc.
+        """
+        self.e_value_verdict = verdict_data
+
+    def set_lifecycle_data(
+        self, data: dict[str, dict[str, Any]]
+    ) -> None:
+        """Set lifecycle state data for all tests.
+
+        Args:
+            data: Dict mapping test_name to {state}.
+                The runs/passes/reliability fields are computed from
+                rolling history by generate_report_with_history().
+        """
+        self.lifecycle_data = data
+
+    def set_lifecycle_config(self, config: dict[str, Any]) -> None:
+        """Set lifecycle configuration for the report.
+
+        Args:
+            config: Dict with min_reliability and
+                statistical_significance.
+        """
+        self.lifecycle_config = config
+
     def add_result(self, result: TestResult) -> None:
         """Add a test result to the report.
 
@@ -153,6 +188,12 @@ class Reporter:
 
         if self.regression_selection:
             report["regression_selection"] = self.regression_selection
+
+        if self.e_value_verdict:
+            report["e_value_verdict"] = self.e_value_verdict
+
+        if self.lifecycle_config:
+            report["lifecycle_config"] = self.lifecycle_config
 
         return {"report": report}
 
@@ -204,7 +245,84 @@ class Reporter:
                 history[result.name] = history[result.name][-MAX_HISTORY:]
 
         report["report"]["history"] = history
+
+        # Update lifecycle reliability from accumulated history so the
+        # displayed percentage matches the visible timeline.  StatusFile
+        # counters reset on lifecycle transitions, but the rolling report
+        # history accumulates across all runs.
+        if self.lifecycle_data:
+            self._update_lifecycle_from_history(report["report"], history)
+
         return report
+
+    def _update_lifecycle_from_history(
+        self,
+        report_inner: dict[str, Any],
+        history: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        """Update lifecycle reliability using accumulated history.
+
+        StatusFile counters reset on lifecycle transitions, but the
+        rolling report history accumulates across all runs.  This method
+        recomputes reliability from history so the displayed percentage
+        matches the visible timeline.
+        """
+        # Compute reliability from history for each test
+        history_reliability: dict[str, dict[str, int | float]] = {}
+        for test_name, entries in history.items():
+            runs = 0
+            passes = 0
+            for e in entries:
+                status = e.get("status", "")
+                if status in ("passed", "passed+dependencies_failed"):
+                    runs += 1
+                    passes += 1
+                elif status in ("failed", "failed+dependencies_failed"):
+                    runs += 1
+                # dependencies_failed: test wasn't run, skip
+            history_reliability[test_name] = {
+                "runs": runs,
+                "passes": passes,
+                "reliability": round(passes / runs, 6) if runs > 0 else 0.0,
+            }
+
+        # Walk the test_set tree and update lifecycle entries
+        test_set = report_inner.get("test_set")
+        if test_set:
+            self._update_node_lifecycle(test_set, history_reliability)
+
+    def _update_node_lifecycle(
+        self,
+        node: dict[str, Any],
+        history_reliability: dict[str, dict[str, int | float]],
+    ) -> None:
+        """Recursively update lifecycle data in a report node.
+
+        Updates direct test entries first, then recurses into child
+        subsets so their summaries are recomputed bottom-up.
+        """
+        # Update direct test entries
+        tests = node.get("tests", {})
+        for test_name, test_data in tests.items():
+            lifecycle = test_data.get("lifecycle")
+            if lifecycle and test_name in history_reliability:
+                hr = history_reliability[test_name]
+                lifecycle["runs"] = hr["runs"]
+                lifecycle["passes"] = hr["passes"]
+                lifecycle["reliability"] = hr["reliability"]
+
+        # Recurse into subsets (so their summaries update first)
+        for subset in node.get("subsets", []):
+            self._update_node_lifecycle(subset, history_reliability)
+
+        # Recompute this node's summary from updated children
+        lifecycle_summary = self._compute_lifecycle_summary(
+            tests, node.get("subsets", []),
+        )
+        if lifecycle_summary is not None:
+            node["lifecycle_summary"] = lifecycle_summary
+        elif "lifecycle_summary" in node:
+            del node["lifecycle_summary"]
 
     def write_report(self, path: Path) -> None:
         """Write the report as a JSON file.
@@ -234,8 +352,12 @@ class Reporter:
     def _build_hierarchical_report(self) -> dict[str, Any]:
         """Build a hierarchical report mirroring the DAG structure.
 
+        If the manifest contains a tree structure (with ``subsets``),
+        produces a nested report.  Otherwise falls back to a flat report
+        for backward compatibility with older manifests.
+
         Returns:
-            Nested dict with test_set at top, test_set_tests as leaves.
+            Nested dict with test_set at top, subsets recursively nested.
         """
         assert self.manifest is not None
 
@@ -247,44 +369,81 @@ class Reporter:
         for r in self.results:
             results_by_name[r.name] = r
 
-        # Build test entries
+        # New tree-aware path
+        if "subsets" in test_set_info:
+            return self._build_report_node(
+                test_set_info, test_set_tests, results_by_name,
+            )
+
+        # Fallback: old flat manifest (no subsets field)
+        return self._build_flat_report_node(
+            test_set_info, test_set_tests, results_by_name,
+        )
+
+    def _build_report_node(
+        self,
+        tree_node: dict[str, Any],
+        test_set_tests: dict[str, dict[str, Any]],
+        results_by_name: dict[str, TestResult],
+    ) -> dict[str, Any]:
+        """Recursively build a report node from a manifest tree node."""
+        # Direct test entries
         test_entries: dict[str, dict[str, Any]] = {}
-        for name, data in test_set_tests.items():
-            entry: dict[str, Any] = {
-                "assertion": data.get("assertion", ""),
-                "requirement_id": data.get("requirement_id", ""),
-            }
+        direct_statuses: list[str] = []
 
-            if name in results_by_name:
-                result = results_by_name[name]
-                entry.update(self._format_result(result))
-                # Remove duplicate name key
-                entry.pop("name", None)
+        for test_label in tree_node.get("tests", []):
+            entry = self._build_test_entry(
+                test_label, test_set_tests, results_by_name,
+            )
+            if entry is not None:
+                test_entries[test_label] = entry
+                if "status" in entry:
+                    direct_statuses.append(entry["status"])
 
-            # Add structured log data
-            if name in self.structured_logs:
-                log_data = self.structured_logs[name]
-                entry["structured_log"] = {
-                    "block_sequence": log_data.get("block_sequence", []),
-                    "measurements": log_data.get("measurements", []),
-                    "results": log_data.get("results", []),
-                    "errors": log_data.get("errors", []),
-                    "has_rigging_failure": log_data.get(
-                        "has_rigging_failure", False
-                    ),
-                }
+        # Recurse into subsets
+        subset_nodes: list[dict[str, Any]] = []
+        subset_statuses: list[str] = []
+        for subset in tree_node.get("subsets", []):
+            child = self._build_report_node(
+                subset, test_set_tests, results_by_name,
+            )
+            subset_nodes.append(child)
+            subset_statuses.append(child["status"])
 
-            # Add burn-in progress
-            if name in self.burn_in_data:
-                entry["burn_in"] = self.burn_in_data[name]
+        agg_status = _aggregate_status(direct_statuses + subset_statuses)
 
-            # Add inferred dependencies
-            if name in self.inferred_deps:
-                entry["inferred_dependencies"] = self.inferred_deps[name]
+        node: dict[str, Any] = {
+            "name": tree_node.get("name", ""),
+            "assertion": tree_node.get("assertion", ""),
+            "requirement_id": tree_node.get("requirement_id", ""),
+            "status": agg_status,
+            "tests": test_entries,
+            "subsets": subset_nodes,
+        }
 
-            test_entries[name] = entry
+        lifecycle_summary = self._compute_lifecycle_summary(
+            test_entries, subset_nodes,
+        )
+        if lifecycle_summary is not None:
+            node["lifecycle_summary"] = lifecycle_summary
 
-        # Compute aggregated status
+        return node
+
+    def _build_flat_report_node(
+        self,
+        test_set_info: dict[str, Any],
+        test_set_tests: dict[str, dict[str, Any]],
+        results_by_name: dict[str, TestResult],
+    ) -> dict[str, Any]:
+        """Build a flat report node (backward compat for old manifests)."""
+        test_entries: dict[str, dict[str, Any]] = {}
+        for name in test_set_tests:
+            entry = self._build_test_entry(
+                name, test_set_tests, results_by_name,
+            )
+            if entry is not None:
+                test_entries[name] = entry
+
         statuses = [
             results_by_name[n].status
             for n in test_set_tests
@@ -292,12 +451,131 @@ class Reporter:
         ]
         agg_status = _aggregate_status(statuses)
 
-        return {
+        node: dict[str, Any] = {
             "name": test_set_info.get("name", ""),
             "assertion": test_set_info.get("assertion", ""),
             "requirement_id": test_set_info.get("requirement_id", ""),
             "status": agg_status,
             "tests": test_entries,
+            "subsets": [],
+        }
+
+        lifecycle_summary = self._compute_lifecycle_summary(
+            test_entries, [],
+        )
+        if lifecycle_summary is not None:
+            node["lifecycle_summary"] = lifecycle_summary
+
+        return node
+
+    def _build_test_entry(
+        self,
+        name: str,
+        test_set_tests: dict[str, dict[str, Any]],
+        results_by_name: dict[str, TestResult],
+    ) -> dict[str, Any] | None:
+        """Build a single test entry with metadata and results."""
+        data = test_set_tests.get(name)
+        if data is None:
+            return None
+
+        entry: dict[str, Any] = {
+            "assertion": data.get("assertion", ""),
+            "requirement_id": data.get("requirement_id", ""),
+        }
+
+        if name in results_by_name:
+            result = results_by_name[name]
+            entry.update(self._format_result(result))
+            entry.pop("name", None)
+
+        if name in self.structured_logs:
+            log_data = self.structured_logs[name]
+            entry["structured_log"] = {
+                "block_sequence": log_data.get("block_sequence", []),
+                "measurements": log_data.get("measurements", []),
+                "results": log_data.get("results", []),
+                "errors": log_data.get("errors", []),
+                "has_rigging_failure": log_data.get(
+                    "has_rigging_failure", False
+                ),
+            }
+
+        if name in self.burn_in_data:
+            entry["burn_in"] = self.burn_in_data[name]
+
+        if name in self.inferred_deps:
+            entry["inferred_dependencies"] = self.inferred_deps[name]
+
+        if name in self.lifecycle_data:
+            entry["lifecycle"] = self.lifecycle_data[name]
+
+        return entry
+
+    def _compute_lifecycle_summary(
+        self,
+        test_entries: dict[str, dict[str, Any]],
+        subset_nodes: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Compute lifecycle summary for a test set node.
+
+        Aggregates lifecycle state counts and reliability from direct
+        tests and child subsets.
+
+        Returns:
+            Summary dict or None if no lifecycle data is available.
+        """
+        state_counts: dict[str, int] = {
+            "new": 0,
+            "burning_in": 0,
+            "stable": 0,
+            "flaky": 0,
+            "disabled": 0,
+        }
+        total = 0
+        aggregate_runs = 0
+        aggregate_passes = 0
+
+        for _test_name, test_data in test_entries.items():
+            lifecycle = test_data.get("lifecycle")
+            if lifecycle is None:
+                continue
+            state = lifecycle.get("state", "new")
+            if state in state_counts:
+                state_counts[state] += 1
+            total += 1
+            aggregate_runs += lifecycle.get("runs", 0)
+            aggregate_passes += lifecycle.get("passes", 0)
+
+        for subset in subset_nodes:
+            child_summary = subset.get("lifecycle_summary")
+            if child_summary is None:
+                continue
+            for state_name in state_counts:
+                state_counts[state_name] += child_summary.get(
+                    state_name, 0
+                )
+            total += child_summary.get("total", 0)
+            aggregate_runs += child_summary.get("aggregate_runs", 0)
+            aggregate_passes += child_summary.get(
+                "aggregate_passes", 0
+            )
+
+        if total == 0:
+            return None
+
+        aggregate_reliability = (
+            aggregate_passes / aggregate_runs
+            if aggregate_runs > 0
+            else 0.0
+        )
+
+        return {
+            "total": total,
+            **state_counts,
+            "aggregate_runs": aggregate_runs,
+            "aggregate_passes": aggregate_passes,
+            "aggregate_reliability": round(aggregate_reliability, 6),
         }
 
     def _compute_summary(self) -> dict[str, Any]:

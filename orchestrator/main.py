@@ -12,6 +12,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from orchestrator.execution.dag import TestDAG
 from orchestrator.execution.executor import AsyncExecutor, SequentialExecutor
@@ -58,7 +59,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--output",
         type=Path,
         default=None,
-        help="Path to write the YAML report file",
+        help="Path to write the JSON report file",
     )
     parser.add_argument(
         "--status-file",
@@ -103,6 +104,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=2,
         help="Max BFS hops in regression co-occurrence expansion (default: 2)",
+    )
+
+    # E-value verdict flags
+    parser.add_argument(
+        "--verdict",
+        choices=["quick", "hifi", "off"],
+        default="off",
+        help="E-value test set verdict mode: quick (pool evidence across commits), "
+             "hifi (current commit only, rerun until decided), off (disabled, default)",
+    )
+    parser.add_argument(
+        "--alpha-set",
+        type=float,
+        default=0.05,
+        help="Type I error rate for RED verdict (default: 0.05)",
+    )
+    parser.add_argument(
+        "--beta-set",
+        type=float,
+        default=0.05,
+        help="Type II error rate for GREEN verdict (default: 0.05)",
+    )
+    parser.add_argument(
+        "--max-reruns",
+        type=int,
+        default=100,
+        help="Max reruns per test for hifi verdict mode (default: 100)",
     )
 
     return parser.parse_args(argv)
@@ -218,6 +246,27 @@ def main(argv: list[str] | None = None) -> int:
     commit_sha: str | None = None
     if args.status_file:
         commit_sha = _resolve_git_context(args.allow_dirty)
+    elif args.output:
+        # Best-effort: tag report history with commit SHA without enforcing clean tree
+        commit_sha = _resolve_git_context(allow_dirty=True)
+
+    # Sync disabled state from manifest and remove disabled tests from DAG
+    if args.status_file:
+        from orchestrator.lifecycle.burnin import sync_disabled_state
+        from orchestrator.lifecycle.status import StatusFile
+
+        sf = StatusFile(args.status_file)
+        sync_events = sync_disabled_state(dag, sf)
+        if sync_events:
+            print("Disabled state sync:")
+            for etype, name, old_state, new_state in sync_events:
+                print(f"  {name}: {old_state} \u2192 {new_state} ({etype})")
+            print()
+
+    removed = dag.remove_disabled()
+    if removed:
+        print(f"Disabled tests excluded from execution: {len(removed)}")
+        print()
 
     # Handle regression option
     if args.regression:
@@ -245,8 +294,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error during execution: {e}", file=sys.stderr)
         return 1
 
-    _print_results(results, args)
     _update_status_file(results, args, commit_sha)
+    verdict_data = _compute_verdict(args, dag, commit_sha)
+    _print_results(results, args, commit_sha, manifest, verdict_data)
     return 1 if any(r.status == "failed" for r in results) else 0
 
 
@@ -360,8 +410,9 @@ def _run_regression(
         print(f"Error during execution: {e}", file=sys.stderr)
         return 1
 
-    _print_results(results, args)
     _update_status_file(results, args, commit_sha)
+    verdict_data = _compute_verdict(args, filtered_dag, commit_sha)
+    _print_results(results, args, commit_sha, filtered_manifest, verdict_data)
     return 1 if any(r.status == "failed" for r in results) else 0
 
 
@@ -398,6 +449,69 @@ def _filter_manifest(
     }
 
 
+def _compute_verdict(
+    args: argparse.Namespace,
+    dag: TestDAG,
+    commit_sha: str | None,
+) -> dict[str, Any] | None:
+    """Compute E-value test set verdict if --verdict is enabled.
+
+    Returns:
+        Verdict dict for the reporter, or None if disabled.
+    """
+    if args.verdict == "off" or not args.status_file:
+        return None
+
+    from orchestrator.lifecycle.e_values import (
+        HiFiEvaluator,
+        evaluate_test_set,
+        verdict_to_dict,
+    )
+    from orchestrator.lifecycle.status import StatusFile
+
+    sf = StatusFile(args.status_file)
+    test_names = list(dag.nodes.keys())
+
+    if args.verdict == "quick":
+        verdict = evaluate_test_set(
+            test_names, sf,
+            mode="quick",
+            alpha_set=args.alpha_set,
+            beta_set=args.beta_set,
+        )
+        verdict_data = verdict_to_dict(verdict)
+    else:
+        # hifi
+        if commit_sha is None:
+            print("Warning: --verdict=hifi requires git context; skipping verdict",
+                  file=sys.stderr)
+            return None
+        evaluator = HiFiEvaluator(
+            dag, sf,
+            commit_sha=commit_sha,
+            alpha_set=args.alpha_set,
+            beta_set=args.beta_set,
+            max_reruns=args.max_reruns,
+        )
+        hifi_result = evaluator.evaluate(test_names)
+        verdict_data = verdict_to_dict(hifi_result.verdict)
+        verdict_data["total_reruns"] = hifi_result.total_reruns
+        verdict_data["decided"] = hifi_result.decided
+
+    # Print verdict summary
+    print(f"\nTest Set Verdict: {verdict_data['verdict']}")
+    print(f"  E_set = {verdict_data['e_set']:.4f} "
+          f"(RED threshold: {verdict_data['red_threshold']:.4f})")
+    print(f"  min(S_i) = {verdict_data['min_s_value']:.4f} "
+          f"(GREEN threshold: {verdict_data['green_threshold']:.4f})")
+    if verdict_data.get("weakest_test"):
+        print(f"  Weakest test: {verdict_data['weakest_test']}")
+    if "total_reruns" in verdict_data:
+        print(f"  HiFi reruns: {verdict_data['total_reruns']}")
+
+    return verdict_data
+
+
 def _update_status_file(
     results: list, args: argparse.Namespace, commit_sha: str | None
 ) -> None:
@@ -416,7 +530,12 @@ def _update_status_file(
             print(f"  {name}: {old_state} \u2192 {new_state} ({etype})")
 
 
-def _print_results(results: list, args: argparse.Namespace) -> None:
+def _print_results(
+    results: list, args: argparse.Namespace,
+    commit_sha: str | None = None,
+    manifest: dict | None = None,
+    verdict_data: dict[str, Any] | None = None,
+) -> None:
     """Print test execution results summary."""
     mode_label = args.mode
     if args.regression:
@@ -447,12 +566,41 @@ def _print_results(results: list, args: argparse.Namespace) -> None:
     # Generate reports
     if args.output:
         reporter = Reporter()
+        if manifest is not None:
+            reporter.set_manifest(manifest)
         reporter.add_results(results)
-        reporter.write_report(args.output)
+        if commit_sha:
+            reporter.set_commit_hash(commit_sha)
+
+        if verdict_data:
+            reporter.set_e_value_verdict(verdict_data)
+
+        # Feed lifecycle data from status file to reporter
+        if args.status_file and args.status_file.exists():
+            from orchestrator.lifecycle.status import StatusFile
+
+            sf = StatusFile(args.status_file)
+            lifecycle_data: dict[str, dict[str, Any]] = {}
+            for test_name, entry in sf.get_all_tests().items():
+                lifecycle_data[test_name] = {
+                    "state": entry.get("state", "new"),
+                }
+            reporter.set_lifecycle_data(lifecycle_data)
+            reporter.set_lifecycle_config({
+                "min_reliability": sf.min_reliability,
+                "statistical_significance": sf.statistical_significance,
+            })
+
+        # Use history-aware generation so the HTML timeline accumulates
+        existing = args.output if args.output.exists() else None
+        report_data = reporter.generate_report_with_history(existing)
+
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.output, "w") as f:
+            json.dump(report_data, f, indent=2)
         print(f"Report written to: {args.output}")
 
         html_path = args.output.with_suffix(".html")
-        report_data = reporter.generate_report()
         write_html_report(report_data, html_path)
         print(f"HTML report written to: {html_path}")
 

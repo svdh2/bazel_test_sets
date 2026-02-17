@@ -141,22 +141,26 @@ Structured logging is optional and additive.
 
 When structured logs are present, the JSON report includes:
 
-```yaml
-tests:
-  my_test:
-    status: passed
-    duration_seconds: 1.234
-    structured_log:
-      block_sequence: [rigging, stimulation, checkpoint, verdict]
-      measurements:
-        - name: query_time_ms
-          value: 12
-          unit: ms
-      results:
-        - name: data_integrity
-          passed: true
-      errors: []
-      has_rigging_failure: false
+```json
+{
+  "tests": {
+    "my_test": {
+      "status": "passed",
+      "duration_seconds": 1.234,
+      "structured_log": {
+        "block_sequence": ["rigging", "stimulation", "checkpoint", "verdict"],
+        "measurements": [
+          {"name": "query_time_ms", "value": 12, "unit": "ms"}
+        ],
+        "results": [
+          {"name": "data_integrity", "passed": true}
+        ],
+        "errors": [],
+        "has_rigging_failure": false
+      }
+    }
+  }
+}
 ```
 
 ## Rigging Failure Detection

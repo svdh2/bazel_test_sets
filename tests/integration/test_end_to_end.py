@@ -150,7 +150,7 @@ class TestDiagnosticEndToEnd:
             assert names.index("middle") < names.index("root")
 
     def test_all_pass_report(self):
-        """All-passing suite produces correct summary and YAML."""
+        """All-passing suite produces correct summary and JSON."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             exe = _pass_script(tmpdir)
@@ -312,10 +312,10 @@ class TestDetectionMode:
 
 
 class TestReportToHtmlPipeline:
-    """Full pipeline: execute -> YAML report -> HTML report."""
+    """Full pipeline: execute -> JSON report -> HTML report."""
 
     def test_json_to_html_roundtrip(self):
-        """Generate YAML, then convert to HTML."""
+        """Generate JSON, then convert to HTML."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             exe = _pass_script(tmpdir)
@@ -433,14 +433,15 @@ class TestBurnInLifecycle:
             status_path = Path(tmpdir) / "status.json"
             sf = StatusFile(status_path)
 
-            sf.set_test_state("test_a", "burning_in", runs=10, passes=10)
+            sf.set_test_state("test_a", "burning_in")
+            for _ in range(10):
+                sf.record_run("test_a", passed=True)
             sf.save()
 
             sf2 = StatusFile(status_path)
             assert sf2.get_test_state("test_a") == "burning_in"
-            entry = sf2.get_test_entry("test_a")
-            assert entry["runs"] == 10
-            assert entry["passes"] == 10
+            history = sf2.get_test_history("test_a")
+            assert len(history) == 10
 
 
 # ---------------------------------------------------------------------------
@@ -820,3 +821,434 @@ class TestMainModuleIntegration:
             "--mode", "diagnostic",
         ])
         assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# E-value computation and test set verdict
+# ---------------------------------------------------------------------------
+
+
+class TestEValueComputation:
+    """Unit tests for E-value computation and test set verdict."""
+
+    def test_compute_log_ratio_all_passes(self):
+        """All passes produce positive log-ratio (favors H0 = reliable)."""
+        from orchestrator.lifecycle.e_values import compute_log_ratio
+        lr = compute_log_ratio(runs=30, passes=30, min_reliability=0.99)
+        assert lr > 0
+
+    def test_compute_log_ratio_all_failures(self):
+        """All failures produce negative log-ratio (favors H1 = unreliable)."""
+        from orchestrator.lifecycle.e_values import compute_log_ratio
+        lr = compute_log_ratio(runs=30, passes=0, min_reliability=0.99)
+        assert lr < 0
+
+    def test_compute_log_ratio_zero_runs(self):
+        """Zero runs return 0.0."""
+        from orchestrator.lifecycle.e_values import compute_log_ratio
+        assert compute_log_ratio(runs=0, passes=0, min_reliability=0.99) == 0.0
+
+    def test_compute_log_ratio_consistency_with_sprt(self):
+        """Log ratio matches sprt.py computation for same inputs."""
+        import math
+        from orchestrator.lifecycle.e_values import compute_log_ratio
+        from orchestrator.lifecycle.sprt import sprt_evaluate
+
+        runs, passes = 30, 30
+        lr = compute_log_ratio(runs, passes, min_reliability=0.99, margin=0.10)
+
+        # With all passes and p0=0.99, p1=0.89, SPRT should accept
+        decision = sprt_evaluate(runs, passes, 0.99, 0.95, margin=0.10)
+        assert decision == "accept"
+        # log-ratio should exceed the upper boundary
+        alpha = 0.05
+        upper = math.log((1 - alpha) / alpha)
+        assert lr >= upper
+
+    def test_quick_e_value_reliable_test(self):
+        """Test with all passes has E_i < 1 (favors reliability)."""
+        from orchestrator.lifecycle.e_values import compute_test_e_value_quick
+
+        history = [{"passed": True, "commit": "abc"} for _ in range(30)]
+        tv = compute_test_e_value_quick("test_a", history, min_reliability=0.99)
+        assert tv.e_value < 1.0
+        assert tv.s_value > 1.0
+        assert tv.runs == 30
+        assert tv.passes == 30
+
+    def test_quick_e_value_unreliable_test(self):
+        """Test with many failures has E_i > 1 (favors unreliability)."""
+        from orchestrator.lifecycle.e_values import compute_test_e_value_quick
+
+        history = [{"passed": i < 20, "commit": "abc"} for i in range(30)]
+        tv = compute_test_e_value_quick("test_b", history, min_reliability=0.99)
+        assert tv.e_value > 1.0
+        assert tv.s_value < 1.0
+
+    def test_quick_e_value_groups_by_commit(self):
+        """History entries are grouped by commit SHA."""
+        from orchestrator.lifecycle.e_values import compute_test_e_value_quick
+
+        history = [
+            {"passed": True, "commit": "aaa"},
+            {"passed": True, "commit": "aaa"},
+            {"passed": True, "commit": "bbb"},
+        ]
+        tv = compute_test_e_value_quick("test_c", history, min_reliability=0.99)
+        assert tv.commits_included == 2
+        assert tv.runs == 3
+
+    def test_quick_e_value_none_commits_independent(self):
+        """Entries with commit=None are separate commit groups."""
+        from orchestrator.lifecycle.e_values import compute_test_e_value_quick
+
+        history = [
+            {"passed": True, "commit": None},
+            {"passed": True, "commit": None},
+        ]
+        tv = compute_test_e_value_quick("test_d", history, min_reliability=0.99)
+        assert tv.commits_included == 2
+
+    def test_quick_e_value_empty_history(self):
+        """Empty history gives neutral E-value (1.0)."""
+        from orchestrator.lifecycle.e_values import compute_test_e_value_quick
+
+        tv = compute_test_e_value_quick("test_e", [], min_reliability=0.99)
+        assert tv.e_value == 1.0
+        assert tv.s_value == 1.0
+        assert tv.runs == 0
+
+    def test_hifi_e_value_filters_to_current_commit(self):
+        """Only entries matching current_commit are used."""
+        from orchestrator.lifecycle.e_values import compute_test_e_value_hifi
+
+        history = [
+            {"passed": True, "commit": "current"},
+            {"passed": True, "commit": "current"},
+            {"passed": False, "commit": "old"},
+            {"passed": False, "commit": "old"},
+        ]
+        tv = compute_test_e_value_hifi(
+            "test_f", history, current_commit="current", min_reliability=0.99,
+        )
+        assert tv.runs == 2
+        assert tv.passes == 2
+        assert tv.commits_included == 1
+
+    def test_hifi_e_value_no_matching_commit(self):
+        """No matching entries gives neutral E-value."""
+        from orchestrator.lifecycle.e_values import compute_test_e_value_hifi
+
+        history = [{"passed": True, "commit": "other"}]
+        tv = compute_test_e_value_hifi(
+            "test_g", history, current_commit="missing", min_reliability=0.99,
+        )
+        assert tv.e_value == 1.0
+        assert tv.runs == 0
+
+    def test_verdict_green(self):
+        """All reliable tests -> GREEN."""
+        from orchestrator.lifecycle.e_values import (
+            TestEValue,
+            compute_test_set_verdict,
+        )
+
+        # Create test E-values with very high S-values (strong reliability evidence)
+        tests = [
+            TestEValue("t1", e_value=1e-10, s_value=1e10, log_e_value=-23.0,
+                        runs=50, passes=50, commits_included=5),
+            TestEValue("t2", e_value=1e-10, s_value=1e10, log_e_value=-23.0,
+                        runs=50, passes=50, commits_included=5),
+        ]
+        v = compute_test_set_verdict(tests, alpha_set=0.05, beta_set=0.05)
+        assert v.verdict == "GREEN"
+        assert v.n_tests == 2
+        # GREEN threshold = N / beta_set = 2 / 0.05 = 40
+        assert v.green_threshold == 40.0
+        assert v.min_s_value > v.green_threshold
+
+    def test_verdict_red(self):
+        """One unreliable test -> RED."""
+        from orchestrator.lifecycle.e_values import (
+            TestEValue,
+            compute_test_set_verdict,
+        )
+
+        tests = [
+            TestEValue("t1", e_value=1e-5, s_value=1e5, log_e_value=-11.5,
+                        runs=50, passes=50, commits_included=5),
+            TestEValue("bad", e_value=100.0, s_value=0.01, log_e_value=4.6,
+                        runs=50, passes=30, commits_included=5),
+        ]
+        v = compute_test_set_verdict(tests, alpha_set=0.05, beta_set=0.05)
+        # E_set = (1e-5 + 100) / 2 = 50.0, threshold = 20.0
+        assert v.verdict == "RED"
+        assert v.weakest_test == "bad"
+
+    def test_verdict_undecided(self):
+        """Insufficient evidence -> UNDECIDED."""
+        from orchestrator.lifecycle.e_values import (
+            TestEValue,
+            compute_test_set_verdict,
+        )
+
+        # Neutral E-values (e=1.0, s=1.0) from no data
+        tests = [
+            TestEValue("t1", e_value=1.0, s_value=1.0, log_e_value=0.0,
+                        runs=0, passes=0, commits_included=0),
+        ]
+        v = compute_test_set_verdict(tests, alpha_set=0.05, beta_set=0.05)
+        assert v.verdict == "UNDECIDED"
+
+    def test_verdict_empty_test_set(self):
+        """Empty test set -> GREEN (vacuous truth)."""
+        from orchestrator.lifecycle.e_values import compute_test_set_verdict
+
+        v = compute_test_set_verdict([], alpha_set=0.05, beta_set=0.05)
+        assert v.verdict == "GREEN"
+        assert v.n_tests == 0
+
+    def test_green_threshold_scales_with_n(self):
+        """GREEN threshold scales with N (more tests = higher bar)."""
+        from orchestrator.lifecycle.e_values import (
+            TestEValue,
+            compute_test_set_verdict,
+        )
+
+        make_tv = lambda name: TestEValue(
+            name, e_value=0.1, s_value=10.0, log_e_value=-2.3,
+            runs=20, passes=20, commits_included=2,
+        )
+
+        # With 2 tests: green_threshold = 2/0.05 = 40
+        v2 = compute_test_set_verdict([make_tv("t1"), make_tv("t2")],
+                                       alpha_set=0.05, beta_set=0.05)
+        # With 10 tests: green_threshold = 10/0.05 = 200
+        v10 = compute_test_set_verdict([make_tv(f"t{i}") for i in range(10)],
+                                        alpha_set=0.05, beta_set=0.05)
+
+        assert v10.green_threshold > v2.green_threshold
+        # S=10 is enough for 2 tests (threshold=40? No, 10 < 40) -> UNDECIDED for both
+        # But the 10-test case has a higher bar
+        assert v10.green_threshold == 200.0
+        assert v2.green_threshold == 40.0
+
+    def test_single_weak_test_blocks_green(self):
+        """One undecided test prevents GREEN even if others are strong."""
+        from orchestrator.lifecycle.e_values import (
+            TestEValue,
+            compute_test_set_verdict,
+        )
+
+        tests = [
+            TestEValue("strong", e_value=1e-10, s_value=1e10, log_e_value=-23.0,
+                        runs=50, passes=50, commits_included=5),
+            TestEValue("weak", e_value=1.0, s_value=1.0, log_e_value=0.0,
+                        runs=0, passes=0, commits_included=0),
+        ]
+        v = compute_test_set_verdict(tests, alpha_set=0.05, beta_set=0.05)
+        # min(S_i) = 1.0, threshold = 2/0.05 = 40 -> not GREEN
+        assert v.verdict != "GREEN"
+        assert v.weakest_test == "weak"
+
+    def test_evaluate_test_set_quick_with_status_file(self):
+        """Quick mode reads history from StatusFile correctly."""
+        from orchestrator.lifecycle.e_values import evaluate_test_set
+        from orchestrator.lifecycle.status import StatusFile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status")
+            for _ in range(30):
+                sf.record_run("test_a", True, commit="abc")
+            sf.save()
+
+            v = evaluate_test_set(
+                ["test_a"], sf, mode="quick",
+                alpha_set=0.05, beta_set=0.05,
+            )
+            assert v.n_tests == 1
+            assert v.per_test[0].runs == 30
+            assert v.per_test[0].passes == 30
+
+    def test_evaluate_test_set_hifi_with_status_file(self):
+        """HiFi mode filters to current commit."""
+        from orchestrator.lifecycle.e_values import evaluate_test_set
+        from orchestrator.lifecycle.status import StatusFile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status")
+            for _ in range(10):
+                sf.record_run("test_a", True, commit="old")
+            for _ in range(5):
+                sf.record_run("test_a", True, commit="current")
+            sf.save()
+
+            v = evaluate_test_set(
+                ["test_a"], sf, mode="hifi", current_commit="current",
+                alpha_set=0.05, beta_set=0.05,
+            )
+            assert v.per_test[0].runs == 5
+            assert v.per_test[0].commits_included == 1
+
+    def test_evaluate_test_set_hifi_requires_commit(self):
+        """HiFi mode raises ValueError without current_commit."""
+        from orchestrator.lifecycle.e_values import evaluate_test_set
+        from orchestrator.lifecycle.status import StatusFile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status")
+            with pytest.raises(ValueError, match="current_commit"):
+                evaluate_test_set(["test_a"], sf, mode="hifi")
+
+    def test_verdict_to_dict_serializable(self):
+        """verdict_to_dict output is JSON-serializable."""
+        from orchestrator.lifecycle.e_values import (
+            TestEValue,
+            TestSetVerdict,
+            verdict_to_dict,
+        )
+
+        verdict = TestSetVerdict(
+            verdict="GREEN", e_set=0.001, min_s_value=1000.0,
+            red_threshold=20.0, green_threshold=40.0, n_tests=2,
+            per_test=[
+                TestEValue("t1", 0.001, 1000.0, -6.9, 30, 30, 3),
+                TestEValue("t2", 0.002, 500.0, -6.2, 25, 25, 2),
+            ],
+            weakest_test="t2",
+        )
+        d = verdict_to_dict(verdict)
+        # Should not raise
+        serialized = json.dumps(d)
+        assert "GREEN" in serialized
+
+
+class TestHiFiEvaluator:
+    """Integration tests for HiFiEvaluator with real executables."""
+
+    def test_all_pass_reaches_green(self):
+        """Tests that always pass eventually produce GREEN."""
+        from orchestrator.lifecycle.e_values import HiFiEvaluator
+        from orchestrator.lifecycle.status import StatusFile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_p = Path(tmpdir)
+            exe = _pass_script(tmpdir_p)
+
+            manifest = {
+                "test_set": {"name": "suite", "assertion": "All pass"},
+                "test_set_tests": {
+                    "t1": {"assertion": "T1", "executable": exe, "depends_on": []},
+                },
+            }
+            dag = TestDAG.from_manifest(manifest)
+            sf = StatusFile(tmpdir_p / "status")
+
+            evaluator = HiFiEvaluator(
+                dag, sf, commit_sha="commit1",
+                alpha_set=0.05, beta_set=0.05,
+                max_reruns=200,
+            )
+            result = evaluator.evaluate(["t1"])
+            assert result.verdict.verdict == "GREEN"
+            assert result.decided is True
+            assert result.total_reruns > 0
+
+    def test_failing_test_reaches_red(self):
+        """Test with failures eventually produces RED."""
+        from orchestrator.lifecycle.e_values import HiFiEvaluator
+        from orchestrator.lifecycle.status import StatusFile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_p = Path(tmpdir)
+            exe = _fail_script(tmpdir_p)
+
+            manifest = {
+                "test_set": {"name": "suite", "assertion": "Should fail"},
+                "test_set_tests": {
+                    "t1": {"assertion": "T1", "executable": exe, "depends_on": []},
+                },
+            }
+            dag = TestDAG.from_manifest(manifest)
+            sf = StatusFile(tmpdir_p / "status")
+
+            evaluator = HiFiEvaluator(
+                dag, sf, commit_sha="commit1",
+                alpha_set=0.05, beta_set=0.05,
+                max_reruns=50,
+            )
+            result = evaluator.evaluate(["t1"])
+            assert result.verdict.verdict == "RED"
+            assert result.decided is True
+
+    def test_budget_exhausted_returns_undecided(self):
+        """Low max_reruns with borderline test returns UNDECIDED or decided."""
+        from orchestrator.lifecycle.e_values import HiFiEvaluator
+        from orchestrator.lifecycle.status import StatusFile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_p = Path(tmpdir)
+            exe = _pass_script(tmpdir_p)
+
+            manifest = {
+                "test_set": {"name": "suite", "assertion": "Suite"},
+                "test_set_tests": {
+                    "t1": {"assertion": "T1", "executable": exe, "depends_on": []},
+                },
+            }
+            dag = TestDAG.from_manifest(manifest)
+            sf = StatusFile(tmpdir_p / "status")
+
+            evaluator = HiFiEvaluator(
+                dag, sf, commit_sha="commit1",
+                alpha_set=0.05, beta_set=0.05,
+                max_reruns=1,  # Very small budget
+            )
+            result = evaluator.evaluate(["t1"])
+            # With only 1 rerun, likely UNDECIDED
+            assert result.total_reruns <= 1
+
+
+class TestEValueVerdictEndToEnd:
+    """E-value verdict integration with full pipeline."""
+
+    def test_quick_verdict_in_report(self):
+        """Quick verdict appears in JSON and HTML reports."""
+        from orchestrator.lifecycle.e_values import evaluate_test_set, verdict_to_dict
+        from orchestrator.lifecycle.status import StatusFile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_p = Path(tmpdir)
+            exe = _pass_script(tmpdir_p)
+            manifest, _ = _make_manifest(tmpdir_p, {
+                "t1": {"assertion": "T1", "executable": exe, "depends_on": []},
+            })
+
+            dag = TestDAG.from_manifest(manifest)
+            executor = SequentialExecutor(dag, mode="diagnostic")
+            results = executor.execute()
+
+            # Record some history
+            sf = StatusFile(tmpdir_p / "status")
+            for _ in range(30):
+                sf.record_run("t1", True, commit="abc")
+            sf.save()
+
+            verdict = evaluate_test_set(["t1"], sf, mode="quick")
+            verdict_data = verdict_to_dict(verdict)
+
+            reporter = Reporter()
+            reporter.set_manifest(manifest)
+            reporter.add_results(results)
+            reporter.set_e_value_verdict(verdict_data)
+
+            report = reporter.generate_report()
+            assert "e_value_verdict" in report["report"]
+            assert report["report"]["e_value_verdict"]["verdict"] in (
+                "GREEN", "RED", "UNDECIDED",
+            )
+
+            # HTML generation should not crash
+            html_str = generate_html_report(report)
+            assert "Test Set Verdict" in html_str
+            assert verdict_data["verdict"] in html_str

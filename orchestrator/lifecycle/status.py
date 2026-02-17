@@ -1,7 +1,7 @@
 """State file management for the burn-in lifecycle.
 
 Reads and writes the .tests/status JSON file that tracks test maturity
-states, run counts, and configuration.
+states and configuration.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any
 
 
 # Valid burn-in states
-VALID_STATES = frozenset({"new", "burning_in", "stable", "flaky"})
+VALID_STATES = frozenset({"new", "burning_in", "stable", "flaky", "disabled"})
 
 # Default configuration values
 DEFAULT_CONFIG = {
@@ -23,6 +23,22 @@ DEFAULT_CONFIG = {
 
 # Maximum per-test history entries (newest-first, oldest dropped when exceeded)
 HISTORY_CAP = 200
+
+
+def runs_and_passes_from_history(
+    history: list[dict[str, Any]],
+) -> tuple[int, int]:
+    """Derive runs and passes counts from the history array.
+
+    Args:
+        history: List of {"passed": bool, "commit": str | None} entries.
+
+    Returns:
+        Tuple of (runs, passes).
+    """
+    runs = len(history)
+    passes = sum(1 for entry in history if entry.get("passed", False))
+    return runs, passes
 
 
 class StatusFile:
@@ -124,7 +140,7 @@ class StatusFile:
             test_name: Test identifier.
 
         Returns:
-            Dict with state, runs, passes, last_updated, or None.
+            Dict with state, history, last_updated, or None.
         """
         return self._data["tests"].get(test_name)
 
@@ -132,16 +148,15 @@ class StatusFile:
         self,
         test_name: str,
         state: str,
-        runs: int | None = None,
-        passes: int | None = None,
+        *,
+        clear_history: bool = False,
     ) -> None:
         """Set or update the state of a test.
 
         Args:
             test_name: Test identifier.
             state: New state (must be in VALID_STATES).
-            runs: Total run count (optional, preserved if not specified).
-            passes: Total pass count (optional, preserved if not specified).
+            clear_history: If True, clear run history (fresh burn-in cycle).
 
         Raises:
             ValueError: If state is not a valid burn-in state.
@@ -155,16 +170,9 @@ class StatusFile:
 
         existing = self._data["tests"].get(test_name, {})
 
-        # When counters are explicitly reset to zero, clear history too
-        # (fresh burn-in cycle after deflake or initial burn-in).
-        reset = runs == 0 and passes == 0
         entry: dict[str, Any] = {
             "state": state,
-            "runs": runs if runs is not None else existing.get("runs", 0),
-            "passes": (
-                passes if passes is not None else existing.get("passes", 0)
-            ),
-            "history": [] if reset else existing.get("history", []),
+            "history": [] if clear_history else existing.get("history", []),
             "last_updated": now,
         }
         self._data["tests"][test_name] = entry
@@ -174,9 +182,9 @@ class StatusFile:
     ) -> None:
         """Record a test run result.
 
-        Increments run count and optionally pass count. Prepends a history
-        entry with the pass/fail result and commit SHA. Updates last_updated.
-        If test doesn't exist in state file, creates it with state "new".
+        Prepends a history entry with the pass/fail result and commit SHA.
+        Updates last_updated. If test doesn't exist in state file, creates
+        it with state "new".
 
         Args:
             test_name: Test identifier.
@@ -188,16 +196,11 @@ class StatusFile:
         if test_name not in self._data["tests"]:
             self._data["tests"][test_name] = {
                 "state": "new",
-                "runs": 0,
-                "passes": 0,
                 "history": [],
                 "last_updated": now,
             }
 
         entry = self._data["tests"][test_name]
-        entry["runs"] = entry.get("runs", 0) + 1
-        if passed:
-            entry["passes"] = entry.get("passes", 0) + 1
         entry["last_updated"] = now
 
         # Prepend to history (newest-first) and cap
@@ -225,7 +228,7 @@ class StatusFile:
         """Get all test entries.
 
         Returns:
-            Dict of {test_name: {state, runs, passes, last_updated}}.
+            Dict of {test_name: {state, history, last_updated}}.
         """
         return dict(self._data["tests"])
 

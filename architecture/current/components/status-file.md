@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Manages the `.tests/status` JSON state file that tracks test maturity states, run counts, and configuration. This is the persistent storage layer for the burn-in lifecycle.
+Manages the `.tests/status` JSON state file that tracks test maturity states and configuration. This is the persistent storage layer for the burn-in lifecycle.
 
 ## Interface
 
@@ -24,12 +24,15 @@ class StatusFile:
     # Test state management
     def get_test_state(test_name: str) -> str | None
     def get_test_entry(test_name: str) -> dict | None
-    def set_test_state(test_name, state, runs=None, passes=None)
+    def set_test_state(test_name, state, *, clear_history=False)
     def record_run(test_name: str, passed: bool, commit: str | None = None)
     def remove_test(test_name: str) -> bool
 
     # History
     def get_test_history(test_name: str) -> list[dict]
+
+# Module-level helper
+def runs_and_passes_from_history(history: list[dict]) -> tuple[int, int]
 
     # Queries
     def get_all_tests() -> dict[str, dict]
@@ -41,7 +44,7 @@ class StatusFile:
 
 ### Valid States
 
-`new`, `burning_in`, `stable`, `flaky`
+`new`, `burning_in`, `stable`, `flaky`, `disabled`
 
 ### File Format
 
@@ -54,8 +57,6 @@ class StatusFile:
   "tests": {
     "//test:a": {
       "state": "stable",
-      "runs": 50,
-      "passes": 50,
       "history": [
         {"passed": true, "commit": "abc123"},
         {"passed": false, "commit": "def456"}
@@ -74,7 +75,7 @@ The `history` array is ordered newest-first and capped at 200 entries (`HISTORY_
 
 ## Dependents
 
-- **Burn-in** (`orchestrator.lifecycle.burnin`): Reads/writes test states and run counts during sweep and result processing
+- **Burn-in** (`orchestrator.lifecycle.burnin`): Reads/writes test states and history during sweep and result processing
 - **Orchestrator Main** (`orchestrator.main`): Loads StatusFile when `--status-file` is provided, passes it to `process_results` after test execution
 - **CI Tool** (`ci_tool/main.py`): All subcommands (burn-in, deflake, test-status) use StatusFile
 - **Regression Selector**: Could filter by burn-in state (currently treats all manifest tests as candidates)
@@ -85,10 +86,12 @@ The `history` array is ordered newest-first and capped at 200 entries (`HISTORY_
 
 2. **Auto-create on record_run**: If `record_run` is called for a test not in the file, it creates an entry with state `"new"`. This supports incremental adoption -- tests can be tracked before explicitly entering the burn-in workflow.
 
-3. **State validation**: `set_test_state` validates that the state is one of the four valid states, raising `ValueError` for invalid transitions. The state machine semantics (which transitions are allowed) are enforced by the burn-in and CI tool logic, not by StatusFile itself.
+3. **State validation**: `set_test_state` validates that the state is one of the five valid states, raising `ValueError` for invalid transitions. The state machine semantics (which transitions are allowed) are enforced by the burn-in and CI tool logic, not by StatusFile itself.
 
 4. **Parent directory creation**: The `save()` method creates parent directories if needed, supporting first-time initialization without manual directory setup.
 
-5. **Capped history with commit SHAs**: Each `record_run` prepends a `{passed, commit}` entry to the test's history. The history is capped at 200 entries (oldest dropped) and stored newest-first. Commit SHAs enable correlating reliability changes with specific commits for root cause diagnostics. When `set_test_state` resets counters to zero (deflake/burn-in scenarios), the history is also cleared.
+5. **Capped history with commit SHAs**: Each `record_run` prepends a `{passed, commit}` entry to the test's history. The history is capped at 200 entries (oldest dropped) and stored newest-first. Commit SHAs enable correlating reliability changes with specific commits for root cause diagnostics. When `set_test_state` is called with `clear_history=True` (deflake/burn-in scenarios), the history is cleared.
 
-6. **Backward compatibility**: Old status files without a `history` field load without error; `get_test_history` returns an empty list for entries that lack the field.
+6. **History-derived aggregates**: Run counts and pass counts are derived from the history array via `runs_and_passes_from_history()` rather than stored separately. This eliminates redundancy and keeps the history as the single source of truth for reliability calculations.
+
+7. **Backward compatibility**: Old status files without a `history` field load without error; `get_test_history` returns an empty list for entries that lack the field. Old files with legacy `runs`/`passes` keys are loaded without error; those keys are simply ignored and dropped on the next `save()`.

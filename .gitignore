@@ -9,3 +9,8 @@ bazel-bin
 bazel-out
 bazel-testlogs
 bazel-*
+
+# Test status files
+examples/ecommerce/.tests/
+
+.claude-images/

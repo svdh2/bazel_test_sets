@@ -9,6 +9,7 @@ TestSetTestInfo = provider(
         "depends_on": "List of labels this test depends on (DAG edges)",
         "judgement_label": "Optional label of the separate judgement target",
         "executable": "The executable file for the wrapped test",
+        "disabled": "Boolean indicating whether this test is disabled",
     },
 )
 
@@ -63,6 +64,7 @@ def _test_set_test_impl(ctx):
             depends_on = depends_on_labels,
             judgement_label = judgement_label,
             executable = runner,
+            disabled = ctx.attr.disabled,
         ),
     ]
 
@@ -93,6 +95,10 @@ test_set_test = rule(
             default = None,
             executable = True,
             cfg = "target",
+        ),
+        "disabled": attr.bool(
+            doc = "If True, this test is disabled and will be skipped during execution",
+            default = False,
         ),
     },
     test = True,

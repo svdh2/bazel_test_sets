@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from orchestrator.reporting.html_reporter import (
+    LIFECYCLE_COLORS,
+    LIFECYCLE_LABELS,
     STATUS_COLORS,
     STATUS_LABELS,
     generate_html_from_file,
@@ -224,6 +226,75 @@ class TestHierarchicalReport:
         assert "PASSED" in result
 
 
+class TestNestedTestSets:
+    """Tests for hierarchical collapsible test set rendering."""
+
+    def _make_nested_report(self, child_status="passed", root_status=None):
+        if root_status is None:
+            root_status = child_status
+        return {
+            "report": {
+                "generated_at": "2026-01-01T00:00:00+00:00",
+                "summary": {"total": 2, "passed": 2, "failed": 0,
+                             "dependencies_failed": 0, "total_duration_seconds": 3.0},
+                "test_set": {
+                    "name": "root_set",
+                    "assertion": "Root passes",
+                    "status": root_status,
+                    "tests": {"test_a": {"status": "passed", "duration_seconds": 1.0}},
+                    "subsets": [
+                        {
+                            "name": "child_set",
+                            "assertion": "Child passes",
+                            "status": child_status,
+                            "tests": {"test_b": {"status": child_status,
+                                                  "duration_seconds": 2.0}},
+                            "subsets": [],
+                        },
+                    ],
+                },
+            },
+        }
+
+    def test_nested_set_in_details_element(self):
+        """Nested test sets render inside details elements."""
+        result = generate_html_report(self._make_nested_report())
+        assert 'class="test-set-details"' in result
+        assert "child_set" in result
+
+    def test_root_not_in_details(self):
+        """Root test set renders as a plain div, not details."""
+        result = generate_html_report(self._make_nested_report())
+        # Root name appears before first <details
+        before_details = result.split("<details")[0]
+        assert "root_set" in before_details
+
+    def test_nested_collapsed_by_default(self):
+        """Nested test sets without failures are collapsed."""
+        result = generate_html_report(self._make_nested_report())
+        assert '<details class="test-set-details">' in result
+        # No open attribute
+        assert 'test-set-details" open>' not in result
+
+    def test_nested_expanded_on_failure(self):
+        """Nested test sets with failures are auto-expanded."""
+        result = generate_html_report(
+            self._make_nested_report(child_status="failed", root_status="failed")
+        )
+        assert '<details class="test-set-details" open>' in result
+
+    def test_test_list_container_present(self):
+        """Direct tests are wrapped in a test-list container."""
+        result = generate_html_report(self._make_nested_report())
+        assert 'class="test-list"' in result
+
+    def test_nested_tests_rendered(self):
+        """Tests inside nested subsets are rendered."""
+        result = generate_html_report(self._make_nested_report())
+        assert "test_a" in result
+        assert "test_b" in result
+
+
 class TestExpandableSections:
     """Tests for expandable log and measurement sections."""
 
@@ -235,7 +306,7 @@ class TestExpandableSections:
         }]
         report = _make_flat_report(tests=tests)
         result = generate_html_report(report)
-        assert "<details>" in result
+        assert "<details" in result
         assert "Hello from test" in result
         assert "Logs" in result
 
@@ -471,3 +542,245 @@ class TestHtmlEscaping:
         result = generate_html_report(report)
         assert "&lt;b&gt;" in result
         assert "&amp;" in result
+
+
+class TestHistoryTimeline:
+    """Tests for pass/fail history timeline rendering."""
+
+    def _make_history_entries(
+        self,
+        statuses: list[str],
+        commits: list[str] | None = None,
+    ) -> list[dict]:
+        entries = []
+        for i, status in enumerate(statuses):
+            entry: dict = {"status": status, "duration_seconds": 1.0,
+                           "timestamp": f"2026-01-0{i + 1}T00:00:00+00:00"}
+            if commits and i < len(commits):
+                entry["commit"] = commits[i]
+            entries.append(entry)
+        return entries
+
+    def test_timeline_rendered_for_flat_report_with_history(self):
+        """History timeline appears when history data is present."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed", "failed", "passed"],
+                ["aaa111", "bbb222", "ccc333"],
+            ),
+        }
+        result = generate_html_report(report)
+        assert "history-timeline" in result
+        assert "ht-box" in result
+
+    def test_timeline_not_rendered_without_history(self):
+        """No timeline div when history data is absent."""
+        report = _make_flat_report()
+        result = generate_html_report(report)
+        assert 'class="history-timeline"' not in result
+
+    def test_timeline_shows_correct_colors(self):
+        """Passed entries are green, failed entries are red."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(["passed", "failed"]),
+        }
+        result = generate_html_report(report)
+        assert "#2da44e" in result  # passed green
+        assert "#cf222e" in result  # failed red
+
+    def test_timeline_shows_commit_in_tooltip(self):
+        """Commit hash appears in title attribute for hover."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed"], ["abcdef123456789"],
+            ),
+        }
+        result = generate_html_report(report)
+        assert 'title="abcdef123456"' in result  # truncated to 12 chars
+
+    def test_timeline_falls_back_to_status_when_no_commit(self):
+        """Tooltip shows status name when commit is missing."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(["passed"]),
+        }
+        result = generate_html_report(report)
+        assert 'title="passed"' in result
+
+    def test_timeline_rendered_in_hierarchical_report(self):
+        """History timeline appears in hierarchical test sets."""
+        report = _make_hierarchical_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed", "passed", "failed"],
+                ["aaa", "bbb", "ccc"],
+            ),
+        }
+        result = generate_html_report(report)
+        assert "history-timeline" in result
+
+    def test_timeline_escapes_html_in_commit(self):
+        """Commit hash with special chars is escaped."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed"], ['<script>"x</script>'],
+            ),
+        }
+        result = generate_html_report(report)
+        assert "<script>" not in result
+        assert "&lt;script&gt;&quot;" in result
+
+    def test_empty_history_list_no_timeline(self):
+        """Empty history list for a test produces no timeline div."""
+        report = _make_flat_report()
+        report["report"]["history"] = {"test_a": []}
+        result = generate_html_report(report)
+        assert 'class="history-timeline"' not in result
+
+    def test_dependencies_failed_color(self):
+        """Dependencies_failed status uses grey in timeline."""
+        report = _make_flat_report(
+            tests=[{"name": "t", "status": "dependencies_failed",
+                    "duration_seconds": 1.0}],
+        )
+        report["report"]["history"] = {
+            "t": self._make_history_entries(["dependencies_failed"]),
+        }
+        result = generate_html_report(report)
+        assert "#999" in result
+
+
+class TestLifecycleRendering:
+    """Tests for lifecycle state rendering in HTML reports."""
+
+    def test_lifecycle_badge_rendered_for_test(self):
+        """Lifecycle state badge appears on individual test entries."""
+        tests = {
+            "t": {
+                "assertion": "A", "status": "passed",
+                "duration_seconds": 1.0,
+                "lifecycle": {
+                    "state": "stable", "runs": 100, "passes": 99,
+                    "reliability": 0.99,
+                },
+            },
+        }
+        report = _make_hierarchical_report(tests=tests)
+        result = generate_html_report(report)
+        assert 'class="lifecycle-badge"' in result
+        assert "STABLE" in result
+        assert "99.0%" in result
+        assert "(99/100)" in result
+
+    def test_no_lifecycle_badge_without_data(self):
+        """No lifecycle badge element when lifecycle data is absent."""
+        tests = {
+            "t": {
+                "assertion": "A", "status": "passed",
+                "duration_seconds": 1.0,
+            },
+        }
+        report = _make_hierarchical_report(tests=tests)
+        result = generate_html_report(report)
+        # CSS class definition exists but no rendered badge element
+        assert 'class="lifecycle-badge"' not in result
+
+    def test_lifecycle_summary_rendered_for_test_set(self):
+        """Lifecycle summary appears on test set headers."""
+        report = _make_hierarchical_report()
+        report["report"]["test_set"]["lifecycle_summary"] = {
+            "total": 3, "stable": 2, "burning_in": 1, "flaky": 0,
+            "new": 0, "disabled": 0,
+            "aggregate_runs": 300, "aggregate_passes": 297,
+            "aggregate_reliability": 0.99,
+        }
+        result = generate_html_report(report)
+        assert "lifecycle-summary" in result
+        assert "2 STABLE" in result
+        assert "1 BURNING IN" in result
+        assert "99.0%" in result
+
+    def test_lifecycle_summary_omits_zero_counts(self):
+        """Zero-count states are not shown in summary."""
+        report = _make_hierarchical_report()
+        report["report"]["test_set"]["lifecycle_summary"] = {
+            "total": 2, "stable": 2, "burning_in": 0, "flaky": 0,
+            "new": 0, "disabled": 0,
+            "aggregate_runs": 200, "aggregate_passes": 200,
+            "aggregate_reliability": 1.0,
+        }
+        result = generate_html_report(report)
+        assert "FLAKY" not in result
+        assert "BURNING IN" not in result
+        assert "2 STABLE" in result
+
+    def test_lifecycle_config_note_rendered(self):
+        """Lifecycle config threshold note appears when config is set."""
+        report = _make_hierarchical_report()
+        report["report"]["test_set"]["lifecycle_summary"] = {
+            "total": 1, "stable": 1, "burning_in": 0, "flaky": 0,
+            "new": 0, "disabled": 0,
+            "aggregate_runs": 100, "aggregate_passes": 100,
+            "aggregate_reliability": 1.0,
+        }
+        report["report"]["lifecycle_config"] = {
+            "min_reliability": 0.99,
+            "statistical_significance": 0.95,
+        }
+        result = generate_html_report(report)
+        assert "lifecycle-config-note" in result
+        assert "99%" in result
+        assert "95%" in result
+
+    def test_lifecycle_badge_colors(self):
+        """Different lifecycle states use correct colors."""
+        for state, expected_color in [
+            ("stable", LIFECYCLE_COLORS["stable"]),
+            ("flaky", LIFECYCLE_COLORS["flaky"]),
+            ("burning_in", LIFECYCLE_COLORS["burning_in"]),
+            ("new", LIFECYCLE_COLORS["new"]),
+            ("disabled", LIFECYCLE_COLORS["disabled"]),
+        ]:
+            tests = {
+                "t": {
+                    "assertion": "A", "status": "passed",
+                    "duration_seconds": 1.0,
+                    "lifecycle": {
+                        "state": state, "runs": 10, "passes": 9,
+                        "reliability": 0.9,
+                    },
+                },
+            }
+            report = _make_hierarchical_report(tests=tests)
+            result = generate_html_report(report)
+            assert expected_color in result, (
+                f"Expected color {expected_color} for state {state}"
+            )
+
+    def test_lifecycle_zero_runs_no_percentage(self):
+        """Tests with zero runs show badge but no percentage."""
+        tests = {
+            "t": {
+                "assertion": "A", "status": "passed",
+                "duration_seconds": 1.0,
+                "lifecycle": {
+                    "state": "new", "runs": 0, "passes": 0,
+                    "reliability": 0.0,
+                },
+            },
+        }
+        report = _make_hierarchical_report(tests=tests)
+        result = generate_html_report(report)
+        assert 'class="lifecycle-badge"' in result
+        assert "NEW" in result
+        # No rendered reliability element (only CSS definition)
+        assert 'class="lifecycle-reliability"' not in result
+
+    def test_all_lifecycle_labels_have_colors(self):
+        """Every lifecycle state in LIFECYCLE_LABELS has a color."""
+        for state in LIFECYCLE_LABELS:
+            assert state in LIFECYCLE_COLORS

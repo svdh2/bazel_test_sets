@@ -49,6 +49,14 @@ Records orchestrator test results in the status file and evaluates lifecycle tra
 
 Returns `(event_type, test_name, old_state, new_state)` tuples for each transition.
 
+### sync_disabled_state
+
+```python
+def sync_disabled_state(dag, status_file) -> list[tuple[str, str, str, str]]
+```
+
+Synchronizes disabled flags from the DAG (manifest) with the status file. Tests marked `disabled=True` in the manifest are transitioned to "disabled" state. Tests in "disabled" state whose manifest no longer marks them disabled are transitioned to "new". Returns lifecycle event tuples.
+
 ### filter_tests_by_state
 
 ```python
@@ -73,7 +81,13 @@ stable  -------->  burning_in
 (suspicious: SPRT inconclusive after failure)
 
 flaky  -------->  burning_in
-(CI tool deflake, counters reset)
+(CI tool deflake, history cleared)
+
+any  ---------->  disabled
+(BUILD: disabled=True, sync at orchestrator start)
+
+disabled  ----->  new
+(BUILD: disabled=True removed, sync at orchestrator start)
 ```
 
 ## Dependencies
@@ -103,3 +117,5 @@ flaky  -------->  burning_in
 6. **Orchestrator integration via process_results**: Unlike `handle_stable_failure` (which re-runs tests), `process_results` operates on existing orchestrator results — it records the outcome and evaluates SPRT without re-execution. This is the primary integration point between the orchestrator and the lifecycle state machine.
 
 7. **Suspicious test escalation**: When a stable test fails but SPRT returns "inconclusive" (not enough evidence to demote), the test transitions to `burning_in` for closer monitoring. Counters and history are preserved (not reset) so the burn-in sweep can continue evaluating from accumulated data.
+
+8. **Manifest-driven disabled sync**: The `sync_disabled_state` function bridges the BUILD file `disabled=True` flag with the persistent status file state. This runs at orchestrator startup before execution, ensuring disabled tests are excluded. When re-enabled, the test starts fresh as "new" and must go through burn-in again.

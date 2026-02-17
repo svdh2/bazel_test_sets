@@ -298,16 +298,18 @@ class AsyncExecutor:
             if self._stop_event.is_set() and not running:
                 break
 
-            # Find tests ready to dispatch
-            ready: list[str] = []
-            for name in list(pending):
+            # Cascade dependency failures until stable.  A single pass
+            # can miss transitive failures when set iteration processes a
+            # downstream dependent before its intermediate dependency.
+            cascaded = True
+            while cascaded:
+                cascaded = False
                 if self._stop_event.is_set():
                     break
-
-                deps = set(self.dag.get_dependencies(name))
-
-                if self.mode == "diagnostic":
-                    # Check if any dep has failed
+                for name in list(pending):
+                    if self.mode != "diagnostic":
+                        break
+                    deps = set(self.dag.get_dependencies(name))
                     dep_failed = any(
                         dep in self.results
                         and self.results[dep].status
@@ -320,7 +322,6 @@ class AsyncExecutor:
                         for dep in deps
                     )
                     if dep_failed:
-                        # Mark as dependencies_failed immediately
                         node = self.dag.nodes[name]
                         result = TestResult(
                             name=name,
@@ -332,8 +333,17 @@ class AsyncExecutor:
                         self._dep_failure_times[name] = time.monotonic()
                         pending.discard(name)
                         done.add(name)
-                        continue
+                        cascaded = True
 
+            # Find tests ready to dispatch
+            ready: list[str] = []
+            for name in list(pending):
+                if self._stop_event.is_set():
+                    break
+
+                deps = set(self.dag.get_dependencies(name))
+
+                if self.mode == "diagnostic":
                     # All deps must be done (not just not-failed)
                     if deps.issubset(done):
                         ready.append(name)

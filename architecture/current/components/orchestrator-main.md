@@ -26,6 +26,10 @@ CLI entry point for the test set orchestrator. Parses command-line arguments, lo
 | `--co-occurrence-graph` | Path | `.tests/co_occurrence_graph.json` | Co-occurrence graph path |
 | `--max-test-percentage` | float | `0.10` | Max fraction of stable tests for regression |
 | `--max-hops` | int | `2` | Max BFS hops in co-occurrence expansion |
+| `--verdict` | Choice | `off` | E-value verdict mode: `quick`, `hifi`, or `off` |
+| `--alpha-set` | float | `0.05` | Type I error rate for RED verdict |
+| `--beta-set` | float | `0.05` | Type II error rate for GREEN verdict |
+| `--max-reruns` | int | `100` | Max reruns per test for hifi verdict mode |
 
 ### Public Function
 
@@ -43,6 +47,7 @@ Returns exit code 0 if all tests pass, 1 if any test fails.
 - **HTML Reporter** (`orchestrator.reporting.html_reporter`): Generates HTML reports
 - **Co-occurrence** (`orchestrator.regression.co_occurrence`): Loads co-occurrence graph (lazy import for regression)
 - **Regression Selector** (`orchestrator.regression.regression_selector`): Selects tests for regression runs (lazy import)
+- **E-values** (`orchestrator.lifecycle.e_values`): Computes test set verdict (lazy import when `--verdict` is enabled)
 
 ## Dependents
 
@@ -57,3 +62,5 @@ Returns exit code 0 if all tests pass, 1 if any test fails.
 3. **Manifest filtering for regression**: When the `--regression` flag selects a subset of tests, the manifest is filtered to include only selected tests, with depends_on edges pruned to the selected set. A new DAG is then built from the filtered manifest.
 
 4. **Dual report output**: When `--output` is specified, both JSON and HTML reports are written (same path, different extensions).
+
+5. **E-value verdict is opt-in**: The `--verdict` flag defaults to `off`. When enabled, the verdict is computed after status file updates and included in reports. It does not currently override the execution-based exit code.

@@ -23,6 +23,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -83,6 +84,16 @@ def _kill_stale_containers():
     lock_path = TARGET_DIR / ".ci.lock"
     if lock_path.exists():
         lock_path.unlink()
+
+
+PROFILE_TIMINGS_FILE = TARGET_DIR / ".profile_timings.json"
+
+
+def _timed(label: str, func, *args, **kwargs):
+    """Run *func* and return (result, elapsed_seconds)."""
+    t0 = time.monotonic()
+    result = func(*args, **kwargs)
+    return result, time.monotonic() - t0
 
 
 def build_image():
@@ -193,20 +204,104 @@ def build(ctx):
 
 
 @cli.command()
+@click.option("--profile", is_flag=True, help="Print wall-clock timing breakdown of each phase.")
 @click.pass_context
-def test(ctx):
+def test(ctx, profile):
     """Run all Bazel tests and Python unit tests."""
     if not IN_CONTAINER:
-        _delegate_to_container(["test"], force=ctx.obj["force"])
+        args = ["test"]
+        if profile:
+            args.append("--profile")
+            # Remove stale timings so we don't show old data on failure
+            PROFILE_TIMINGS_FILE.parent.mkdir(exist_ok=True)
+            if PROFILE_TIMINGS_FILE.exists():
+                PROFILE_TIMINGS_FILE.unlink()
+
+            _, dt_build = _timed("docker_build", build_image)
+
+            # Inline the container-run part of _delegate_to_container so we
+            # can time it separately from the image build.
+            force = ctx.obj["force"]
+            stale = _find_running_containers()
+            if stale:
+                if force:
+                    _kill_stale_containers()
+                else:
+                    console.print(
+                        "[red]Stale container(s) detected. Run with --force to kill them.[/red]"
+                    )
+                    sys.exit(1)
+
+            TARGET_DIR.mkdir(exist_ok=True)
+            lock_path = TARGET_DIR / ".ci.lock"
+            with open(lock_path, "w") as lock_fd:
+                try:
+                    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    console.print("[red]Another ./ci command is already running.[/red]")
+                    sys.exit(1)
+                ci_cmd = "./ci " + " ".join(shlex.quote(a) for a in args)
+                try:
+                    _, dt_container = _timed(
+                        "container_run",
+                        run_cmd,
+                        [
+                            "docker", "run", "--rm",
+                            "-v", f"{PROJECT_ROOT}:/workspace:rw",
+                            "-w", "/workspace",
+                            IMAGE_NAME,
+                            ci_cmd,
+                        ],
+                    )
+                finally:
+                    leftover = _find_running_containers()
+                    if leftover:
+                        _kill_stale_containers()
+
+            # Read container-side timings and print combined summary
+            import json as json_mod
+            container_timings: list[tuple[str, float]] = []
+            if PROFILE_TIMINGS_FILE.exists():
+                container_timings = json_mod.loads(
+                    PROFILE_TIMINGS_FILE.read_text()
+                )
+
+            console.print()
+            console.print("[bold]===== Profile: wall-clock timing =====[/bold]")
+            timings: list[tuple[str, float]] = [
+                ("docker build (image)", dt_build),
+            ]
+            for label, dt in container_timings:
+                timings.append((f"  {label}", dt))
+            timings.append(("docker run  (total)", dt_container))
+            for label, dt in timings:
+                console.print(f"  {label:<40s} {dt:>7.1f}s")
+            total = dt_build + dt_container
+            console.print(f"  {'TOTAL':<40s} {total:>7.1f}s")
+            return
+
+        _delegate_to_container(args, force=ctx.obj["force"])
         return
+
+    # --- Inside container ---
+    timings: list[tuple[str, float]] = []
+
     _clean_stale_bazel_symlinks()
-    run_cmd(["bazel", "test", "//..."])
+    _, dt = _timed("bazel test //...", run_cmd, ["bazel", "test", "//..."])
+    timings.append(("bazel test //...", dt))
+
     console.print("[bold]--- Running pytest ---[/bold]")
-    run_cmd([
-        "uv", "run", "--with", "pytest",
+    pytest_args = [
         "pytest", "orchestrator/", "ci_tool/", "tests/",
         "-v", "--tb=short",
-    ])
+    ]
+    _, dt = _timed("pytest", run_cmd, pytest_args)
+    timings.append(("pytest", dt))
+
+    if profile:
+        import json as json_mod
+        PROFILE_TIMINGS_FILE.parent.mkdir(exist_ok=True)
+        PROFILE_TIMINGS_FILE.write_text(json_mod.dumps(timings))
 
 
 @cli.command()
@@ -217,7 +312,6 @@ def check(ctx):
         _delegate_to_container(["check"], force=ctx.obj["force"])
         return
     run_cmd([
-        "uv", "run", "--with", "mypy",
         "mypy", "orchestrator/", "ci_tool/", "tests/",
         "--ignore-missing-imports",
     ])
@@ -226,7 +320,7 @@ def check(ctx):
 @cli.command("test-examples")
 @click.pass_context
 def test_examples(ctx):
-    """Run Bazel tests, lifecycle demo (burn-in/demotion), and reports."""
+    """Run Bazel tests, lifecycle demo (burn-in/demotion/recovery), and reports."""
     if not IN_CONTAINER:
         _delegate_to_container(["test-examples"], force=ctx.obj["force"])
         return
@@ -241,23 +335,35 @@ def test_examples(ctx):
             item.unlink()
             console.print(f"[dim]Removed stale symlink examples/{item.name}[/dim]")
 
-    # Phase 1: Bazel validation — all tests pass (no status file)
-    console.print("[bold]--- Phase 1: Bazel test validation ---[/bold]")
+    status_path = examples_dir / "ecommerce" / ".tests" / "status"
+    email_label = "@@//ecommerce:email_notification_raw_test"
+
+    # Phase 1: Clean start + Bazel validation
+    console.print("[bold]--- Phase 1: Clean start + Bazel validation ---[/bold]")
+    shutil.rmtree(status_path.parent, ignore_errors=True)
+    console.print("[dim]Removed .tests/ directory[/dim]")
     run_cmd(["bazel", "test", "//..."], cwd=str(examples_dir))
 
-    # Phase 2: Set up status file for lifecycle demo
-    console.print("[bold]--- Phase 2: Setting up lifecycle demo ---[/bold]")
-    status_path = examples_dir / "ecommerce" / ".tests" / "status"
-    _setup_lifecycle_status(status_path, examples_dir)
+    # Phase 2: Burn-in acceptance (email: burning_in → stable)
+    # Pre-seed 27/27 passes; one orchestrator run tips SPRT to accept.
+    console.print("[bold]--- Phase 2: Burn-in acceptance ---[/bold]")
+    _setup_burnin_status(status_path, email_label)
+    run_cmd(
+        [
+            "bazel", "run", "//ecommerce:ecommerce_tests", "--",
+            "--status-file", str(status_path), "--allow-dirty",
+        ],
+        cwd=str(examples_dir),
+    )
+    _print_lifecycle_summary(status_path, "after burn-in acceptance")
 
-    # Phase 3: Orchestrator run with status file + forced failure
-    # Exercises three scenarios in a single run:
-    #   - burn-in acceptance (discount test: burning_in → stable)
-    #   - normal operation (other tests: results recorded)
-    #   - demotion (email notification: stable → flaky)
-    console.print("[bold]--- Phase 3: Lifecycle run ---[/bold]")
+    # Phase 3: Degradation → demotion (email: stable → flaky)
+    # Inject failure history (simulating bad CI runs), then run with degraded
+    # reliability so the current run also fails → demotion triggers.
+    console.print("[bold]--- Phase 3: Degradation and demotion ---[/bold]")
+    _inject_degradation(status_path, email_label)
     env = dict(os.environ)
-    env["TST_FORCE_FAIL"] = "1"
+    env["TST_EMAIL_RELIABILITY"] = "0.0"
     run_cmd(
         [
             "bazel", "run", "//ecommerce:ecommerce_tests", "--",
@@ -267,9 +373,21 @@ def test_examples(ctx):
         env=env,
         check=False,  # email_notification will fail — expect non-zero exit
     )
+    _print_lifecycle_summary(status_path, "after degradation")
 
-    # Phase 4: Print lifecycle summary
-    _print_lifecycle_summary(status_path)
+    # Phase 4: Fix + re-burn-in (email: burning_in → stable again)
+    # Simulate: developer fixes root cause, CI tool deflakes the test,
+    # 27 clean burn-in runs accumulate, then this run tips acceptance.
+    console.print("[bold]--- Phase 4: Fix and re-stabilization ---[/bold]")
+    _setup_deflake_status(status_path, email_label)
+    run_cmd(
+        [
+            "bazel", "run", "//ecommerce:ecommerce_tests", "--",
+            "--status-file", str(status_path), "--allow-dirty",
+        ],
+        cwd=str(examples_dir),
+    )
+    _print_lifecycle_summary(status_path, "after re-stabilization")
 
     # Phase 5: Generate reports for other examples
     console.print("[bold]--- Phase 5: Other example reports ---[/bold]")
@@ -279,22 +397,9 @@ def test_examples(ctx):
     )
 
 
-def _setup_lifecycle_status(status_path: Path, examples_dir: Path) -> None:
-    """Set up the status file for the lifecycle demo.
-
-    Pre-populates two tests with specific states:
-    - discount: burning_in close to acceptance (one more pass → stable)
-    - email_notification: stable with recent failures (one more failure → flaky)
-    """
+def _setup_burnin_status(status_path: Path, email_label: str) -> None:
+    """Create status file with email_notification in burn-in, one pass from SPRT accept."""
     import json as json_mod
-
-    # Determine exact test labels from the manifest.  The test_set_test rule
-    # stores test_label = the underlying py_test label, so we need the raw
-    # test names.  Build first so the manifest exists, then peek at labels
-    # via a quick bazel query.  Fall back to the @@// prefix observed in
-    # prior runs if query fails.
-    discount_label = "@@//ecommerce:discount_raw_test"
-    email_label = "@@//ecommerce:email_notification_raw_test"
 
     status = {
         "config": {
@@ -302,23 +407,11 @@ def _setup_lifecycle_status(status_path: Path, examples_dir: Path) -> None:
             "statistical_significance": 0.95,
         },
         "tests": {
-            discount_label: {
+            email_label: {
                 "state": "burning_in",
-                "runs": 27,
-                "passes": 27,
                 "history": [
                     {"passed": True, "commit": None} for _ in range(27)
                 ],
-                "last_updated": "2026-02-16T12:00:00+00:00",
-            },
-            email_label: {
-                "state": "stable",
-                "runs": 55,
-                "passes": 50,
-                "history": (
-                    [{"passed": False, "commit": "prev"} for _ in range(5)]
-                    + [{"passed": True, "commit": "older"} for _ in range(50)]
-                ),
                 "last_updated": "2026-02-16T12:00:00+00:00",
             },
         },
@@ -326,16 +419,64 @@ def _setup_lifecycle_status(status_path: Path, examples_dir: Path) -> None:
 
     status_path.parent.mkdir(parents=True, exist_ok=True)
     status_path.write_text(json_mod.dumps(status, indent=2) + "\n")
-    console.print(f"[dim]Status file written: {status_path.relative_to(examples_dir)}[/dim]")
-    console.print(f"[dim]  {discount_label}: burning_in (27/27 passes)[/dim]")
-    console.print(f"[dim]  {email_label}: stable (50/55, 5 recent failures)[/dim]")
+    console.print(f"[dim]  {email_label}: burning_in (27/27 — one pass from acceptance)[/dim]")
 
 
-def _print_lifecycle_summary(status_path: Path) -> None:
-    """Print a summary of the status file after the lifecycle run."""
+def _inject_degradation(status_path: Path, email_label: str) -> None:
+    """Inject recent failures into email_notification history.
+
+    Simulates several CI runs where a bad commit caused the test to fail.
+    """
     import json as json_mod
 
-    console.print("[bold]--- Phase 4: Lifecycle summary ---[/bold]")
+    data = json_mod.loads(status_path.read_text())
+    entry = data["tests"].get(email_label)
+    if entry is None:
+        console.print(f"[red]Warning: {email_label} not found in status file[/red]")
+        return
+
+    for _ in range(5):
+        entry["history"].insert(0, {"passed": False, "commit": "bad-commit"})
+
+    status_path.write_text(json_mod.dumps(data, indent=2) + "\n")
+    console.print(
+        f"[dim]  Injected 5 failures into {email_label} history "
+        f"(simulating degraded CI runs)[/dim]"
+    )
+
+
+def _setup_deflake_status(status_path: Path, email_label: str) -> None:
+    """Reset email_notification to burning_in for re-stabilization.
+
+    Simulates: developer fixes root cause, CI tool deflakes the test,
+    then 27 successful burn-in runs accumulate in subsequent CI runs.
+    """
+    import json as json_mod
+
+    data = json_mod.loads(status_path.read_text())
+    data["tests"][email_label] = {
+        "state": "burning_in",
+        "history": [
+            {"passed": True, "commit": None} for _ in range(27)
+        ],
+        "last_updated": "2026-02-16T14:00:00+00:00",
+    }
+    status_path.write_text(json_mod.dumps(data, indent=2) + "\n")
+    console.print(
+        f"[dim]  {email_label}: reset to burning_in "
+        f"(27/27 — simulating deflake + re-burn-in)[/dim]"
+    )
+
+
+def _print_lifecycle_summary(status_path: Path, phase_label: str = "") -> None:
+    """Print a summary of the status file after a lifecycle phase."""
+    import json as json_mod
+
+    header = "Lifecycle summary"
+    if phase_label:
+        header += f" ({phase_label})"
+    console.print(f"[bold]{header}[/bold]")
+
     try:
         data = json_mod.loads(status_path.read_text())
     except (FileNotFoundError, json_mod.JSONDecodeError) as e:
@@ -346,15 +487,15 @@ def _print_lifecycle_summary(status_path: Path) -> None:
     state_counts: dict[str, int] = {}
     for name, entry in sorted(tests.items()):
         state = entry.get("state", "unknown")
-        runs = entry.get("runs", 0)
-        passes = entry.get("passes", 0)
+        history = entry.get("history", [])
+        runs = len(history)
+        passes = sum(1 for h in history if h.get("passed", False))
         state_counts[state] = state_counts.get(state, 0) + 1
-        # Highlight transitions
         short_name = name.split(":")[-1] if ":" in name else name
-        if state == "stable" and entry.get("runs", 0) == 28:
-            console.print(f"  [green]{short_name}: {state} (burn-in accepted, {runs} runs)[/green]")
+        if state == "stable":
+            console.print(f"  [green]{short_name}: {state} ({runs} runs, {passes} passes)[/green]")
         elif state == "flaky":
-            console.print(f"  [red]{short_name}: {state} (demoted, {runs} runs, {passes} passes)[/red]")
+            console.print(f"  [red]{short_name}: {state} ({runs} runs, {passes} passes)[/red]")
         elif state == "burning_in":
             console.print(f"  [yellow]{short_name}: {state} ({runs} runs, {passes} passes)[/yellow]")
         else:
@@ -363,6 +504,7 @@ def _print_lifecycle_summary(status_path: Path) -> None:
     console.print()
     summary = ", ".join(f"{count} {state}" for state, count in sorted(state_counts.items()))
     console.print(f"[bold]Status summary: {summary}[/bold]")
+    console.print()
 
 
 @cli.command()

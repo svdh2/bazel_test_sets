@@ -25,8 +25,11 @@ def main() -> int:
     tst({"type": "result", "name": "email_delivered", "passed": True})
     tst({"type": "block_end", "block": "verdict"})
 
-    if os.environ.get("TST_FORCE_FAIL"):
-        return 1
+    reliability = float(os.environ.get("TST_EMAIL_RELIABILITY", "1.0"))
+    if reliability < 1.0:
+        import random
+        if random.random() >= reliability:
+            return 1
     return 0
 
 

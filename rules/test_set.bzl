@@ -11,6 +11,7 @@ TestSetInfo = provider(
         "test_labels": "List of direct test_set_test labels in this set",
         "subset_labels": "List of direct subset test_set labels",
         "all_tests": "Depset of all TestSetTestInfo across tests and subsets",
+        "tree": "Recursive tree dict for hierarchical reporting",
     },
 )
 
@@ -40,6 +41,8 @@ def _test_info_to_dict(info):
         entry["requirement_id"] = info.requirement_id
     if info.judgement_label:
         entry["judgement_executable"] = str(info.judgement_label)
+    if info.disabled:
+        entry["disabled"] = True
     return entry
 
 def _test_set_rule_test_impl(ctx):
@@ -50,21 +53,20 @@ def _test_set_rule_test_impl(ctx):
     # Collect all tests transitively
     all_tests = _collect_all_tests(ctx.attr.tests, ctx.attr.subsets)
 
-    # Build the JSON manifest
-    subset_labels = [str(s.label) for s in ctx.attr.subsets]
+    # Build hierarchical tree for reporting (uses raw test labels)
+    tree = {
+        "name": ctx.label.name,
+        "assertion": ctx.attr.assertion,
+        "tests": [str(t[TestSetTestInfo].test_label) for t in ctx.attr.tests],
+        "subsets": [s[TestSetInfo].tree for s in ctx.attr.subsets],
+    }
+    if ctx.attr.requirement_id:
+        tree["requirement_id"] = ctx.attr.requirement_id
 
     manifest = {
-        "test_set": {
-            "name": ctx.label.name,
-            "assertion": ctx.attr.assertion,
-            "tests": [str(t.label) for t in ctx.attr.tests],
-            "subsets": subset_labels,
-        },
+        "test_set": tree,
         "test_set_tests": {},
     }
-
-    if ctx.attr.requirement_id:
-        manifest["test_set"]["requirement_id"] = ctx.attr.requirement_id
 
     # Populate test_set_tests from all collected tests
     for info in all_tests.to_list():
@@ -105,7 +107,7 @@ OUT_DIR="${{BUILD_WORKSPACE_DIRECTORY:-.}}/target/reports"
 mkdir -p "$OUT_DIR"
 exec "$R/{workspace}/{orchestrator}" \\
   --manifest "$R/{workspace}/{manifest}" \\
-  --output "$OUT_DIR/{name}.yaml" \\
+  --output "$OUT_DIR/{name}.json" \\
   "$@"
 """.format(
             name = ctx.label.name,
@@ -128,6 +130,7 @@ exec "$R/{workspace}/{orchestrator}" \\
             test_labels = [t.label for t in ctx.attr.tests],
             subset_labels = [s.label for s in ctx.attr.subsets],
             all_tests = all_tests,
+            tree = tree,
         ),
     ]
 

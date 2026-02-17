@@ -13,6 +13,7 @@ from orchestrator.lifecycle.status import (
     HISTORY_CAP,
     VALID_STATES,
     StatusFile,
+    runs_and_passes_from_history,
 )
 
 
@@ -62,18 +63,23 @@ class TestStatusFileReadWrite:
             path = Path(tmpdir) / "status.json"
 
             sf1 = StatusFile(path)
-            sf1.set_test_state("//test:a", "stable", runs=50, passes=50)
-            sf1.set_test_state("//test:b", "burning_in", runs=12, passes=12)
+            sf1.set_test_state("//test:a", "stable")
+            for _ in range(50):
+                sf1.record_run("//test:a", passed=True)
+            sf1.set_test_state("//test:b", "burning_in")
+            for _ in range(12):
+                sf1.record_run("//test:b", passed=True)
             sf1.save()
 
             sf2 = StatusFile(path)
             assert sf2.get_test_state("//test:a") == "stable"
             assert sf2.get_test_state("//test:b") == "burning_in"
 
-            entry_a = sf2.get_test_entry("//test:a")
-            assert entry_a is not None
-            assert entry_a["runs"] == 50
-            assert entry_a["passes"] == 50
+            runs, passes = runs_and_passes_from_history(
+                sf2.get_test_history("//test:a")
+            )
+            assert runs == 50
+            assert passes == 50
 
     def test_get_nonexistent_test(self):
         """Getting state of nonexistent test returns None."""
@@ -83,17 +89,22 @@ class TestStatusFileReadWrite:
             assert sf.get_test_entry("//test:nonexistent") is None
 
     def test_update_existing_test(self):
-        """Updating existing test preserves runs if not specified."""
+        """Updating existing test preserves history."""
         with tempfile.TemporaryDirectory() as tmpdir:
             sf = StatusFile(Path(tmpdir) / "status.json")
-            sf.set_test_state("//test:a", "burning_in", runs=10, passes=10)
+            sf.set_test_state("//test:a", "burning_in")
+            for _ in range(10):
+                sf.record_run("//test:a", passed=True)
             sf.set_test_state("//test:a", "stable")
 
             entry = sf.get_test_entry("//test:a")
             assert entry is not None
             assert entry["state"] == "stable"
-            assert entry["runs"] == 10
-            assert entry["passes"] == 10
+            runs, passes = runs_and_passes_from_history(
+                sf.get_test_history("//test:a")
+            )
+            assert runs == 10
+            assert passes == 10
 
 
 class TestStatusFileConfig:
@@ -145,26 +156,33 @@ class TestStatusFileRecordRun:
             entry = sf.get_test_entry("//test:a")
             assert entry is not None
             assert entry["state"] == "new"
-            assert entry["runs"] == 1
-            assert entry["passes"] == 1
+            runs, passes = runs_and_passes_from_history(
+                sf.get_test_history("//test:a")
+            )
+            assert runs == 1
+            assert passes == 1
 
     def test_record_run_existing_test(self):
-        """Recording runs increments counts."""
+        """Recording runs grows history."""
         with tempfile.TemporaryDirectory() as tmpdir:
             sf = StatusFile(Path(tmpdir) / "status.json")
-            sf.set_test_state("//test:a", "burning_in", runs=5, passes=5)
+            sf.set_test_state("//test:a", "burning_in")
+            for _ in range(5):
+                sf.record_run("//test:a", passed=True)
 
             sf.record_run("//test:a", passed=True)
-            entry = sf.get_test_entry("//test:a")
-            assert entry is not None
-            assert entry["runs"] == 6
-            assert entry["passes"] == 6
+            runs, passes = runs_and_passes_from_history(
+                sf.get_test_history("//test:a")
+            )
+            assert runs == 6
+            assert passes == 6
 
             sf.record_run("//test:a", passed=False)
-            entry = sf.get_test_entry("//test:a")
-            assert entry is not None
-            assert entry["runs"] == 7
-            assert entry["passes"] == 6
+            runs, passes = runs_and_passes_from_history(
+                sf.get_test_history("//test:a")
+            )
+            assert runs == 7
+            assert passes == 6
 
     def test_record_run_updates_timestamp(self):
         """Recording a run updates last_updated."""
@@ -183,10 +201,10 @@ class TestStatusFileQuery:
         """Filter tests by state."""
         with tempfile.TemporaryDirectory() as tmpdir:
             sf = StatusFile(Path(tmpdir) / "status.json")
-            sf.set_test_state("//test:a", "stable", runs=50, passes=50)
-            sf.set_test_state("//test:b", "burning_in", runs=10, passes=10)
-            sf.set_test_state("//test:c", "stable", runs=30, passes=30)
-            sf.set_test_state("//test:d", "flaky", runs=20, passes=15)
+            sf.set_test_state("//test:a", "stable")
+            sf.set_test_state("//test:b", "burning_in")
+            sf.set_test_state("//test:c", "stable")
+            sf.set_test_state("//test:d", "flaky")
 
             stable = sf.get_tests_by_state("stable")
             assert sorted(stable) == ["//test:a", "//test:c"]
@@ -246,7 +264,7 @@ class TestStatusFileValidation:
 
     def test_valid_states_constant(self):
         """VALID_STATES contains expected values."""
-        assert VALID_STATES == {"new", "burning_in", "stable", "flaky"}
+        assert VALID_STATES == {"new", "burning_in", "stable", "flaky", "disabled"}
 
 
 class TestStatusFileCorrupted:
@@ -367,28 +385,28 @@ class TestStatusFileHistory:
             assert len(sf.get_test_history("//test:a")) == 1
 
     def test_reset_clears_history(self):
-        """set_test_state with runs=0, passes=0 clears history."""
+        """set_test_state with clear_history=True clears history."""
         with tempfile.TemporaryDirectory() as tmpdir:
             sf = StatusFile(Path(tmpdir) / "status.json")
-            sf.set_test_state("//test:a", "stable", runs=50, passes=50)
+            sf.set_test_state("//test:a", "stable")
             sf.record_run("//test:a", passed=True, commit="abc")
             sf.record_run("//test:a", passed=False, commit="def")
             assert len(sf.get_test_history("//test:a")) == 2
 
             # Reset (deflake scenario)
-            sf.set_test_state("//test:a", "burning_in", runs=0, passes=0)
+            sf.set_test_state("//test:a", "burning_in", clear_history=True)
             assert sf.get_test_history("//test:a") == []
 
     def test_set_test_state_preserves_history(self):
-        """set_test_state without counter reset preserves history."""
+        """set_test_state without clear_history preserves history."""
         with tempfile.TemporaryDirectory() as tmpdir:
             sf = StatusFile(Path(tmpdir) / "status.json")
-            sf.set_test_state("//test:a", "burning_in", runs=0, passes=0)
+            sf.set_test_state("//test:a", "burning_in", clear_history=True)
             sf.record_run("//test:a", passed=True, commit="abc")
             sf.record_run("//test:a", passed=True, commit="def")
 
-            # Transition to stable (preserving counters)
-            sf.set_test_state("//test:a", "stable", runs=2, passes=2)
+            # Transition to stable (preserving history)
+            sf.set_test_state("//test:a", "stable")
             assert len(sf.get_test_history("//test:a")) == 2
 
     def test_get_test_history_nonexistent(self):
@@ -405,3 +423,40 @@ class TestStatusFileHistory:
             history = sf.get_test_history("//test:a")
             history.clear()
             assert len(sf.get_test_history("//test:a")) == 1
+
+
+class TestStatusFileDisabled:
+    """Tests for the disabled state."""
+
+    def test_disabled_state_roundtrip(self):
+        """Disabled state survives save/load."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "status.json"
+            sf1 = StatusFile(path)
+            sf1.set_test_state("//test:a", "disabled", clear_history=True)
+            sf1.save()
+
+            sf2 = StatusFile(path)
+            assert sf2.get_test_state("//test:a") == "disabled"
+
+    def test_get_tests_by_state_disabled(self):
+        """Filter tests by disabled state."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable")
+            sf.set_test_state("//test:b", "disabled", clear_history=True)
+            sf.set_test_state("//test:c", "disabled", clear_history=True)
+
+            disabled = sf.get_tests_by_state("disabled")
+            assert sorted(disabled) == ["//test:b", "//test:c"]
+
+    def test_disabled_resets_history(self):
+        """Setting state to disabled with clear_history clears history."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable")
+            sf.record_run("//test:a", passed=True, commit="abc")
+            assert len(sf.get_test_history("//test:a")) == 1
+
+            sf.set_test_state("//test:a", "disabled", clear_history=True)
+            assert sf.get_test_history("//test:a") == []

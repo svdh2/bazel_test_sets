@@ -21,6 +21,7 @@ class TestNode:
     depends_on: list[str] = field(default_factory=list)
     requirement_id: str = ""
     judgement_executable: str | None = None
+    disabled: bool = False
 
     # Computed graph edges (populated during DAG construction)
     dependents: list[str] = field(default_factory=list)  # nodes that depend on this one
@@ -67,6 +68,7 @@ class TestDAG:
                 depends_on=list(data.get("depends_on", [])),
                 requirement_id=data.get("requirement_id", ""),
                 judgement_executable=data.get("judgement_executable"),
+                disabled=bool(data.get("disabled", False)),
             )
             dag.nodes[name] = node
 
@@ -255,3 +257,19 @@ class TestDAG:
         if name not in self.nodes:
             return []
         return list(self.nodes[name].dependents)
+
+    def remove_disabled(self) -> list[str]:
+        """Remove disabled nodes from the DAG and clean up edges.
+
+        Returns:
+            List of removed node names.
+        """
+        disabled = [name for name, node in self.nodes.items() if node.disabled]
+        for name in disabled:
+            for other in self.nodes.values():
+                if name in other.depends_on:
+                    other.depends_on.remove(name)
+                if name in other.dependents:
+                    other.dependents.remove(name)
+            del self.nodes[name]
+        return disabled

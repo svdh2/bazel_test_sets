@@ -81,7 +81,7 @@ mkdir -p "$OUT_DIR"
 # Execute orchestrator with manifest
 exec "$R/{workspace}/orchestrator/main" \
     --manifest "$R/{workspace}/{name}_manifest.json" \
-    --output "$OUT_DIR/{name}.yaml" \
+    --output "$OUT_DIR/{name}.json" \
     "$@"
 ```
 

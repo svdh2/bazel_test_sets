@@ -85,6 +85,7 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 | [Executor](components/executor.md) | `orchestrator/execution/` | Sequential and async parallel test execution with dependency gating |
 | [Burn-in](components/burnin.md) | `orchestrator/lifecycle/` | Sweep loop for burning_in tests and stable demotion logic |
 | [SPRT](components/sprt.md) | `orchestrator/lifecycle/` | Sequential Probability Ratio Test for burn-in accept/reject and demotion decisions |
+| [E-values](components/e-values.md) | `orchestrator/lifecycle/` | E-value based test set verdicts with aggregate Type II error control |
 | [Status File](components/status-file.md) | `orchestrator/lifecycle/` | JSON state file manager for test maturity lifecycle (new/burning_in/stable/flaky) |
 | [Co-occurrence Graph](components/co-occurrence.md) | `orchestrator/regression/` | Git history analysis to build file-commit bidirectional index |
 | [Regression Selector](components/regression-selector.md) | `orchestrator/regression/` | Selects tests by co-occurrence scoring with hop decay and dependency closure |
@@ -112,8 +113,9 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 | [Burn-in Lifecycle](flows/burn-in-lifecycle.md) | SPRT-driven test maturity progression from new to stable or flaky |
 | [Manifest Generation](flows/manifest-generation.md) | Build-time flow from Starlark rules to JSON manifest to orchestrator |
 | [Report Generation](flows/report-generation.md) | Post-execution JSON and HTML report generation with structured log integration |
+| [E-value Verdict](flows/e-value-verdict.md) | E-value based test set verdict computation with quick and high-fidelity modes |
 
 ## Git Sync
 
-- **Commit**: `9b123779f35a3037d04a312766d6f9678e102d03`
+- **Commit**: `e7e6d81749dbce00242f0271b334fc3c7309550f`
 - **Last updated**: 2026-02-16

@@ -377,3 +377,77 @@ class TestHelperMethods:
         dag = TestDAG.from_manifest(manifest)
         dependents = dag.get_dependents("b")
         assert sorted(dependents) == ["a", "c"]
+
+
+# --- Disabled Tests ---
+
+class TestDisabled:
+    """Tests for the disabled field and remove_disabled()."""
+
+    def test_manifest_with_disabled(self):
+        """Parse manifest with disabled=true sets TestNode.disabled."""
+        manifest = {
+            "test_set": {"name": "root", "assertion": "test", "tests": ["a", "b"], "subsets": []},
+            "test_set_tests": {
+                "a": {"assertion": "A", "executable": "/bin/true", "depends_on": [], "disabled": True},
+                "b": {"assertion": "B", "executable": "/bin/true", "depends_on": []},
+            },
+        }
+        dag = TestDAG.from_manifest(manifest)
+        assert dag.nodes["a"].disabled is True
+        assert dag.nodes["b"].disabled is False
+
+    def test_manifest_without_disabled_defaults_false(self):
+        """Manifest without disabled key defaults to False."""
+        manifest = {
+            "test_set": {"name": "root", "assertion": "test", "tests": ["a"], "subsets": []},
+            "test_set_tests": {
+                "a": {"assertion": "A", "executable": "/bin/true", "depends_on": []},
+            },
+        }
+        dag = TestDAG.from_manifest(manifest)
+        assert dag.nodes["a"].disabled is False
+
+    def test_remove_disabled_removes_nodes(self):
+        """remove_disabled() removes disabled nodes from DAG."""
+        manifest = {
+            "test_set": {"name": "root", "assertion": "test", "tests": ["a", "b", "c"], "subsets": []},
+            "test_set_tests": {
+                "a": {"assertion": "A", "executable": "/bin/true", "depends_on": [], "disabled": True},
+                "b": {"assertion": "B", "executable": "/bin/true", "depends_on": []},
+                "c": {"assertion": "C", "executable": "/bin/true", "depends_on": []},
+            },
+        }
+        dag = TestDAG.from_manifest(manifest)
+        removed = dag.remove_disabled()
+        assert removed == ["a"]
+        assert "a" not in dag.nodes
+        assert len(dag.nodes) == 2
+
+    def test_remove_disabled_cleans_edges(self):
+        """remove_disabled() cleans up depends_on and dependents edges."""
+        manifest = {
+            "test_set": {"name": "root", "assertion": "test", "tests": ["a", "b", "c"], "subsets": []},
+            "test_set_tests": {
+                "a": {"assertion": "A", "executable": "/bin/true", "depends_on": [], "disabled": True},
+                "b": {"assertion": "B", "executable": "/bin/true", "depends_on": ["a"]},
+                "c": {"assertion": "C", "executable": "/bin/true", "depends_on": ["a"]},
+            },
+        }
+        dag = TestDAG.from_manifest(manifest)
+        dag.remove_disabled()
+        assert "a" not in dag.nodes["b"].depends_on
+        assert "a" not in dag.nodes["c"].depends_on
+
+    def test_remove_disabled_no_disabled(self):
+        """remove_disabled() with no disabled nodes returns empty list."""
+        manifest = {
+            "test_set": {"name": "root", "assertion": "test", "tests": ["a"], "subsets": []},
+            "test_set_tests": {
+                "a": {"assertion": "A", "executable": "/bin/true", "depends_on": []},
+            },
+        }
+        dag = TestDAG.from_manifest(manifest)
+        removed = dag.remove_disabled()
+        assert removed == []
+        assert len(dag.nodes) == 1
