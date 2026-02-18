@@ -739,8 +739,9 @@ class TestLifecycleRendering:
             "aggregate_reliability": 1.0,
         }
         result = generate_html_report(report)
-        assert "FLAKY" not in result
-        assert "BURNING IN" not in result
+        # Zero-count states should not appear as rendered summary items
+        assert "0 FLAKY" not in result
+        assert "0 BURNING IN" not in result
         assert "2 STABLE" in result
 
     def test_lifecycle_config_note_rendered(self):
@@ -913,3 +914,172 @@ class TestSourceLinksRendering:
         report = self._make_report_with_source_links(source_link_base=base)
         result = generate_html_report(report)
         assert "<th>Source</th>" in result
+
+
+# ---------------------------------------------------------------------------
+# DAG Visualization
+# ---------------------------------------------------------------------------
+
+def _make_dag_report() -> dict:
+    """Build a report with depends_on edges for DAG visualization tests."""
+    return {
+        "report": {
+            "generated_at": "2026-01-01T00:00:00+00:00",
+            "summary": {
+                "total": 3, "passed": 2, "failed": 1,
+                "dependencies_failed": 0, "total_duration_seconds": 3.0,
+            },
+            "test_set": {
+                "name": "root_set",
+                "assertion": "Root assertion",
+                "requirement_id": "ROOT",
+                "status": "failed",
+                "tests": {
+                    "test_a": {
+                        "assertion": "A works",
+                        "status": "passed",
+                        "duration_seconds": 1.0,
+                        "depends_on": [],
+                    },
+                    "test_b": {
+                        "assertion": "B works",
+                        "status": "passed",
+                        "duration_seconds": 1.0,
+                        "depends_on": ["test_a"],
+                    },
+                },
+                "subsets": [
+                    {
+                        "name": "child_set",
+                        "assertion": "Child assertion",
+                        "status": "failed",
+                        "tests": {
+                            "test_c": {
+                                "assertion": "C works",
+                                "status": "failed",
+                                "duration_seconds": 1.0,
+                                "depends_on": ["test_a"],
+                            },
+                        },
+                        "subsets": [],
+                    },
+                ],
+            },
+        },
+    }
+
+
+class TestDagVisualization:
+    """Tests for the interactive DAG visualization section."""
+
+    def test_dag_section_present_for_hierarchical_report(self):
+        """DAG section appears when report has a test_set."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        assert 'class="dag-section"' in result
+        assert 'id="dag-canvas"' in result
+
+    def test_dag_section_absent_for_flat_report(self):
+        """DAG section does not appear for flat (non-hierarchical) reports."""
+        report = _make_flat_report()
+        result = generate_html_report(report)
+        assert "dag-section" not in result
+
+    def test_graph_data_embedded(self):
+        """GRAPH_DATA JavaScript variable is embedded."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        assert "var GRAPH_DATA=" in result
+
+    def test_cytoscape_cdn_included(self):
+        """Cytoscape.js CDN script tag is present."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        assert "cytoscape.min.js" in result
+        assert "dagre.min.js" in result
+        assert "cytoscape-dagre.js" in result
+
+    def test_nodes_include_test_names(self):
+        """Graph data contains nodes for all tests and groups."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        assert '"test_a"' in result
+        assert '"test_b"' in result
+        assert '"test_c"' in result
+        assert '"root_set"' in result
+        assert '"child_set"' in result
+
+    def test_edges_reflect_depends_on(self):
+        """Graph data contains edges for depends_on relationships."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        # test_b depends on test_a
+        assert '"source":"test_b"' in result
+        assert '"target":"test_a"' in result
+        # test_c also depends on test_a
+        assert '"source":"test_c"' in result
+
+    def test_toolbar_buttons_present(self):
+        """Toolbar with zoom, fit, expand, collapse buttons is present."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        assert 'id="dag-zoom-in"' in result
+        assert 'id="dag-zoom-out"' in result
+        assert 'id="dag-fit"' in result
+        assert 'id="dag-expand-all"' in result
+        assert 'id="dag-collapse-all"' in result
+
+    def test_detail_pane_present(self):
+        """Detail pane with content div is present."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        assert 'id="dag-detail"' in result
+        assert 'id="dag-detail-content"' in result
+
+    def test_handles_empty_depends_on(self):
+        """DAG section renders correctly when no test has dependencies."""
+        report = _make_hierarchical_report()
+        result = generate_html_report(report)
+        assert 'class="dag-section"' in result
+        # No edges should be in graph data
+        assert '"edges":[]' in result
+
+    def test_detail_pane_clones_rendered_test_entry(self):
+        """DAG detail JS finds test entries by data-test-name attribute."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        # Test entries have data-test-name attributes for JS to find
+        assert 'data-test-name="test_a"' in result
+        assert 'data-test-name="test_b"' in result
+        assert 'data-test-name="test_c"' in result
+        # JS uses querySelectorAll with data-test-name
+        assert "data-test-name" in result
+        assert "dag-detail-content" in result
+
+    def test_label_shortening_for_bazel_labels(self):
+        """Bazel-style labels are shortened to the target name."""
+        report = {
+            "report": {
+                "generated_at": "2026-01-01T00:00:00+00:00",
+                "summary": {"total": 1, "passed": 1, "failed": 0,
+                             "dependencies_failed": 0,
+                             "total_duration_seconds": 1.0},
+                "test_set": {
+                    "name": "suite",
+                    "assertion": "Suite",
+                    "status": "passed",
+                    "tests": {
+                        "@@//pkg:my_test": {
+                            "assertion": "Works",
+                            "status": "passed",
+                            "duration_seconds": 1.0,
+                            "depends_on": [],
+                        },
+                    },
+                    "subsets": [],
+                },
+            },
+        }
+        result = generate_html_report(report)
+        # The short label "my_test" should appear in the graph data
+        assert '"label":"my_test"' in result

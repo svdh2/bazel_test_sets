@@ -450,6 +450,10 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     history = report.get("history", {})
     lifecycle_config = report.get("lifecycle_config")
 
+    # DAG visualization (only for hierarchical reports)
+    if "test_set" in report:
+        parts.append(_render_dag_section(report))
+
     # Test set (hierarchical) or flat tests
     if "test_set" in report:
         parts.append(_render_test_set(
@@ -680,7 +684,10 @@ def _render_test_entry(
     duration = data.get("duration_seconds", 0)
     assertion = data.get("assertion", "")
 
-    parts.append(f'<div class="test-entry" style="border-left-color:{color}">')
+    parts.append(
+        f'<div class="test-entry" style="border-left-color:{color}"'
+        f' data-test-name="{html.escape(name, quote=True)}">'
+    )
 
     lifecycle_html = ""
     lifecycle = data.get("lifecycle")
@@ -1154,4 +1161,390 @@ def _render_regression_selection(selection: dict[str, Any]) -> str:
         parts.append("</details>")
 
     parts.append("</div>")
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# DAG Visualization
+# ---------------------------------------------------------------------------
+
+_DAG_CSS = """\
+.dag-section {
+    background: #fff;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.dag-section h2 {
+    margin: 0 0 12px 0;
+    font-size: 18px;
+}
+.dag-container {
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    overflow: hidden;
+}
+.dag-toolbar {
+    display: flex;
+    gap: 6px;
+    padding: 8px 12px;
+    background: #f5f5f5;
+    border-bottom: 1px solid #ddd;
+}
+.dag-toolbar button {
+    padding: 4px 12px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 13px;
+}
+.dag-toolbar button:hover {
+    background: #e8e8e8;
+}
+.dag-split {
+    display: flex;
+    height: 500px;
+}
+.dag-canvas {
+    flex: 1;
+    min-width: 0;
+}
+.dag-detail {
+    width: 400px;
+    border-left: 1px solid #ddd;
+    position: relative;
+    overflow: hidden;
+}
+.dag-detail-close {
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    z-index: 10;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 22px;
+    text-align: center;
+}
+.dag-detail-content {
+    width: 100%;
+    height: calc(100% - 8px);
+    overflow-y: auto;
+    padding: 12px;
+    background: #f5f5f5;
+    box-sizing: border-box;
+}
+"""
+
+_DAG_JS = """\
+(function() {
+    var STATUS_COLORS = {
+        passed: '#90EE90', failed: '#FFB6C1',
+        dependencies_failed: '#D3D3D3',
+        'passed+dependencies_failed': '#FFFFAD',
+        'failed+dependencies_failed': '#FFB6C1',
+        mixed: '#FFFFAD', no_tests: '#D3D3D3'
+    };
+
+    var elements = [];
+    var i, d;
+    for (i = 0; i < GRAPH_DATA.nodes.length; i++) {
+        d = GRAPH_DATA.nodes[i].data;
+        elements.push({
+            group: 'nodes',
+            data: {
+                id: d.id, label: d.label, type: d.type,
+                status: d.status, parent: d.parent || undefined
+            },
+            classes: d.type
+        });
+    }
+    for (i = 0; i < GRAPH_DATA.edges.length; i++) {
+        elements.push({group: 'edges', data: GRAPH_DATA.edges[i].data});
+    }
+
+    var cy = cytoscape({
+        container: document.getElementById('dag-canvas'),
+        elements: elements,
+        style: [
+            {
+                selector: 'node.group',
+                style: {
+                    'shape': 'round-rectangle',
+                    'background-color': function(ele) {
+                        return STATUS_COLORS[ele.data('status')] || '#e8e8e8';
+                    },
+                    'background-opacity': 0.15,
+                    'border-width': 2,
+                    'border-color': function(ele) {
+                        return STATUS_COLORS[ele.data('status')] || '#ccc';
+                    },
+                    'label': 'data(label)',
+                    'text-valign': 'top',
+                    'text-halign': 'center',
+                    'font-size': '12px',
+                    'font-weight': 'bold',
+                    'padding': '20px',
+                    'text-margin-y': '-5px'
+                }
+            },
+            {
+                selector: 'node.test',
+                style: {
+                    'shape': 'round-rectangle',
+                    'background-color': function(ele) {
+                        return STATUS_COLORS[ele.data('status')] || '#e8e8e8';
+                    },
+                    'label': 'data(label)',
+                    'text-valign': 'center',
+                    'text-halign': 'center',
+                    'font-size': '10px',
+                    'width': 'label',
+                    'height': '30px',
+                    'padding': '8px',
+                    'border-width': 1,
+                    'border-color': '#999'
+                }
+            },
+            {
+                selector: 'node.test:selected',
+                style: {
+                    'border-width': 3,
+                    'border-color': '#0d6efd'
+                }
+            },
+            {
+                selector: 'node.collapsed',
+                style: {
+                    'font-style': 'italic'
+                }
+            },
+            {
+                selector: 'edge',
+                style: {
+                    'width': 2,
+                    'line-color': '#999',
+                    'target-arrow-color': '#999',
+                    'target-arrow-shape': 'triangle',
+                    'curve-style': 'bezier',
+                    'arrow-scale': 0.8
+                }
+            }
+        ],
+        layout: {
+            name: 'dagre',
+            rankDir: 'TB',
+            spacingFactor: 1.2,
+            nodeSep: 20,
+            rankSep: 40
+        },
+        userZoomingEnabled: true,
+        userPanningEnabled: true,
+        boxSelectionEnabled: false
+    });
+
+    /* Toolbar handlers */
+    document.getElementById('dag-zoom-in').addEventListener('click', function() {
+        cy.zoom({level: cy.zoom() * 1.2,
+            renderedPosition: {x: cy.width()/2, y: cy.height()/2}});
+    });
+    document.getElementById('dag-zoom-out').addEventListener('click', function() {
+        cy.zoom({level: cy.zoom() / 1.2,
+            renderedPosition: {x: cy.width()/2, y: cy.height()/2}});
+    });
+    document.getElementById('dag-fit').addEventListener('click', function() {
+        cy.fit(undefined, 30);
+    });
+
+    function collapseGroup(group) {
+        var children = group.children();
+        children.style('display', 'none');
+        children.connectedEdges().style('display', 'none');
+        /* Recursively collapse nested groups */
+        children.filter('.group').forEach(function(child) {
+            child.addClass('collapsed');
+        });
+        group.addClass('collapsed');
+    }
+
+    function expandGroup(group) {
+        var children = group.children();
+        children.style('display', 'element');
+        children.connectedEdges().style('display', 'element');
+        group.removeClass('collapsed');
+        /* Nested groups stay collapsed unless explicitly expanded */
+    }
+
+    document.getElementById('dag-collapse-all').addEventListener('click',
+        function() {
+            cy.nodes('.group').forEach(function(g) { collapseGroup(g); });
+            cy.layout({name: 'dagre', rankDir: 'TB',
+                animate: true, animationDuration: 300}).run();
+        });
+    document.getElementById('dag-expand-all').addEventListener('click',
+        function() {
+            cy.nodes('.group').forEach(function(g) { expandGroup(g); });
+            cy.layout({name: 'dagre', rankDir: 'TB',
+                animate: true, animationDuration: 300}).run();
+        });
+
+    /* Click group to toggle collapse */
+    cy.on('tap', 'node.group', function(evt) {
+        var node = evt.target;
+        if (node.hasClass('collapsed')) {
+            expandGroup(node);
+        } else {
+            collapseGroup(node);
+        }
+        cy.layout({name: 'dagre', rankDir: 'TB',
+            animate: true, animationDuration: 300}).run();
+    });
+
+    /* Click test node to show detail pane */
+    cy.on('tap', 'node.test', function(evt) {
+        var nodeId = evt.target.data('id');
+        var entries = document.querySelectorAll('[data-test-name]');
+        var found = null;
+        for (var j = 0; j < entries.length; j++) {
+            if (entries[j].getAttribute('data-test-name') === nodeId) {
+                found = entries[j];
+                break;
+            }
+        }
+        if (!found) return;
+        var detailPane = document.getElementById('dag-detail');
+        var content = document.getElementById('dag-detail-content');
+        detailPane.style.display = 'block';
+        content.innerHTML = found.outerHTML;
+    });
+
+    document.getElementById('dag-detail-close').addEventListener('click',
+        function() {
+            document.getElementById('dag-detail').style.display = 'none';
+        });
+})();
+"""
+
+
+def _build_graph_data(test_set: dict[str, Any]) -> dict[str, Any]:
+    """Build Cytoscape.js-compatible graph data from the test_set hierarchy.
+
+    Returns:
+        Dict with ``nodes`` and ``edges`` lists in Cytoscape elements format.
+    """
+    nodes: list[dict[str, Any]] = []
+    edges: list[dict[str, Any]] = []
+    _walk_tree_for_graph(test_set, parent_id=None, nodes=nodes, edges=edges)
+    return {"nodes": nodes, "edges": edges}
+
+
+def _walk_tree_for_graph(
+    node: dict[str, Any],
+    parent_id: str | None,
+    nodes: list[dict[str, Any]],
+    edges: list[dict[str, Any]],
+) -> None:
+    """Recursively walk the test_set tree and populate graph elements."""
+    node_id = node.get("name", "")
+    nodes.append({"data": {
+        "id": node_id,
+        "label": node_id,
+        "type": "group",
+        "status": node.get("status", "no_tests"),
+        "parent": parent_id,
+    }})
+
+    for test_name, test_data in node.get("tests", {}).items():
+        short_label = (
+            test_name.rsplit(":", 1)[-1] if ":" in test_name else test_name
+        )
+        nodes.append({"data": {
+            "id": test_name,
+            "label": short_label,
+            "type": "test",
+            "status": test_data.get("status", "no_tests"),
+            "parent": node_id,
+        }})
+        for dep in test_data.get("depends_on", []):
+            edges.append({"data": {"source": test_name, "target": dep}})
+
+    for subset in node.get("subsets", []):
+        _walk_tree_for_graph(
+            subset, parent_id=node_id, nodes=nodes, edges=edges,
+        )
+
+
+def _render_dag_section(report: dict[str, Any]) -> str:
+    """Render the interactive DAG visualization section."""
+    test_set = report.get("test_set", {})
+    graph_data = _build_graph_data(test_set)
+
+    parts: list[str] = []
+    parts.append(f"<style>{_DAG_CSS}</style>")
+    parts.append('<div class="dag-section">')
+    parts.append("<h2>Test DAG</h2>")
+    parts.append('<div class="dag-container">')
+
+    # Toolbar
+    parts.append('<div class="dag-toolbar">')
+    parts.append('<button id="dag-zoom-in" title="Zoom in">+</button>')
+    parts.append(
+        '<button id="dag-zoom-out" title="Zoom out">&minus;</button>'
+    )
+    parts.append('<button id="dag-fit" title="Fit to view">Fit</button>')
+    parts.append(
+        '<button id="dag-expand-all" title="Expand all groups">'
+        "Expand All</button>"
+    )
+    parts.append(
+        '<button id="dag-collapse-all" title="Collapse all groups">'
+        "Collapse All</button>"
+    )
+    parts.append("</div>")
+
+    # Split pane: canvas + detail
+    parts.append('<div class="dag-split">')
+    parts.append('<div id="dag-canvas" class="dag-canvas"></div>')
+    parts.append(
+        '<div id="dag-detail" class="dag-detail" style="display:none">'
+    )
+    parts.append(
+        '<button id="dag-detail-close" class="dag-detail-close"'
+        ' title="Close">&times;</button>'
+    )
+    parts.append(
+        '<div id="dag-detail-content" class="dag-detail-content"></div>'
+    )
+    parts.append("</div>")  # dag-detail
+    parts.append("</div>")  # dag-split
+    parts.append("</div>")  # dag-container
+    parts.append("</div>")  # dag-section
+
+    # Embedded data
+    graph_json = json.dumps(graph_data, separators=(",", ":"))
+    parts.append(f"<script>var GRAPH_DATA={graph_json};</script>")
+
+    # CDN libraries
+    parts.append(
+        '<script src="https://unpkg.com/cytoscape@3.30.4/dist/'
+        'cytoscape.min.js"></script>'
+    )
+    parts.append(
+        '<script src="https://unpkg.com/dagre@0.8.5/dist/'
+        'dagre.min.js"></script>'
+    )
+    parts.append(
+        '<script src="https://unpkg.com/cytoscape-dagre@2.5.0/'
+        'cytoscape-dagre.js"></script>'
+    )
+
+    # Application JavaScript
+    parts.append(f"<script>{_DAG_JS}</script>")
+
     return "\n".join(parts)
