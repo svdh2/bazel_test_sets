@@ -4,6 +4,7 @@ from orchestrator.analysis.inference import infer_rigging_dependencies, load_fea
 from orchestrator.analysis.judgement import JudgementResult, execute_judgement, find_rejudgeable_tests
 from orchestrator.analysis.log_parser import (
     BlockSegment,
+    ParsedOutput,
     TextSegment,
     parse_stdout_segments,
     parse_test_output,
@@ -13,6 +14,7 @@ from orchestrator.analysis.measurements import load_measurements, store_measurem
 __all__ = [
     "BlockSegment",
     "JudgementResult",
+    "ParsedOutput",
     "TextSegment",
     "execute_judgement",
     "find_rejudgeable_tests",

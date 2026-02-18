@@ -8,7 +8,6 @@ Unknown types and malformed lines are skipped for forward compatibility.
 from __future__ import annotations
 
 import json
-import warnings
 from dataclasses import dataclass, field
 from typing import Any, Union
 
@@ -17,135 +16,272 @@ SENTINEL = "[TST] "
 
 
 @dataclass
-class ParsedTestOutput:
-    """Result of parsing structured log output from a test."""
+class BlockSegment:
+    """A structured block delimited by block_start/block_end events.
 
-    block_sequence: list[str] = field(default_factory=list)
+    Each block groups the features, measurements, results, errors, and
+    logs that were emitted while the block was active.
+
+    The ``block`` field holds the block type name (e.g. ``"rigging"``,
+    ``"stimulation"``, ``"checkpoint"``, ``"verdict"``).  A special value
+    of ``"untyped"`` captures output that falls outside any typed block.
+
+    The ``logs`` field contains **all** lines emitted during the block in
+    their original order, including both plain-text output and structured
+    ``[TST]`` sentinel lines.  This preserves the raw timeline so that
+    interleaving of structured and unstructured output is visible for
+    debugging, while the typed fields (features, measurements, …) give
+    the parsed / synthetic view.
+    """
+
+    block: str
+    description: str = ""
+    logs: str = ""
     features: list[dict[str, Any]] = field(default_factory=list)
     measurements: list[dict[str, Any]] = field(default_factory=list)
     results: list[dict[str, Any]] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
-    plain_output: list[str] = field(default_factory=list)
+    assertions: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class ParsedOutput:
+    """Block-oriented parsed test output.
+
+    Groups the parsed log events by the block they belong to rather than
+    by event type.  The three top-level fields correspond to the canonical
+    test phases:
+
+    * ``rigging`` – the single rigging block (or ``None``).
+    * ``run_blocks`` – stimulation, checkpoint, and untyped blocks in order.
+    * ``verdict`` – the single verdict block (or ``None``).
+    """
+
+    rigging: BlockSegment | None = None
+    run_blocks: list[BlockSegment] = field(default_factory=list)
+    verdict: BlockSegment | None = None
     warnings: list[str] = field(default_factory=list)
+
+    @property
+    def has_rigging_failure(self) -> bool:
+        """True if the rigging block contains any errors."""
+        if self.rigging is None:
+            return False
+        return len(self.rigging.errors) > 0
+
+    @property
+    def all_blocks(self) -> list[BlockSegment]:
+        """All blocks in order: rigging, run_blocks, verdict."""
+        blocks: list[BlockSegment] = []
+        if self.rigging is not None:
+            blocks.append(self.rigging)
+        blocks.extend(self.run_blocks)
+        if self.verdict is not None:
+            blocks.append(self.verdict)
+        return blocks
+
+    @property
+    def block_sequence(self) -> list[str]:
+        """Block names in order (excludes ``"untyped"``)."""
+        return [b.block for b in self.all_blocks if b.block != "untyped"]
+
+    @property
+    def all_features(self) -> list[dict[str, Any]]:
+        """All features across all blocks."""
+        return [f for b in self.all_blocks for f in b.features]
+
+    @property
+    def all_measurements(self) -> list[dict[str, Any]]:
+        """All measurements across all blocks."""
+        return [m for b in self.all_blocks for m in b.measurements]
+
+    @property
+    def all_results(self) -> list[dict[str, Any]]:
+        """All results across all blocks."""
+        return [r for b in self.all_blocks for r in b.results]
+
+    @property
+    def all_errors(self) -> list[dict[str, Any]]:
+        """All errors across all blocks."""
+        return [e for b in self.all_blocks for e in b.errors]
+
+
+def _finalize_block(seg: BlockSegment) -> BlockSegment:
+    """Strip trailing whitespace from accumulated logs."""
+    seg.logs = seg.logs.strip("\n")
+    return seg
 
 
 def parse_test_output(
     lines: list[str] | str,
-) -> dict[str, Any]:
+) -> ParsedOutput:
     """Parse structured test output from stdout lines.
 
-    Scans each line for the [TST] sentinel prefix. Lines with the prefix
-    are parsed as JSON events. Lines without the prefix are collected as
-    plain output. Unknown event types are skipped for forward compatibility.
+    Scans each line for the ``[TST]`` sentinel prefix.  Lines with the
+    prefix are parsed as JSON events and dispatched into ``BlockSegment``
+    objects.  Lines without the prefix become part of the active block's
+    ``logs`` or an ``"untyped"`` block.
 
     Args:
         lines: List of output lines, or a single string (split on newlines).
 
     Returns:
-        Dictionary with:
-        - block_sequence: List of block names from phase events
-        - features: List of feature dicts (name, block)
-        - measurements: List of measurement dicts (name, value, block)
-        - results: List of result dicts (status, message, block)
-        - errors: List of error dicts (message, block)
-        - plain_output: Non-sentinel lines
-        - warnings: Parser warnings for malformed lines
+        A :class:`ParsedOutput` with events grouped by block.
     """
     if isinstance(lines, str):
         lines = lines.splitlines()
 
-    parsed = ParsedTestOutput()
-    current_block: str | None = None
+    all_segments: list[BlockSegment] = []
+    parser_warnings: list[str] = []
+    text_accum: list[str] = []
+    current_block: BlockSegment | None = None
+
+    def _flush_text() -> None:
+        if text_accum:
+            seg = BlockSegment(block="untyped", logs="\n".join(text_accum))
+            all_segments.append(seg)
+            text_accum.clear()
+
+    def _flush_block() -> None:
+        nonlocal current_block
+        if current_block is not None:
+            all_segments.append(_finalize_block(current_block))
+            current_block = None
 
     for line in lines:
         if not line.startswith(SENTINEL):
-            parsed.plain_output.append(line)
+            if current_block is not None:
+                if current_block.logs:
+                    current_block.logs += "\n"
+                current_block.logs += line
+            else:
+                text_accum.append(line)
             continue
 
-        json_str = line[len(SENTINEL) :]
+        json_str = line[len(SENTINEL):]
 
         try:
             entry = json.loads(json_str)
         except json.JSONDecodeError:
-            parsed.warnings.append(f"malformed [TST] line, skipping: {line}")
+            parser_warnings.append(
+                f"malformed [TST] line, skipping: {line}"
+            )
             continue
 
         if not isinstance(entry, dict):
-            parsed.warnings.append(
+            parser_warnings.append(
                 f"[TST] line is not a JSON object, skipping: {line}"
             )
             continue
 
         event_type = entry.get("type")
         if event_type is None:
-            parsed.warnings.append(
+            parser_warnings.append(
                 f"[TST] line missing type field, skipping: {line}"
             )
             continue
 
         if event_type in ("phase", "block_start"):
-            block = entry.get("block")
-            if block is not None:
-                current_block = block
-                parsed.block_sequence.append(block)
+            block_name = entry.get("block")
+            if block_name is not None:
+                _flush_block()
+                _flush_text()
+                current_block = BlockSegment(
+                    block=block_name,
+                    description=entry.get("description", ""),
+                )
 
         elif event_type == "block_end":
-            # End of a block phase; reset current_block
-            current_block = None
-
-        elif event_type == "feature":
-            name = entry.get("name", "")
-            parsed.features.append(
-                {"name": name, "block": current_block}
-            )
-
-        elif event_type == "measurement":
-            name = entry.get("name", "")
-            value = entry.get("value")
-            parsed.measurements.append(
-                {"name": name, "value": value, "block": current_block}
-            )
-
-        elif event_type == "result":
-            status = entry.get("status", "")
-            message = entry.get("message", "")
-            parsed.results.append(
-                {
-                    "status": status,
-                    "message": message,
-                    "block": current_block,
-                }
-            )
-
-        elif event_type == "error":
-            message = entry.get("message", "")
-            parsed.errors.append(
-                {"message": message, "block": current_block}
-            )
+            _flush_block()
 
         else:
-            # Unknown type - skip for forward compatibility
-            pass
+            # Content event — preserve raw line in block logs
+            if current_block is not None:
+                if current_block.logs:
+                    current_block.logs += "\n"
+                current_block.logs += line
 
-    # Compute derived flags
-    has_rigging_failure = any(
-        e.get("block") == "rigging" if isinstance(e, dict) else False
-        for e in parsed.errors
+            if event_type == "feature":
+                name = entry.get("name", "")
+                block_tag = current_block.block if current_block else None
+                feat = {"name": name, "block": block_tag}
+                if current_block is not None:
+                    current_block.features.append(feat)
+                else:
+                    # Event before any block — buffer in untyped
+                    _flush_text()
+                    seg = BlockSegment(block="untyped", logs=line)
+                    seg.features.append(feat)
+                    all_segments.append(seg)
+
+            elif event_type == "measurement":
+                name = entry.get("name", "")
+                value = entry.get("value")
+                block_tag = current_block.block if current_block else None
+                m = {"name": name, "value": value, "block": block_tag}
+                if current_block is not None:
+                    current_block.measurements.append(m)
+                else:
+                    _flush_text()
+                    seg = BlockSegment(block="untyped", logs=line)
+                    seg.measurements.append(m)
+                    all_segments.append(seg)
+
+            elif event_type == "result":
+                status = entry.get("status", "")
+                message = entry.get("message", "")
+                block_tag = current_block.block if current_block else None
+                r = {"status": status, "message": message, "block": block_tag}
+                if current_block is not None:
+                    current_block.results.append(r)
+                else:
+                    _flush_text()
+                    seg = BlockSegment(block="untyped", logs=line)
+                    seg.results.append(r)
+                    all_segments.append(seg)
+
+            elif event_type == "error":
+                message = entry.get("message", "")
+                block_tag = current_block.block if current_block else None
+                e = {"message": message, "block": block_tag}
+                if current_block is not None:
+                    current_block.errors.append(e)
+                else:
+                    _flush_text()
+                    seg = BlockSegment(block="untyped", logs=line)
+                    seg.errors.append(e)
+                    all_segments.append(seg)
+
+            # else: unknown type — already in logs, skip silently
+
+    _flush_block()
+    _flush_text()
+
+    # Categorise segments into rigging / run_blocks / verdict.
+    rigging: BlockSegment | None = None
+    verdict: BlockSegment | None = None
+    run_blocks: list[BlockSegment] = []
+
+    for seg in all_segments:
+        if seg.block == "rigging" and rigging is None:
+            rigging = seg
+        elif seg.block == "verdict":
+            # Always take the last verdict; push any earlier one to run_blocks
+            if verdict is not None:
+                run_blocks.append(verdict)
+            verdict = seg
+        else:
+            run_blocks.append(seg)
+
+    return ParsedOutput(
+        rigging=rigging,
+        run_blocks=run_blocks,
+        verdict=verdict,
+        warnings=parser_warnings,
     )
 
-    return {
-        "block_sequence": parsed.block_sequence,
-        "features": parsed.features,
-        "measurements": parsed.measurements,
-        "results": parsed.results,
-        "errors": parsed.errors,
-        "plain_output": parsed.plain_output,
-        "warnings": parsed.warnings,
-        "has_rigging_failure": has_rigging_failure,
-    }
 
-
-def is_rigging_failure(parsed: dict[str, Any]) -> bool:
+def is_rigging_failure(parsed: ParsedOutput) -> bool:
     """Determine if the parsed output represents a rigging failure.
 
     A rigging failure is an error that occurs during the rigging phase,
@@ -157,13 +293,10 @@ def is_rigging_failure(parsed: dict[str, Any]) -> bool:
     Returns:
         True if errors occurred during rigging phase.
     """
-    for error in parsed.get("errors", []):
-        if error.get("block") == "rigging":
-            return True
-    return False
+    return parsed.has_rigging_failure
 
 
-def get_rigging_features(parsed: dict[str, Any]) -> list[str]:
+def get_rigging_features(parsed: ParsedOutput) -> list[str]:
     """Extract feature names declared during rigging.
 
     Args:
@@ -172,11 +305,9 @@ def get_rigging_features(parsed: dict[str, Any]) -> list[str]:
     Returns:
         List of feature name strings from rigging phase.
     """
-    return [
-        f["name"]
-        for f in parsed.get("features", [])
-        if f.get("block") == "rigging"
-    ]
+    if parsed.rigging is None:
+        return []
+    return [f["name"] for f in parsed.rigging.features]
 
 
 # ---------------------------------------------------------------------------
@@ -191,26 +322,7 @@ class TextSegment:
     text: str
 
 
-@dataclass
-class BlockSegment:
-    """A structured block delimited by block_start/block_end events."""
-
-    block: str
-    description: str = ""
-    logs: str = ""
-    error: str | None = None
-    features: list[dict[str, Any]] = field(default_factory=list)
-    measurements: list[dict[str, Any]] = field(default_factory=list)
-    assertions: list[dict[str, Any]] = field(default_factory=list)
-
-
 Segment = Union[TextSegment, BlockSegment]
-
-
-def _finalize_block(seg: BlockSegment) -> BlockSegment:
-    """Strip trailing whitespace from accumulated logs."""
-    seg.logs = seg.logs.strip("\n")
-    return seg
 
 
 def _normalize_assertion(entry: dict[str, Any]) -> dict[str, Any]:
@@ -314,7 +426,12 @@ def parse_stdout_segments(stdout: str) -> list[Segment]:
             _flush_block()
 
         elif current_block is not None:
-            # Event inside a block — dispatch to block fields
+            # Content event — preserve raw sentinel line in logs
+            if current_block.logs:
+                current_block.logs += "\n"
+            current_block.logs += line
+
+            # Dispatch to structured fields
             if event_type == "feature":
                 feat: dict[str, Any] = {"name": entry.get("name", "")}
                 action = entry.get("action")
@@ -336,9 +453,11 @@ def parse_stdout_segments(stdout: str) -> list[Segment]:
                 current_block.assertions.append(_normalize_assertion(entry))
 
             elif event_type == "error":
-                current_block.error = entry.get("message", "")
+                current_block.errors.append(
+                    {"message": entry.get("message", "")}
+                )
 
-            # Unknown event types inside blocks are silently skipped
+            # Unknown event types: already in logs, skip silently
 
         # Events outside any block (other than block_start) are skipped
 

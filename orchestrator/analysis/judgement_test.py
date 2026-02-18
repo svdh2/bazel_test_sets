@@ -225,7 +225,7 @@ class TestJudgementStructuredOutput:
 
             result = execute_judgement("test_a", manifest, measurements_dir)
             assert result.judgement_output is not None
-            assert len(result.judgement_output["results"]) >= 0
+            assert len(result.judgement_output.all_results) >= 0
 
 
 class TestFindRejudgeableTests:

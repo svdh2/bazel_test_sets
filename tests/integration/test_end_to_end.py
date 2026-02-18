@@ -473,10 +473,10 @@ class TestStructuredLoggingIntegration:
             from orchestrator.analysis.log_parser import parse_test_output, parse_stdout_segments, BlockSegment
             parsed = parse_test_output(results[0].stdout)
 
-            assert "rigging" in parsed["block_sequence"]
-            assert "stimulation" in parsed["block_sequence"]
-            assert "verdict" in parsed["block_sequence"]
-            assert len(parsed["measurements"]) >= 1
+            assert "rigging" in parsed.block_sequence
+            assert "stimulation" in parsed.block_sequence
+            assert "verdict" in parsed.block_sequence
+            assert len(parsed.all_measurements) >= 1
 
             # Verify segment-based parser also works on the same stdout
             segments = parse_stdout_segments(results[0].stdout)

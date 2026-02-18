@@ -778,15 +778,20 @@ def _render_block_segment(block: BlockSegment) -> str:
             parts.append(f'<li class="{css_class}">{desc}</li>')
         parts.append("</ul>")
 
-    # Block logs (plain text emitted during the block)
+    # Block logs (raw timeline — collapsed by default)
     if block.logs:
+        parts.append('<details class="log-details">')
+        parts.append("<summary>Raw logs</summary>")
         parts.append(f"<pre>{html.escape(block.logs)}</pre>")
+        parts.append("</details>")
 
-    # Error
-    if block.error:
-        parts.append(
-            f'<div class="block-error">Error: {html.escape(block.error)}</div>'
-        )
+    # Errors
+    for err in block.errors:
+        msg = err.get("message", "") if isinstance(err, dict) else str(err)
+        if msg:
+            parts.append(
+                f'<div class="block-error">Error: {html.escape(msg)}</div>'
+            )
 
     parts.append("</div>")
     return "\n".join(parts)
