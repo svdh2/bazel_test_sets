@@ -809,3 +809,107 @@ class TestLifecycleRendering:
         """Every lifecycle state in LIFECYCLE_LABELS has a color."""
         for state in LIFECYCLE_LABELS:
             assert state in LIFECYCLE_COLORS
+
+
+class TestSourceLinksRendering:
+    """Tests for source code link rendering in HTML reports."""
+
+    def _make_report_with_source_links(self, source_link_base=None):
+        """Build a report with structured stdout containing _file/_line."""
+        tests = {
+            "t": {
+                "assertion": "A",
+                "status": "passed",
+                "duration_seconds": 1.0,
+                "stdout": (
+                    '[TST] {"type": "block_start", "block": "rigging"}\n'
+                    '[TST] {"type": "feature", "name": "auth", '
+                    '"_file": "examples/test.py", "_line": 14}\n'
+                    '[TST] {"type": "block_end", "block": "rigging"}\n'
+                    '[TST] {"type": "block_start", "block": "stimulation"}\n'
+                    '[TST] {"type": "measurement", "name": "latency", '
+                    '"value": 42, "unit": "ms", '
+                    '"_file": "examples/test.py", "_line": 18}\n'
+                    '[TST] {"type": "block_end", "block": "stimulation"}\n'
+                    '[TST] {"type": "block_start", "block": "verdict"}\n'
+                    '[TST] {"type": "result", "name": "ok", "passed": true, '
+                    '"_file": "examples/test.py", "_line": 22}\n'
+                    '[TST] {"type": "block_end", "block": "verdict"}'
+                ),
+            },
+        }
+        report = _make_hierarchical_report(tests=tests)
+        if source_link_base is not None:
+            report["report"]["source_link_base"] = source_link_base
+        return report
+
+    def test_github_source_links_rendered(self):
+        """Source links render as <a> tags when source_link_base is set."""
+        base = "https://github.com/owner/repo/blob/abc123"
+        report = self._make_report_with_source_links(source_link_base=base)
+        result = generate_html_report(report)
+        assert 'class="source-link"' in result
+        assert 'target="_blank"' in result
+        assert f"{base}/examples/test.py#L14" in result
+        assert f"{base}/examples/test.py#L18" in result
+        assert f"{base}/examples/test.py#L22" in result
+
+    def test_local_source_links_rendered(self):
+        """Source links render as <span> when source_link_base is absent."""
+        report = self._make_report_with_source_links()
+        result = generate_html_report(report)
+        assert '<span class="source-link">' in result
+        assert "examples/test.py:14" in result
+        assert "examples/test.py:18" in result
+        assert "examples/test.py:22" in result
+
+    def test_no_source_links_without_metadata(self):
+        """No rendered source link elements when events lack _file/_line."""
+        tests = {
+            "t": {
+                "assertion": "A",
+                "status": "passed",
+                "duration_seconds": 1.0,
+                "stdout": (
+                    '[TST] {"type": "block_start", "block": "verdict"}\n'
+                    '[TST] {"type": "result", "name": "ok", "passed": true}\n'
+                    '[TST] {"type": "block_end", "block": "verdict"}'
+                ),
+            },
+        }
+        report = _make_hierarchical_report(tests=tests)
+        result = generate_html_report(report)
+        # CSS class definition is always present, but no rendered elements
+        assert 'class="source-link"' not in result
+
+    def test_source_link_css_present(self):
+        """Source link CSS class is defined in the stylesheet."""
+        report = _make_hierarchical_report()
+        result = generate_html_report(report)
+        assert ".source-link" in result
+
+    def test_error_source_links_rendered(self):
+        """Error events with _file/_line also get source links."""
+        tests = {
+            "t": {
+                "assertion": "A",
+                "status": "failed",
+                "duration_seconds": 1.0,
+                "stdout": (
+                    '[TST] {"type": "block_start", "block": "rigging"}\n'
+                    '[TST] {"type": "error", "message": "db down", '
+                    '"_file": "examples/test.py", "_line": 7}\n'
+                    '[TST] {"type": "block_end", "block": "rigging"}'
+                ),
+            },
+        }
+        report = _make_hierarchical_report(tests=tests)
+        result = generate_html_report(report)
+        assert "examples/test.py:7" in result
+
+    def test_measurements_table_has_source_column(self):
+        """Measurements table includes a Source column header."""
+        base = "https://github.com/owner/repo/blob/abc123"
+        report = self._make_report_with_source_links(source_link_base=base)
+        result = generate_html_report(report)
+        assert "<th>Source</th>" in result

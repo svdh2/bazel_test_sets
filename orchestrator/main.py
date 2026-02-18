@@ -638,12 +638,15 @@ def _print_results(
 
     # Generate reports
     if args.output:
+        from orchestrator.reporting.source_links import resolve_source_link_base
+
         reporter = Reporter()
         if manifest is not None:
             reporter.set_manifest(manifest)
         reporter.add_results(results)
         if commit_sha:
             reporter.set_commit_hash(commit_sha)
+        reporter.set_source_link_base(resolve_source_link_base(commit_sha))
 
         if verdict_data:
             reporter.set_e_value_verdict(verdict_data)
@@ -766,12 +769,15 @@ def _print_effort_results(
 
     # Generate reports
     if args.output:
+        from orchestrator.reporting.source_links import resolve_source_link_base
+
         reporter = Reporter()
         if manifest is not None:
             reporter.set_manifest(manifest)
         reporter.add_results(initial_results)
         if commit_sha:
             reporter.set_commit_hash(commit_sha)
+        reporter.set_source_link_base(resolve_source_link_base(commit_sha))
 
         if verdict_data:
             reporter.set_e_value_verdict(verdict_data)

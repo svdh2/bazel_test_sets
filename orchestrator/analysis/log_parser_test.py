@@ -911,3 +911,121 @@ class TestParseStdoutSegments:
 
         assert isinstance(segments[4], TextSegment)
         assert "Test complete." in segments[4].text
+
+
+class TestSourceMetadata:
+    """Tests for _file/_line source metadata preservation."""
+
+    def test_feature_preserves_source(self):
+        """Feature event preserves _file and _line in parse_test_output."""
+        lines = [
+            '[TST] {"type": "phase", "block": "rigging"}',
+            '[TST] {"type": "feature", "name": "auth", "_file": "test.py", "_line": 10}',
+        ]
+        result = parse_test_output(lines)
+        feat = result.all_features[0]
+        assert feat["_file"] == "test.py"
+        assert feat["_line"] == 10
+
+    def test_measurement_preserves_source(self):
+        """Measurement event preserves _file and _line."""
+        lines = [
+            '[TST] {"type": "phase", "block": "stimulation"}',
+            '[TST] {"type": "measurement", "name": "x", "value": 1, '
+            '"_file": "test.py", "_line": 20}',
+        ]
+        result = parse_test_output(lines)
+        m = result.all_measurements[0]
+        assert m["_file"] == "test.py"
+        assert m["_line"] == 20
+
+    def test_result_preserves_source(self):
+        """Result event preserves _file and _line."""
+        lines = [
+            '[TST] {"type": "phase", "block": "verdict"}',
+            '[TST] {"type": "result", "status": "pass", "message": "ok", '
+            '"_file": "test.py", "_line": 30}',
+        ]
+        result = parse_test_output(lines)
+        r = result.all_results[0]
+        assert r["_file"] == "test.py"
+        assert r["_line"] == 30
+
+    def test_error_preserves_source(self):
+        """Error event preserves _file and _line."""
+        lines = [
+            '[TST] {"type": "phase", "block": "rigging"}',
+            '[TST] {"type": "error", "message": "fail", '
+            '"_file": "test.py", "_line": 5}',
+        ]
+        result = parse_test_output(lines)
+        e = result.all_errors[0]
+        assert e["_file"] == "test.py"
+        assert e["_line"] == 5
+
+    def test_events_without_source_have_no_keys(self):
+        """Events without _file/_line do not gain those keys."""
+        lines = [
+            '[TST] {"type": "phase", "block": "rigging"}',
+            '[TST] {"type": "feature", "name": "auth"}',
+        ]
+        result = parse_test_output(lines)
+        feat = result.all_features[0]
+        assert "_file" not in feat
+        assert "_line" not in feat
+
+    def test_segments_feature_preserves_source(self):
+        """parse_stdout_segments preserves _file/_line on features."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "rigging"}\n'
+            '[TST] {"type": "feature", "name": "auth", '
+            '"_file": "test.py", "_line": 15}\n'
+            '[TST] {"type": "block_end", "block": "rigging"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.features[0]["_file"] == "test.py"
+        assert seg.features[0]["_line"] == 15
+
+    def test_segments_measurement_preserves_source(self):
+        """parse_stdout_segments preserves _file/_line on measurements."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "stimulation"}\n'
+            '[TST] {"type": "measurement", "name": "x", "value": 1, '
+            '"_file": "test.py", "_line": 22}\n'
+            '[TST] {"type": "block_end", "block": "stimulation"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.measurements[0]["_file"] == "test.py"
+        assert seg.measurements[0]["_line"] == 22
+
+    def test_segments_assertion_preserves_source(self):
+        """parse_stdout_segments preserves _file/_line on assertions."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "verdict"}\n'
+            '[TST] {"type": "result", "name": "ok", "passed": true, '
+            '"_file": "test.py", "_line": 30}\n'
+            '[TST] {"type": "block_end", "block": "verdict"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.assertions[0]["_file"] == "test.py"
+        assert seg.assertions[0]["_line"] == 30
+
+    def test_segments_error_preserves_source(self):
+        """parse_stdout_segments preserves _file/_line on errors."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "rigging"}\n'
+            '[TST] {"type": "error", "message": "fail", '
+            '"_file": "test.py", "_line": 8}\n'
+            '[TST] {"type": "block_end", "block": "rigging"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.errors[0]["_file"] == "test.py"
+        assert seg.errors[0]["_line"] == 8

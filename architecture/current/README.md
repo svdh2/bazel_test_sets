@@ -94,6 +94,7 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 | [Log Parser](components/log-parser.md) | `orchestrator/analysis/` | Parses [TST] structured log events from test stdout |
 | [Reporter](components/reporter.md) | `orchestrator/reporting/` | Generates JSON reports with hierarchical DAG structure and rolling history |
 | [HTML Reporter](components/html-reporter.md) | `orchestrator/reporting/` | Generates self-contained HTML reports from report data |
+| [Source Links](components/source-links.md) | `orchestrator/reporting/` | Resolves source link base URL and renders clickable source links for structured log events |
 | [Measurements](components/measurements.md) | `orchestrator/analysis/` | Stores and retrieves structured measurement data per test label |
 | [Inference](components/inference.md) | `orchestrator/analysis/` | Infers DAG dependencies from rigging feature events in structured logs |
 | [Judgement](components/judgement.md) | `orchestrator/analysis/` | Executes judgement targets with stored measurements for verdict re-evaluation |
@@ -120,5 +121,5 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 
 ## Git Sync
 
-- **Commit**: `f9367dc7d91b73ee1410e5d59ce3958c51187831`
+- **Commit**: `674dcd7debd9d6f9a29adcb9a9acb454d085105c`
 - **Last updated**: 2026-02-17

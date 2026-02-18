@@ -11,7 +11,10 @@ import time
 
 
 def tst(event: dict) -> None:
-    """Emit a structured test log event."""
+    """Emit a structured test log event with source location."""
+    frame = sys._getframe(1)
+    rel = os.path.relpath(frame.f_code.co_filename)
+    event = {**event, "_file": rel, "_line": frame.f_lineno}
     print(f"[TST] {json.dumps(event)}")
 
 
