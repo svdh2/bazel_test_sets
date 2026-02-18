@@ -1252,6 +1252,20 @@ _DAG_JS = """\
         mixed: '#FFFFAD', no_tests: '#D3D3D3'
     };
 
+    var DAG_COLORS = {green: '#90EE90', red: '#FFB6C1', grey: '#D3D3D3'};
+
+    var LIFECYCLE_ICONS = {
+        burning_in: '\\uD83D\\uDD25',
+        flaky: '\\u26A0\\uFE0F',
+        disabled: '\\uD83D\\uDC7B'
+    };
+
+    var LIFECYCLE_BORDER = {
+        flaky: '#cf222e',
+        burning_in: '#d4a72c',
+        disabled: '#999'
+    };
+
     var elements = [];
     var i, d;
     for (i = 0; i < GRAPH_DATA.nodes.length; i++) {
@@ -1260,13 +1274,19 @@ _DAG_JS = """\
             group: 'nodes',
             data: {
                 id: d.id, label: d.label, type: d.type,
-                status: d.status, parent: d.parent || undefined
+                status: d.status, lifecycle: d.lifecycle || '',
+                dagColor: d.dag_color || 'grey'
             },
             classes: d.type
         });
     }
     for (i = 0; i < GRAPH_DATA.edges.length; i++) {
-        elements.push({group: 'edges', data: GRAPH_DATA.edges[i].data});
+        d = GRAPH_DATA.edges[i].data;
+        elements.push({
+            group: 'edges',
+            data: d,
+            classes: d.type || 'dependency'
+        });
     }
 
     var cy = cytoscape({
@@ -1278,20 +1298,19 @@ _DAG_JS = """\
                 style: {
                     'shape': 'round-rectangle',
                     'background-color': function(ele) {
-                        return STATUS_COLORS[ele.data('status')] || '#e8e8e8';
-                    },
-                    'background-opacity': 0.15,
-                    'border-width': 2,
-                    'border-color': function(ele) {
-                        return STATUS_COLORS[ele.data('status')] || '#ccc';
+                        return DAG_COLORS[ele.data('dagColor')] || '#e8e8e8';
                     },
                     'label': 'data(label)',
-                    'text-valign': 'top',
+                    'text-valign': 'center',
                     'text-halign': 'center',
                     'font-size': '12px',
                     'font-weight': 'bold',
-                    'padding': '20px',
-                    'text-margin-y': '-5px'
+                    'width': 'label',
+                    'height': '35px',
+                    'padding': '12px',
+                    'border-width': 4,
+                    'border-style': 'double',
+                    'border-color': '#333'
                 }
             },
             {
@@ -1301,15 +1320,23 @@ _DAG_JS = """\
                     'background-color': function(ele) {
                         return STATUS_COLORS[ele.data('status')] || '#e8e8e8';
                     },
-                    'label': 'data(label)',
+                    'label': function(ele) {
+                        var icon = LIFECYCLE_ICONS[ele.data('lifecycle')];
+                        var lbl = ele.data('label');
+                        return icon ? icon + ' ' + lbl : lbl;
+                    },
                     'text-valign': 'center',
                     'text-halign': 'center',
-                    'font-size': '10px',
+                    'font-size': '11px',
                     'width': 'label',
                     'height': '30px',
                     'padding': '8px',
-                    'border-width': 1,
-                    'border-color': '#999'
+                    'border-width': function(ele) {
+                        return LIFECYCLE_BORDER[ele.data('lifecycle')] ? 3 : 1;
+                    },
+                    'border-color': function(ele) {
+                        return LIFECYCLE_BORDER[ele.data('lifecycle')] || '#999';
+                    }
                 }
             },
             {
@@ -1320,20 +1347,27 @@ _DAG_JS = """\
                 }
             },
             {
-                selector: 'node.collapsed',
+                selector: 'edge.member',
                 style: {
-                    'font-style': 'italic'
+                    'width': 2,
+                    'line-color': '#bbb',
+                    'target-arrow-color': '#bbb',
+                    'target-arrow-shape': 'triangle',
+                    'curve-style': 'bezier',
+                    'arrow-scale': 0.8,
+                    'line-style': 'solid'
                 }
             },
             {
-                selector: 'edge',
+                selector: 'edge.dependency',
                 style: {
                     'width': 2,
-                    'line-color': '#999',
-                    'target-arrow-color': '#999',
+                    'line-color': '#666',
+                    'target-arrow-color': '#666',
                     'target-arrow-shape': 'triangle',
                     'curve-style': 'bezier',
-                    'arrow-scale': 0.8
+                    'arrow-scale': 0.8,
+                    'line-style': 'dashed'
                 }
             }
         ],
@@ -1362,50 +1396,6 @@ _DAG_JS = """\
         cy.fit(undefined, 30);
     });
 
-    function collapseGroup(group) {
-        var children = group.children();
-        children.style('display', 'none');
-        children.connectedEdges().style('display', 'none');
-        /* Recursively collapse nested groups */
-        children.filter('.group').forEach(function(child) {
-            child.addClass('collapsed');
-        });
-        group.addClass('collapsed');
-    }
-
-    function expandGroup(group) {
-        var children = group.children();
-        children.style('display', 'element');
-        children.connectedEdges().style('display', 'element');
-        group.removeClass('collapsed');
-        /* Nested groups stay collapsed unless explicitly expanded */
-    }
-
-    document.getElementById('dag-collapse-all').addEventListener('click',
-        function() {
-            cy.nodes('.group').forEach(function(g) { collapseGroup(g); });
-            cy.layout({name: 'dagre', rankDir: 'TB',
-                animate: true, animationDuration: 300}).run();
-        });
-    document.getElementById('dag-expand-all').addEventListener('click',
-        function() {
-            cy.nodes('.group').forEach(function(g) { expandGroup(g); });
-            cy.layout({name: 'dagre', rankDir: 'TB',
-                animate: true, animationDuration: 300}).run();
-        });
-
-    /* Click group to toggle collapse */
-    cy.on('tap', 'node.group', function(evt) {
-        var node = evt.target;
-        if (node.hasClass('collapsed')) {
-            expandGroup(node);
-        } else {
-            collapseGroup(node);
-        }
-        cy.layout({name: 'dagre', rankDir: 'TB',
-            animate: true, animationDuration: 300}).run();
-    });
-
     /* Click test node to show detail pane */
     cy.on('tap', 'node.test', function(evt) {
         var nodeId = evt.target.data('id');
@@ -1432,51 +1422,140 @@ _DAG_JS = """\
 """
 
 
+# Map test run status to a DAG display color (green/red/grey).
+_STATUS_DAG_COLOR: dict[str, str] = {
+    "passed": "green",
+    "failed": "red",
+    "dependencies_failed": "grey",
+    "passed+dependencies_failed": "green",
+    "failed+dependencies_failed": "red",
+    "mixed": "red",
+    "no_tests": "grey",
+}
+
+
 def _build_graph_data(test_set: dict[str, Any]) -> dict[str, Any]:
     """Build Cytoscape.js-compatible graph data from the test_set hierarchy.
+
+    Nodes are **not** nested via Cytoscape compound parents.  Instead,
+    membership (test-set → test, test-set → sub-set) is expressed as
+    regular edges so that the same node can appear as a member of
+    multiple test sets (DAG, not tree).
+
+    After walking, a leaf-to-root pass computes ``dag_color`` for every
+    node: test nodes derive it from their run status; group nodes
+    aggregate from their direct member children (red if any child red,
+    grey if all children grey, green otherwise).
 
     Returns:
         Dict with ``nodes`` and ``edges`` lists in Cytoscape elements format.
     """
-    nodes: list[dict[str, Any]] = []
+    seen_nodes: dict[str, dict[str, Any]] = {}
     edges: list[dict[str, Any]] = []
-    _walk_tree_for_graph(test_set, parent_id=None, nodes=nodes, edges=edges)
-    return {"nodes": nodes, "edges": edges}
+    _walk_dag_for_graph(test_set, parent_id=None,
+                        seen_nodes=seen_nodes, edges=edges)
+
+    # Build children map from membership edges.
+    children_map: dict[str, list[str]] = {}
+    for edge in edges:
+        ed = edge["data"]
+        if ed["type"] == "member":
+            children_map.setdefault(ed["source"], []).append(ed["target"])
+
+    # Compute dag_color leaf-to-root with memoisation.
+    color_cache: dict[str, str] = {}
+    for node_id in seen_nodes:
+        _compute_dag_color(node_id, seen_nodes, children_map, color_cache)
+
+    return {"nodes": list(seen_nodes.values()), "edges": edges}
 
 
-def _walk_tree_for_graph(
+def _compute_dag_color(
+    node_id: str,
+    seen_nodes: dict[str, dict[str, Any]],
+    children_map: dict[str, list[str]],
+    cache: dict[str, str],
+) -> str:
+    """Recursively compute and store ``dag_color`` for *node_id*."""
+    if node_id in cache:
+        return cache[node_id]
+
+    data = seen_nodes[node_id]["data"]
+
+    if data["type"] == "test":
+        color = _STATUS_DAG_COLOR.get(data["status"], "grey")
+    else:
+        child_ids = children_map.get(node_id, [])
+        if not child_ids:
+            color = _STATUS_DAG_COLOR.get(data["status"], "grey")
+        else:
+            child_colors = [
+                _compute_dag_color(cid, seen_nodes, children_map, cache)
+                for cid in child_ids
+            ]
+            if any(c == "red" for c in child_colors):
+                color = "red"
+            elif all(c == "grey" for c in child_colors):
+                color = "grey"
+            else:
+                color = "green"
+
+    data["dag_color"] = color
+    cache[node_id] = color
+    return color
+
+
+def _walk_dag_for_graph(
     node: dict[str, Any],
     parent_id: str | None,
-    nodes: list[dict[str, Any]],
+    seen_nodes: dict[str, dict[str, Any]],
     edges: list[dict[str, Any]],
 ) -> None:
-    """Recursively walk the test_set tree and populate graph elements."""
+    """Recursively walk the test_set tree and populate graph elements.
+
+    Nodes are deduplicated so a test or subset appearing under multiple
+    parents is emitted only once.  Membership is expressed as edges
+    from the parent test-set node to its children.
+    """
     node_id = node.get("name", "")
-    nodes.append({"data": {
-        "id": node_id,
-        "label": node_id,
-        "type": "group",
-        "status": node.get("status", "no_tests"),
-        "parent": parent_id,
-    }})
+    if node_id not in seen_nodes:
+        seen_nodes[node_id] = {"data": {
+            "id": node_id,
+            "label": node_id,
+            "type": "group",
+            "status": node.get("status", "no_tests"),
+        }}
+
+    if parent_id is not None:
+        edges.append({"data": {
+            "source": parent_id, "target": node_id, "type": "member",
+        }})
 
     for test_name, test_data in node.get("tests", {}).items():
-        short_label = (
-            test_name.rsplit(":", 1)[-1] if ":" in test_name else test_name
-        )
-        nodes.append({"data": {
-            "id": test_name,
-            "label": short_label,
-            "type": "test",
-            "status": test_data.get("status", "no_tests"),
-            "parent": node_id,
+        if test_name not in seen_nodes:
+            short_label = (
+                test_name.rsplit(":", 1)[-1] if ":" in test_name else test_name
+            )
+            lifecycle = test_data.get("lifecycle") or {}
+            seen_nodes[test_name] = {"data": {
+                "id": test_name,
+                "label": short_label,
+                "type": "test",
+                "status": test_data.get("status", "no_tests"),
+                "lifecycle": lifecycle.get("state", ""),
+            }}
+        edges.append({"data": {
+            "source": node_id, "target": test_name, "type": "member",
         }})
         for dep in test_data.get("depends_on", []):
-            edges.append({"data": {"source": test_name, "target": dep}})
+            edges.append({"data": {
+                "source": test_name, "target": dep, "type": "dependency",
+            }})
 
     for subset in node.get("subsets", []):
-        _walk_tree_for_graph(
-            subset, parent_id=node_id, nodes=nodes, edges=edges,
+        _walk_dag_for_graph(
+            subset, parent_id=node_id,
+            seen_nodes=seen_nodes, edges=edges,
         )
 
 
@@ -1498,14 +1577,6 @@ def _render_dag_section(report: dict[str, Any]) -> str:
         '<button id="dag-zoom-out" title="Zoom out">&minus;</button>'
     )
     parts.append('<button id="dag-fit" title="Fit to view">Fit</button>')
-    parts.append(
-        '<button id="dag-expand-all" title="Expand all groups">'
-        "Expand All</button>"
-    )
-    parts.append(
-        '<button id="dag-collapse-all" title="Collapse all groups">'
-        "Collapse All</button>"
-    )
     parts.append("</div>")
 
     # Split pane: canvas + detail
