@@ -1,4 +1,5 @@
 {
   "min_reliability": 0.99,
-  "statistical_significance": 0.95
+  "statistical_significance": 0.95,
+  "status_file": "/workspace/examples/ecommerce/.tests/status"
 }

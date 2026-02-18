@@ -6,29 +6,41 @@
 
 ## Purpose
 
-Parses structured test log events from test stdout. Tests emit machine-readable events prefixed with `[TST] ` followed by JSON. The parser extracts block phases, features, measurements, results, and errors while collecting non-sentinel lines as plain output.
+Parses structured test log events from test stdout. Tests emit machine-readable events prefixed with `[TST] ` followed by JSON. The parser groups events by the block they belong to and categorises blocks into `rigging`, `run_blocks` (stimulation/checkpoint), and `verdict`.
 
 ## Interface
+
+### Data Types
+
+```python
+@dataclass
+class BlockSegment:
+    block: str              # "rigging", "stimulation", "checkpoint", "verdict", "untyped"
+    description: str        # from optional block_start description field
+    logs: str               # all lines in order (plain text + raw sentinel lines)
+    features: list[dict]    # [{"name": ..., "block": ...}]
+    measurements: list[dict]  # [{"name": ..., "value": ..., "block": ...}]
+    results: list[dict]     # [{"status": ..., "message": ..., "block": ...}]
+    errors: list[dict]      # [{"message": ..., "block": ...}]
+    assertions: list[dict]  # normalized for display: [{"description": ..., "status": ...}]
+
+@dataclass
+class ParsedOutput:
+    rigging: BlockSegment | None    # the single rigging block
+    run_blocks: list[BlockSegment]  # stimulation, checkpoint, and untyped blocks in order
+    verdict: BlockSegment | None    # the single verdict block
+    warnings: list[str]             # parser-level warnings for malformed lines
+```
+
+`ParsedOutput` properties: `has_rigging_failure`, `block_sequence`, `all_blocks`, `all_features`, `all_measurements`, `all_results`, `all_errors`.
 
 ### parse_test_output
 
 ```python
-def parse_test_output(lines: list[str] | str) -> dict[str, Any]
+def parse_test_output(lines: list[str] | str) -> ParsedOutput
 ```
 
-Returns:
-```python
-{
-    "block_sequence": ["rigging", "execution", ...],   # Phase names in order
-    "features": [{"name": "auth", "block": "rigging"}],
-    "measurements": [{"name": "latency_ms", "value": 42, "block": "execution"}],
-    "results": [{"status": "passed", "message": "...", "block": "execution"}],
-    "errors": [{"message": "...", "block": "rigging"}],
-    "plain_output": ["non-sentinel lines..."],
-    "warnings": ["parser warnings for malformed lines..."],
-    "has_rigging_failure": true/false,
-}
-```
+Builds `BlockSegment` objects as it encounters `block_start`/`block_end` events. Text outside typed blocks becomes `BlockSegment(block="untyped")`. Categorises the first `rigging` block into `rigging`, the last `verdict` block into `verdict`, and everything else into `run_blocks`.
 
 ### Event Types
 
@@ -44,8 +56,8 @@ Returns:
 ### Helper Functions
 
 ```python
-def is_rigging_failure(parsed: dict) -> bool
-def get_rigging_features(parsed: dict) -> list[str]
+def is_rigging_failure(parsed: ParsedOutput) -> bool
+def get_rigging_features(parsed: ParsedOutput) -> list[str]
 ```
 
 ### parse_stdout_segments (segment-based parser)
@@ -56,29 +68,7 @@ def parse_stdout_segments(stdout: str) -> list[TextSegment | BlockSegment]
 
 Parses raw stdout into a sequence of interleaved `TextSegment` (plain text) and `BlockSegment` (structured blocks) for unified rendering. Used by the HTML reporter to detect and render structured logging inline with plain text.
 
-```python
-@dataclass
-class TextSegment:
-    text: str
-
-@dataclass
-class BlockSegment:
-    block: str              # "rigging", "stimulation", "checkpoint", "verdict"
-    description: str        # from optional block_start description field
-    logs: str               # plain text emitted during block
-    error: str | None       # error that terminated block
-    features: list[dict]    # rigging & stimulation
-    measurements: list[dict]  # stimulation
-    assertions: list[dict]  # checkpoint/verdict: [{"description": ..., "status": ...}]
-```
-
-Block-specific fields:
-- **All blocks**: `logs` (unstructured text during execution), `error` (termination error)
-- **rigging & stimulation**: `features` (services/features triggered)
-- **stimulation**: `description`, `measurements`
-- **checkpoint/verdict**: `assertions` (each with `description` and `status`)
-
-Result events are normalized: `name`/`passed` → `{"description": name, "status": "passed"/"failed"}`; `status`/`message` → `{"description": message, "status": status}`.
+Result events are normalized into `assertions`: `name`/`passed` → `{"description": name, "status": "passed"/"failed"}`; `status`/`message` → `{"description": message, "status": status}`.
 
 ## Dependencies
 
@@ -87,15 +77,19 @@ Result events are normalized: `name`/`passed` → `{"description": name, "status
 ## Dependents
 
 - **Inference** (`orchestrator.analysis.inference`): Uses `get_rigging_features` to find features for dependency inference
-- **Judgement** (`orchestrator.analysis.judgement`): Parses structured output from judgement executables via `parse_test_output`
+- **Judgement** (`orchestrator.analysis.judgement`): Parses structured output from judgement executables via `parse_test_output`; stores `ParsedOutput` as `JudgementResult.judgement_output`
 - **HTML Reporter** (`orchestrator.reporting.html_reporter`): Uses `parse_stdout_segments` to render structured stdout
 
 ## Key Design Decisions
 
-1. **Sentinel prefix `[TST] `**: A fixed prefix makes it easy to distinguish structured events from regular test output. Tests can intermix structured events with normal print statements.
+1. **Block-oriented return type**: `parse_test_output` returns a `ParsedOutput` that groups events by the block they belong to (rigging/run_blocks/verdict) rather than by event type. Aggregate accessors (`all_features`, `all_measurements`, etc.) provide flat views across all blocks.
 
-2. **Forward compatibility**: Unknown event types are silently skipped rather than causing errors. This allows new event types to be added without breaking older parsers.
+2. **Sentinel prefix `[TST] `**: A fixed prefix makes it easy to distinguish structured events from regular test output. Tests can intermix structured events with normal print statements.
 
-3. **Block scoping**: Events are automatically associated with the current block (set by `block_start`, cleared by `block_end`). This enables block-level analysis (e.g., "did rigging fail?") without requiring each event to repeat the block name.
+3. **Forward compatibility**: Unknown event types are silently skipped rather than causing errors. This allows new event types to be added without breaking older parsers.
 
-4. **Malformed line tolerance**: Lines with `[TST]` prefix but invalid JSON are recorded as warnings and skipped, preventing a single malformed log line from crashing the parser.
+4. **Block scoping**: Events are automatically associated with the current block (set by `block_start`, cleared by `block_end`). This enables block-level analysis (e.g., "did rigging fail?") without requiring each event to repeat the block name.
+
+5. **Untyped blocks**: Text before, between, or after typed blocks is captured in `BlockSegment(block="untyped")` segments so no output is lost.
+
+6. **Malformed line tolerance**: Lines with `[TST]` prefix but invalid JSON are recorded as warnings and skipped, preventing a single malformed log line from crashing the parser.

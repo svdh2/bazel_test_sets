@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from orchestrator.analysis.log_parser import parse_test_output
+from orchestrator.analysis.log_parser import ParsedOutput, parse_test_output
 from orchestrator.analysis.measurements import load_measurements
 
 
@@ -22,7 +22,7 @@ class JudgementResult:
     status: str  # "passed", "failed", "skipped", "judgement_error"
     reason: str  # Human-readable reason for the status
     measurements_file: str | None  # Path to measurements file used
-    judgement_output: dict[str, Any] | None  # Parsed structured log output
+    judgement_output: ParsedOutput | None  # Parsed structured log output
     exit_code: int | None  # Process exit code (None if not executed)
 
 

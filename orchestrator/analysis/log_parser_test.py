@@ -7,6 +7,7 @@ import pytest
 from orchestrator.analysis.log_parser import (
     SENTINEL,
     BlockSegment,
+    ParsedOutput,
     TextSegment,
     parse_test_output,
     parse_stdout_segments,
@@ -22,7 +23,7 @@ class TestPhaseEvents:
         """Parse a single phase event."""
         lines = ['[TST] {"type": "phase", "block": "rigging"}']
         result = parse_test_output(lines)
-        assert result["block_sequence"] == ["rigging"]
+        assert result.block_sequence == ["rigging"]
 
     def test_multiple_phases(self):
         """Parse multiple phase events in order."""
@@ -33,7 +34,7 @@ class TestPhaseEvents:
             '[TST] {"type": "phase", "block": "verdict"}',
         ]
         result = parse_test_output(lines)
-        assert result["block_sequence"] == [
+        assert result.block_sequence == [
             "rigging",
             "stimulation",
             "checkpoint",
@@ -44,7 +45,7 @@ class TestPhaseEvents:
         """Phase event without block field is ignored."""
         lines = ['[TST] {"type": "phase"}']
         result = parse_test_output(lines)
-        assert result["block_sequence"] == []
+        assert result.block_sequence == []
 
     def test_phase_with_interleaved_output(self):
         """Phases extracted correctly when interleaved with plain output."""
@@ -56,10 +57,123 @@ class TestPhaseEvents:
             "Running test...",
         ]
         result = parse_test_output(lines)
-        assert result["block_sequence"] == ["rigging", "stimulation"]
-        assert "Setting up test environment..." in result["plain_output"]
-        assert "Rigging complete" in result["plain_output"]
-        assert "Running test..." in result["plain_output"]
+        assert result.block_sequence == ["rigging", "stimulation"]
+        # Plain text before rigging goes into an untyped run_block
+        assert any(
+            "Setting up test environment..." in b.logs
+            for b in result.run_blocks
+            if b.block == "untyped"
+        )
+        # Plain text inside rigging goes into rigging's logs
+        assert result.rigging is not None
+        assert "Rigging complete" in result.rigging.logs
+
+
+class TestBlockStructure:
+    """Tests for the block-oriented return structure."""
+
+    def test_rigging_extracted(self):
+        """Rigging block is extracted into the rigging field."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "rigging"}',
+            '[TST] {"type": "feature", "name": "auth"}',
+            '[TST] {"type": "block_end", "block": "rigging"}',
+        ]
+        result = parse_test_output(lines)
+        assert result.rigging is not None
+        assert result.rigging.block == "rigging"
+        assert len(result.rigging.features) == 1
+
+    def test_verdict_extracted(self):
+        """Verdict block is extracted into the verdict field."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "verdict"}',
+            '[TST] {"type": "result", "status": "pass", "message": "ok"}',
+            '[TST] {"type": "block_end", "block": "verdict"}',
+        ]
+        result = parse_test_output(lines)
+        assert result.verdict is not None
+        assert result.verdict.block == "verdict"
+        assert len(result.verdict.results) == 1
+
+    def test_stimulation_in_run_blocks(self):
+        """Stimulation blocks go into run_blocks."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "measurement", "name": "x", "value": 1}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+        assert result.rigging is None
+        assert result.verdict is None
+        typed_blocks = [b for b in result.run_blocks if b.block != "untyped"]
+        assert len(typed_blocks) == 1
+        assert typed_blocks[0].block == "stimulation"
+
+    def test_checkpoint_in_run_blocks(self):
+        """Checkpoint blocks go into run_blocks."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "checkpoint"}',
+            '[TST] {"type": "result", "status": "pass", "message": "ok"}',
+            '[TST] {"type": "block_end", "block": "checkpoint"}',
+        ]
+        result = parse_test_output(lines)
+        typed_blocks = [b for b in result.run_blocks if b.block != "untyped"]
+        assert len(typed_blocks) == 1
+        assert typed_blocks[0].block == "checkpoint"
+
+    def test_untyped_block_before_rigging(self):
+        """Text before rigging creates an untyped block in run_blocks."""
+        lines = [
+            "=== Test banner ===",
+            '[TST] {"type": "block_start", "block": "rigging"}',
+            '[TST] {"type": "block_end", "block": "rigging"}',
+        ]
+        result = parse_test_output(lines)
+        assert result.rigging is not None
+        untyped = [b for b in result.run_blocks if b.block == "untyped"]
+        assert len(untyped) == 1
+        assert "=== Test banner ===" in untyped[0].logs
+
+    def test_untyped_block_between_blocks(self):
+        """Text between typed blocks creates an untyped block."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "rigging"}',
+            '[TST] {"type": "block_end", "block": "rigging"}',
+            "Some interstitial text",
+            '[TST] {"type": "block_start", "block": "verdict"}',
+            '[TST] {"type": "block_end", "block": "verdict"}',
+        ]
+        result = parse_test_output(lines)
+        untyped = [b for b in result.run_blocks if b.block == "untyped"]
+        assert len(untyped) == 1
+        assert "Some interstitial text" in untyped[0].logs
+
+    def test_untyped_block_after_verdict(self):
+        """Text after verdict creates an untyped block in run_blocks."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "verdict"}',
+            '[TST] {"type": "block_end", "block": "verdict"}',
+            "Test complete.",
+        ]
+        result = parse_test_output(lines)
+        untyped = [b for b in result.run_blocks if b.block == "untyped"]
+        assert len(untyped) == 1
+        assert "Test complete." in untyped[0].logs
+
+    def test_all_blocks_property(self):
+        """all_blocks returns blocks in order: rigging, run_blocks, verdict."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "rigging"}',
+            '[TST] {"type": "block_end", "block": "rigging"}',
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+            '[TST] {"type": "block_start", "block": "verdict"}',
+            '[TST] {"type": "block_end", "block": "verdict"}',
+        ]
+        result = parse_test_output(lines)
+        block_names = [b.block for b in result.all_blocks]
+        assert block_names == ["rigging", "stimulation", "verdict"]
 
 
 class TestFeatureEvents:
@@ -72,9 +186,9 @@ class TestFeatureEvents:
             '[TST] {"type": "feature", "name": "user_auth"}',
         ]
         result = parse_test_output(lines)
-        assert len(result["features"]) == 1
-        assert result["features"][0]["name"] == "user_auth"
-        assert result["features"][0]["block"] == "rigging"
+        assert len(result.all_features) == 1
+        assert result.all_features[0]["name"] == "user_auth"
+        assert result.all_features[0]["block"] == "rigging"
 
     def test_feature_outside_rigging(self):
         """Feature event outside rigging is still captured with its block."""
@@ -83,15 +197,15 @@ class TestFeatureEvents:
             '[TST] {"type": "feature", "name": "some_feature"}',
         ]
         result = parse_test_output(lines)
-        assert len(result["features"]) == 1
-        assert result["features"][0]["block"] == "stimulation"
+        assert len(result.all_features) == 1
+        assert result.all_features[0]["block"] == "stimulation"
 
     def test_feature_before_any_phase(self):
         """Feature event before any phase has block=None."""
         lines = ['[TST] {"type": "feature", "name": "early_feature"}']
         result = parse_test_output(lines)
-        assert len(result["features"]) == 1
-        assert result["features"][0]["block"] is None
+        assert len(result.all_features) == 1
+        assert result.all_features[0]["block"] is None
 
     def test_feature_without_name(self):
         """Feature event without name defaults to empty string."""
@@ -100,7 +214,7 @@ class TestFeatureEvents:
             '[TST] {"type": "feature"}',
         ]
         result = parse_test_output(lines)
-        assert result["features"][0]["name"] == ""
+        assert result.all_features[0]["name"] == ""
 
     def test_multiple_features(self):
         """Multiple feature events are all captured."""
@@ -111,8 +225,8 @@ class TestFeatureEvents:
             '[TST] {"type": "feature", "name": "notifications"}',
         ]
         result = parse_test_output(lines)
-        assert len(result["features"]) == 3
-        names = [f["name"] for f in result["features"]]
+        assert len(result.all_features) == 3
+        names = [f["name"] for f in result.all_features]
         assert names == ["auth", "billing", "notifications"]
 
 
@@ -125,9 +239,9 @@ class TestMeasurementEvents:
             '[TST] {"type": "measurement", "name": "response_time", "value": 142.0}'
         ]
         result = parse_test_output(lines)
-        assert len(result["measurements"]) == 1
-        assert result["measurements"][0]["name"] == "response_time"
-        assert result["measurements"][0]["value"] == 142.0
+        assert len(result.all_measurements) == 1
+        assert result.all_measurements[0]["name"] == "response_time"
+        assert result.all_measurements[0]["value"] == 142.0
 
     def test_measurement_with_structured_value(self):
         """Parse a measurement with a structured (dict) value."""
@@ -136,7 +250,7 @@ class TestMeasurementEvents:
             '"value": {"value": 142.0, "unit": "ms"}}'
         ]
         result = parse_test_output(lines)
-        assert result["measurements"][0]["value"] == {
+        assert result.all_measurements[0]["value"] == {
             "value": 142.0,
             "unit": "ms",
         }
@@ -145,7 +259,7 @@ class TestMeasurementEvents:
         """Measurement without value field has value=None."""
         lines = ['[TST] {"type": "measurement", "name": "counter"}']
         result = parse_test_output(lines)
-        assert result["measurements"][0]["value"] is None
+        assert result.all_measurements[0]["value"] is None
 
     def test_measurement_tracks_block(self):
         """Measurement records the current block."""
@@ -154,7 +268,7 @@ class TestMeasurementEvents:
             '[TST] {"type": "measurement", "name": "latency", "value": 50}',
         ]
         result = parse_test_output(lines)
-        assert result["measurements"][0]["block"] == "checkpoint"
+        assert result.all_measurements[0]["block"] == "checkpoint"
 
 
 class TestResultEvents:
@@ -167,10 +281,10 @@ class TestResultEvents:
             '[TST] {"type": "result", "status": "pass", "message": "all checks passed"}',
         ]
         result = parse_test_output(lines)
-        assert len(result["results"]) == 1
-        assert result["results"][0]["status"] == "pass"
-        assert result["results"][0]["message"] == "all checks passed"
-        assert result["results"][0]["block"] == "verdict"
+        assert len(result.all_results) == 1
+        assert result.all_results[0]["status"] == "pass"
+        assert result.all_results[0]["message"] == "all checks passed"
+        assert result.all_results[0]["block"] == "verdict"
 
     def test_fail_result(self):
         """Parse a failing result event."""
@@ -178,14 +292,14 @@ class TestResultEvents:
             '[TST] {"type": "result", "status": "fail", "message": "assertion failed"}'
         ]
         result = parse_test_output(lines)
-        assert result["results"][0]["status"] == "fail"
+        assert result.all_results[0]["status"] == "fail"
 
     def test_result_without_fields(self):
         """Result without status/message defaults to empty strings."""
         lines = ['[TST] {"type": "result"}']
         result = parse_test_output(lines)
-        assert result["results"][0]["status"] == ""
-        assert result["results"][0]["message"] == ""
+        assert result.all_results[0]["status"] == ""
+        assert result.all_results[0]["message"] == ""
 
 
 class TestErrorEvents:
@@ -198,21 +312,21 @@ class TestErrorEvents:
             '[TST] {"type": "error", "message": "cannot connect to database"}',
         ]
         result = parse_test_output(lines)
-        assert len(result["errors"]) == 1
-        assert result["errors"][0]["message"] == "cannot connect to database"
-        assert result["errors"][0]["block"] == "rigging"
+        assert len(result.all_errors) == 1
+        assert result.all_errors[0]["message"] == "cannot connect to database"
+        assert result.all_errors[0]["block"] == "rigging"
 
     def test_error_without_message(self):
         """Error without message defaults to empty string."""
         lines = ['[TST] {"type": "error"}']
         result = parse_test_output(lines)
-        assert result["errors"][0]["message"] == ""
+        assert result.all_errors[0]["message"] == ""
 
     def test_error_outside_block(self):
         """Error before any phase has block=None."""
         lines = ['[TST] {"type": "error", "message": "startup failure"}']
         result = parse_test_output(lines)
-        assert result["errors"][0]["block"] is None
+        assert result.all_errors[0]["block"] is None
 
 
 class TestMalformedInput:
@@ -222,23 +336,23 @@ class TestMalformedInput:
         """Malformed JSON after sentinel produces a warning."""
         lines = ["[TST] not json at all"]
         result = parse_test_output(lines)
-        assert len(result["warnings"]) == 1
-        assert "malformed" in result["warnings"][0]
-        assert result["block_sequence"] == []
+        assert len(result.warnings) == 1
+        assert "malformed" in result.warnings[0]
+        assert result.block_sequence == []
 
     def test_non_object_json(self):
         """JSON that is not an object produces a warning."""
         lines = ['[TST] [1, 2, 3]']
         result = parse_test_output(lines)
-        assert len(result["warnings"]) == 1
-        assert "not a JSON object" in result["warnings"][0]
+        assert len(result.warnings) == 1
+        assert "not a JSON object" in result.warnings[0]
 
     def test_missing_type_field(self):
         """JSON object without type field produces a warning."""
         lines = ['[TST] {"name": "something"}']
         result = parse_test_output(lines)
-        assert len(result["warnings"]) == 1
-        assert "missing type" in result["warnings"][0]
+        assert len(result.warnings) == 1
+        assert "missing type" in result.warnings[0]
 
     def test_malformed_does_not_affect_valid_lines(self):
         """Valid lines after malformed lines are still parsed correctly."""
@@ -249,16 +363,16 @@ class TestMalformedInput:
             '[TST] {"type": "result", "status": "pass", "message": "ok"}',
         ]
         result = parse_test_output(lines)
-        assert result["block_sequence"] == ["verdict"]
-        assert len(result["results"]) == 1
-        assert result["results"][0]["status"] == "pass"
-        assert len(result["warnings"]) == 2
+        assert result.block_sequence == ["verdict"]
+        assert len(result.all_results) == 1
+        assert result.all_results[0]["status"] == "pass"
+        assert len(result.warnings) == 2
 
     def test_empty_sentinel_line(self):
         """Sentinel prefix with empty content produces a warning."""
         lines = ["[TST] "]
         result = parse_test_output(lines)
-        assert len(result["warnings"]) == 1
+        assert len(result.warnings) == 1
 
 
 class TestUnknownTypes:
@@ -268,12 +382,12 @@ class TestUnknownTypes:
         """Unknown event type is silently skipped."""
         lines = ['[TST] {"type": "future_event", "data": "something"}']
         result = parse_test_output(lines)
-        assert result["block_sequence"] == []
-        assert result["features"] == []
-        assert result["measurements"] == []
-        assert result["results"] == []
-        assert result["errors"] == []
-        assert result["warnings"] == []
+        assert result.block_sequence == []
+        assert result.all_features == []
+        assert result.all_measurements == []
+        assert result.all_results == []
+        assert result.all_errors == []
+        assert result.warnings == []
 
     def test_unknown_type_does_not_break_state(self):
         """Unknown type does not affect current_block tracking."""
@@ -283,14 +397,29 @@ class TestUnknownTypes:
             '[TST] {"type": "feature", "name": "auth"}',
         ]
         result = parse_test_output(lines)
-        assert result["features"][0]["block"] == "rigging"
+        assert result.all_features[0]["block"] == "rigging"
 
 
 class TestPlainOutput:
     """Tests for non-sentinel line collection."""
 
-    def test_plain_lines_collected(self):
-        """Lines without sentinel are collected as plain output."""
+    def test_plain_lines_in_blocks(self):
+        """Lines without sentinel inside blocks go to block logs."""
+        lines = [
+            '[TST] {"type": "phase", "block": "rigging"}',
+            "Setting up service...",
+            '[TST] {"type": "phase", "block": "stimulation"}',
+            "Running test...",
+        ]
+        result = parse_test_output(lines)
+        assert result.rigging is not None
+        assert "Setting up service..." in result.rigging.logs
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        assert len(stim) == 1
+        assert "Running test..." in stim[0].logs
+
+    def test_plain_lines_before_blocks(self):
+        """Lines without sentinel before any block go to untyped block."""
         lines = [
             "Hello world",
             "Test running...",
@@ -298,30 +427,32 @@ class TestPlainOutput:
             "More output",
         ]
         result = parse_test_output(lines)
-        assert result["plain_output"] == [
-            "Hello world",
-            "Test running...",
-            "More output",
-        ]
+        untyped = [b for b in result.run_blocks if b.block == "untyped"]
+        assert len(untyped) == 1
+        assert "Hello world" in untyped[0].logs
+        assert "Test running..." in untyped[0].logs
 
     def test_no_sentinel_lines(self):
         """All lines without sentinel results in empty parsed events."""
         lines = ["line 1", "line 2"]
         result = parse_test_output(lines)
-        assert result["block_sequence"] == []
-        assert result["features"] == []
-        assert result["plain_output"] == ["line 1", "line 2"]
+        assert result.block_sequence == []
+        assert result.all_features == []
+        # Lines go into an untyped block
+        untyped = [b for b in result.run_blocks if b.block == "untyped"]
+        assert len(untyped) == 1
+        assert "line 1" in untyped[0].logs
 
     def test_empty_input(self):
         """Empty input produces empty result."""
         result = parse_test_output([])
-        assert result["block_sequence"] == []
-        assert result["features"] == []
-        assert result["measurements"] == []
-        assert result["results"] == []
-        assert result["errors"] == []
-        assert result["plain_output"] == []
-        assert result["warnings"] == []
+        assert result.block_sequence == []
+        assert result.all_features == []
+        assert result.all_measurements == []
+        assert result.all_results == []
+        assert result.all_errors == []
+        assert result.run_blocks == []
+        assert result.warnings == []
 
 
 class TestStringInput:
@@ -335,15 +466,15 @@ class TestStringInput:
             '[TST] {"type": "phase", "block": "verdict"}'
         )
         result = parse_test_output(text)
-        assert result["block_sequence"] == ["rigging", "verdict"]
-        assert "some output" in result["plain_output"]
+        assert result.block_sequence == ["rigging", "verdict"]
+        assert result.rigging is not None
+        assert "some output" in result.rigging.logs
 
     def test_empty_string(self):
         """Empty string produces empty result."""
         result = parse_test_output("")
-        assert result["block_sequence"] == []
-        # splitlines on "" gives [] so no plain_output either
-        assert result["plain_output"] == []
+        assert result.block_sequence == []
+        assert result.run_blocks == []
 
 
 class TestFullExampleOutput:
@@ -370,48 +501,56 @@ class TestFullExampleOutput:
         result = parse_test_output(lines)
 
         # Verify block sequence
-        assert result["block_sequence"] == [
+        assert result.block_sequence == [
             "rigging",
             "stimulation",
             "checkpoint",
             "verdict",
         ]
 
-        # Verify features (captured with rigging block)
-        assert len(result["features"]) == 2
-        assert result["features"][0] == {
+        # Verify features (captured in rigging block)
+        assert len(result.all_features) == 2
+        assert result.all_features[0] == {
             "name": "payment_gateway",
             "block": "rigging",
         }
-        assert result["features"][1] == {
+        assert result.all_features[1] == {
             "name": "user_accounts",
             "block": "rigging",
         }
+        # Rigging block directly holds features
+        assert result.rigging is not None
+        assert len(result.rigging.features) == 2
 
         # Verify measurements (in checkpoint block)
-        assert len(result["measurements"]) == 2
-        assert result["measurements"][0]["name"] == "response_time"
-        assert result["measurements"][0]["value"] == {
+        assert len(result.all_measurements) == 2
+        assert result.all_measurements[0]["name"] == "response_time"
+        assert result.all_measurements[0]["value"] == {
             "value": 142.0,
             "unit": "ms",
         }
-        assert result["measurements"][0]["block"] == "checkpoint"
-        assert result["measurements"][1]["name"] == "status_code"
-        assert result["measurements"][1]["value"] == 200
+        assert result.all_measurements[0]["block"] == "checkpoint"
+        assert result.all_measurements[1]["name"] == "status_code"
+        assert result.all_measurements[1]["value"] == 200
 
         # Verify results
-        assert len(result["results"]) == 2
-        assert result["results"][0]["block"] == "checkpoint"
-        assert result["results"][1]["block"] == "verdict"
+        assert len(result.all_results) == 2
+        assert result.all_results[0]["block"] == "checkpoint"
+        assert result.all_results[1]["block"] == "verdict"
 
-        # Verify plain output
-        assert "=== Test: //tests:payment_flow ===" in result["plain_output"]
-        assert "Setting up payment service..." in result["plain_output"]
-        assert "Test complete." in result["plain_output"]
+        # Verify plain output is in block logs
+        assert result.rigging is not None
+        assert "Setting up payment service..." in result.rigging.logs
+
+        # Text before rigging goes to untyped block
+        untyped = [b for b in result.run_blocks if b.block == "untyped"]
+        assert any(
+            "=== Test: //tests:payment_flow ===" in b.logs for b in untyped
+        )
 
         # No errors or warnings
-        assert result["errors"] == []
-        assert result["warnings"] == []
+        assert result.all_errors == []
+        assert result.warnings == []
 
 
 class TestIsRiggingFailure:
@@ -419,36 +558,50 @@ class TestIsRiggingFailure:
 
     def test_rigging_error_is_failure(self):
         """Error during rigging phase is a rigging failure."""
-        parsed = {
-            "errors": [{"message": "db down", "block": "rigging"}],
-        }
+        parsed = ParsedOutput(
+            rigging=BlockSegment(
+                block="rigging",
+                errors=[{"message": "db down", "block": "rigging"}],
+            ),
+        )
         assert is_rigging_failure(parsed) is True
 
     def test_non_rigging_error_not_failure(self):
         """Error during non-rigging phase is not a rigging failure."""
-        parsed = {
-            "errors": [{"message": "assertion failed", "block": "checkpoint"}],
-        }
+        parsed = ParsedOutput(
+            run_blocks=[
+                BlockSegment(
+                    block="checkpoint",
+                    errors=[{"message": "assertion failed", "block": "checkpoint"}],
+                ),
+            ],
+        )
         assert is_rigging_failure(parsed) is False
 
     def test_no_errors_not_failure(self):
         """No errors means not a rigging failure."""
-        parsed = {"errors": []}
+        parsed = ParsedOutput(rigging=BlockSegment(block="rigging"))
         assert is_rigging_failure(parsed) is False
 
-    def test_missing_errors_key(self):
-        """Missing errors key means not a rigging failure."""
-        parsed = {}
+    def test_missing_rigging(self):
+        """Missing rigging block means not a rigging failure."""
+        parsed = ParsedOutput()
         assert is_rigging_failure(parsed) is False
 
     def test_mixed_errors(self):
         """One rigging error among others is still a rigging failure."""
-        parsed = {
-            "errors": [
-                {"message": "test error", "block": "checkpoint"},
-                {"message": "rigging error", "block": "rigging"},
+        parsed = ParsedOutput(
+            rigging=BlockSegment(
+                block="rigging",
+                errors=[{"message": "rigging error", "block": "rigging"}],
+            ),
+            run_blocks=[
+                BlockSegment(
+                    block="checkpoint",
+                    errors=[{"message": "test error", "block": "checkpoint"}],
+                ),
             ],
-        }
+        )
         assert is_rigging_failure(parsed) is True
 
 
@@ -457,32 +610,41 @@ class TestGetRiggingFeatures:
 
     def test_features_in_rigging(self):
         """Extracts feature names from rigging phase."""
-        parsed = {
-            "features": [
-                {"name": "auth", "block": "rigging"},
-                {"name": "billing", "block": "rigging"},
-            ],
-        }
+        parsed = ParsedOutput(
+            rigging=BlockSegment(
+                block="rigging",
+                features=[
+                    {"name": "auth", "block": "rigging"},
+                    {"name": "billing", "block": "rigging"},
+                ],
+            ),
+        )
         assert get_rigging_features(parsed) == ["auth", "billing"]
 
     def test_features_not_in_rigging(self):
         """Features not in rigging are excluded."""
-        parsed = {
-            "features": [
-                {"name": "auth", "block": "rigging"},
-                {"name": "perf", "block": "stimulation"},
+        parsed = ParsedOutput(
+            rigging=BlockSegment(
+                block="rigging",
+                features=[{"name": "auth", "block": "rigging"}],
+            ),
+            run_blocks=[
+                BlockSegment(
+                    block="stimulation",
+                    features=[{"name": "perf", "block": "stimulation"}],
+                ),
             ],
-        }
+        )
         assert get_rigging_features(parsed) == ["auth"]
 
     def test_no_features(self):
         """No features returns empty list."""
-        parsed = {"features": []}
+        parsed = ParsedOutput(rigging=BlockSegment(block="rigging"))
         assert get_rigging_features(parsed) == []
 
-    def test_missing_features_key(self):
-        """Missing features key returns empty list."""
-        parsed = {}
+    def test_missing_rigging(self):
+        """Missing rigging block returns empty list."""
+        parsed = ParsedOutput()
         assert get_rigging_features(parsed) == []
 
 
@@ -496,7 +658,7 @@ class TestHasRiggingFailureFlag:
             '[TST] {"type": "error", "message": "rigging failed"}',
         ]
         result = parse_test_output(lines)
-        assert result["has_rigging_failure"] is True
+        assert result.has_rigging_failure is True
 
     def test_no_error_flag_false(self):
         """No errors means has_rigging_failure=False."""
@@ -505,7 +667,7 @@ class TestHasRiggingFailureFlag:
             '[TST] {"type": "phase", "block": "verdict"}',
         ]
         result = parse_test_output(lines)
-        assert result["has_rigging_failure"] is False
+        assert result.has_rigging_failure is False
 
     def test_non_rigging_error_flag_false(self):
         """Error outside rigging phase has has_rigging_failure=False."""
@@ -514,12 +676,12 @@ class TestHasRiggingFailureFlag:
             '[TST] {"type": "error", "message": "test error"}',
         ]
         result = parse_test_output(lines)
-        assert result["has_rigging_failure"] is False
+        assert result.has_rigging_failure is False
 
     def test_empty_input_flag_false(self):
         """Empty input has has_rigging_failure=False."""
         result = parse_test_output([])
-        assert result["has_rigging_failure"] is False
+        assert result.has_rigging_failure is False
 
 
 class TestParseStdoutSegments:
@@ -639,7 +801,7 @@ class TestParseStdoutSegments:
         assert seg.assertions[0] == {"description": "all good", "status": "pass"}
 
     def test_block_error(self):
-        """Error event sets BlockSegment.error."""
+        """Error event populates BlockSegment.errors list."""
         stdout = (
             '[TST] {"type": "block_start", "block": "rigging"}\n'
             '[TST] {"type": "error", "message": "connection refused"}\n'
@@ -648,7 +810,8 @@ class TestParseStdoutSegments:
         segments = parse_stdout_segments(stdout)
         seg = segments[0]
         assert isinstance(seg, BlockSegment)
-        assert seg.error == "connection refused"
+        assert len(seg.errors) == 1
+        assert seg.errors[0]["message"] == "connection refused"
 
     def test_description_on_block_start(self):
         """block_start with description field populates BlockSegment.description."""
