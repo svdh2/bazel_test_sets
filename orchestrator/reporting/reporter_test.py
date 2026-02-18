@@ -459,6 +459,31 @@ class TestHierarchicalReport:
         report = reporter.generate_report()
         assert report["report"]["test_set"]["status"] == "failed"
 
+    def test_depends_on_included_in_test_entry(self):
+        """depends_on is included in hierarchical test entries."""
+        reporter = Reporter()
+        reporter.set_manifest(SAMPLE_MANIFEST)
+        reporter.add_results([
+            TestResult(name="auth_test", assertion="Auth works", status="passed", duration=1.0),
+            TestResult(name="billing_test", assertion="Billing works", status="passed", duration=2.0),
+        ])
+
+        report = reporter.generate_report()
+        billing_entry = report["report"]["test_set"]["tests"]["billing_test"]
+        assert billing_entry["depends_on"] == ["auth_test"]
+
+    def test_depends_on_empty_list_included(self):
+        """depends_on is included even when empty."""
+        reporter = Reporter()
+        reporter.set_manifest(SAMPLE_MANIFEST)
+        reporter.add_results([
+            TestResult(name="auth_test", assertion="Auth works", status="passed", duration=1.0),
+        ])
+
+        report = reporter.generate_report()
+        auth_entry = report["report"]["test_set"]["tests"]["auth_test"]
+        assert auth_entry["depends_on"] == []
+
     def test_flat_report_without_manifest(self):
         """Without manifest, report uses flat tests list."""
         reporter = Reporter()

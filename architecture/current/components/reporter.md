@@ -62,6 +62,7 @@ class Reporter:
       "tests": {
         "//test:a": {
           "assertion": "...",
+          "depends_on": ["//test:b"],
           "status": "passed",
           "duration_seconds": 1.234,
           "burn_in": {},

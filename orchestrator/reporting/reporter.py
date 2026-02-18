@@ -533,6 +533,7 @@ class Reporter:
         entry: dict[str, Any] = {
             "assertion": data.get("assertion", ""),
             "requirement_id": data.get("requirement_id", ""),
+            "depends_on": list(data.get("depends_on", [])),
         }
 
         if name in results_by_name:

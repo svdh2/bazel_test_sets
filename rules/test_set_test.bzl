@@ -44,8 +44,8 @@ def _test_set_test_impl(ctx):
     # Add the wrapped executable and runner to runfiles
     runfiles = runfiles.merge(ctx.runfiles(files = [wrapped_executable, runner]))
 
-    # Collect depends_on labels
-    depends_on_labels = [dep.label for dep in ctx.attr.depends_on]
+    # Collect depends_on labels (use test_label so they match test_set_tests keys)
+    depends_on_labels = [dep[TestSetTestInfo].test_label for dep in ctx.attr.depends_on]
 
     # Collect judgement label if provided
     judgement_label = None
