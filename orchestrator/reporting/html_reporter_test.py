@@ -1010,24 +1010,33 @@ class TestDagVisualization:
         assert '"child_set"' in result
 
     def test_edges_reflect_depends_on(self):
-        """Graph data contains edges for depends_on relationships."""
+        """Graph data contains dependency edges for depends_on relationships."""
         report = _make_dag_report()
         result = generate_html_report(report)
-        # test_b depends on test_a
-        assert '"source":"test_b"' in result
-        assert '"target":"test_a"' in result
+        # test_b depends on test_a (dependency edge)
+        assert '"source":"test_b","target":"test_a","type":"dependency"' in result
         # test_c also depends on test_a
-        assert '"source":"test_c"' in result
+        assert '"source":"test_c","target":"test_a","type":"dependency"' in result
+
+    def test_edges_reflect_membership(self):
+        """Graph data contains membership edges from sets to their members."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        # root_set contains test_a and test_b
+        assert '"source":"root_set","target":"test_a","type":"member"' in result
+        assert '"source":"root_set","target":"test_b","type":"member"' in result
+        # root_set contains child_set
+        assert '"source":"root_set","target":"child_set","type":"member"' in result
+        # child_set contains test_c
+        assert '"source":"child_set","target":"test_c","type":"member"' in result
 
     def test_toolbar_buttons_present(self):
-        """Toolbar with zoom, fit, expand, collapse buttons is present."""
+        """Toolbar with zoom and fit buttons is present."""
         report = _make_dag_report()
         result = generate_html_report(report)
         assert 'id="dag-zoom-in"' in result
         assert 'id="dag-zoom-out"' in result
         assert 'id="dag-fit"' in result
-        assert 'id="dag-expand-all"' in result
-        assert 'id="dag-collapse-all"' in result
 
     def test_detail_pane_present(self):
         """Detail pane with content div is present."""
@@ -1037,12 +1046,13 @@ class TestDagVisualization:
         assert 'id="dag-detail-content"' in result
 
     def test_handles_empty_depends_on(self):
-        """DAG section renders correctly when no test has dependencies."""
+        """DAG section renders correctly when no test has dependency edges."""
         report = _make_hierarchical_report()
         result = generate_html_report(report)
         assert 'class="dag-section"' in result
-        # No edges should be in graph data
-        assert '"edges":[]' in result
+        # Only membership edges, no dependency edges
+        assert '"type":"dependency"' not in result
+        assert '"type":"member"' in result
 
     def test_detail_pane_clones_rendered_test_entry(self):
         """DAG detail JS finds test entries by data-test-name attribute."""
@@ -1083,3 +1093,150 @@ class TestDagVisualization:
         result = generate_html_report(report)
         # The short label "my_test" should appear in the graph data
         assert '"label":"my_test"' in result
+
+    def test_lifecycle_state_in_graph_data(self):
+        """Graph data includes lifecycle state for test nodes."""
+        report = {
+            "report": {
+                "generated_at": "2026-01-01T00:00:00+00:00",
+                "summary": {"total": 1, "passed": 1, "failed": 0,
+                             "dependencies_failed": 0,
+                             "total_duration_seconds": 1.0},
+                "test_set": {
+                    "name": "suite",
+                    "assertion": "Suite",
+                    "status": "passed",
+                    "tests": {
+                        "test_a": {
+                            "assertion": "Works",
+                            "status": "passed",
+                            "duration_seconds": 1.0,
+                            "depends_on": [],
+                            "lifecycle": {
+                                "state": "flaky", "runs": 10,
+                                "passes": 7, "reliability": 0.7,
+                            },
+                        },
+                    },
+                    "subsets": [],
+                },
+            },
+        }
+        result = generate_html_report(report)
+        assert '"lifecycle":"flaky"' in result
+
+    def test_lifecycle_state_empty_when_absent(self):
+        """Graph data has empty lifecycle when test has no lifecycle."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        assert '"lifecycle":""' in result
+
+    def test_group_node_double_border_style(self):
+        """Group nodes use double border style with black color."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        assert "'border-style': 'double'" in result
+        assert "'border-color': '#333'" in result
+
+    def test_lifecycle_icons_in_js(self):
+        """Lifecycle icon mapping is present in the JS."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        assert "LIFECYCLE_ICONS" in result
+
+    def test_dag_color_all_passed(self):
+        """Set node is green when all children passed."""
+        report = _make_hierarchical_report(status="passed")
+        result = generate_html_report(report)
+        # The single test is passed → green; the set aggregates → green
+        assert '"dag_color":"green"' in result
+
+    def test_dag_color_any_failed_propagates_red(self):
+        """Set node is red when any child is red."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        # test_c failed → child_set red → root_set red
+        # Check that root_set and child_set both get red
+        import json as _json
+        graph_json = result.split("var GRAPH_DATA=")[1].split(";</script>")[0]
+        graph = _json.loads(graph_json)
+        colors = {n["data"]["id"]: n["data"]["dag_color"]
+                  for n in graph["nodes"]}
+        assert colors["test_a"] == "green"
+        assert colors["test_b"] == "green"
+        assert colors["test_c"] == "red"
+        assert colors["child_set"] == "red"
+        assert colors["root_set"] == "red"
+
+    def test_dag_color_all_grey(self):
+        """Set node is grey when all children are grey."""
+        report = {
+            "report": {
+                "generated_at": "2026-01-01T00:00:00+00:00",
+                "summary": {"total": 1, "passed": 0, "failed": 0,
+                             "dependencies_failed": 1,
+                             "total_duration_seconds": 0},
+                "test_set": {
+                    "name": "suite",
+                    "assertion": "Suite",
+                    "status": "dependencies_failed",
+                    "tests": {
+                        "test_x": {
+                            "assertion": "X",
+                            "status": "dependencies_failed",
+                            "duration_seconds": 0,
+                            "depends_on": [],
+                        },
+                    },
+                    "subsets": [],
+                },
+            },
+        }
+        result = generate_html_report(report)
+        import json as _json
+        graph_json = result.split("var GRAPH_DATA=")[1].split(";</script>")[0]
+        graph = _json.loads(graph_json)
+        colors = {n["data"]["id"]: n["data"]["dag_color"]
+                  for n in graph["nodes"]}
+        assert colors["test_x"] == "grey"
+        assert colors["suite"] == "grey"
+
+    def test_dag_color_mixed_green_grey_is_green(self):
+        """Set node is green when children are a mix of green and grey."""
+        report = {
+            "report": {
+                "generated_at": "2026-01-01T00:00:00+00:00",
+                "summary": {"total": 2, "passed": 1, "failed": 0,
+                             "dependencies_failed": 1,
+                             "total_duration_seconds": 1.0},
+                "test_set": {
+                    "name": "suite",
+                    "assertion": "Suite",
+                    "status": "passed+dependencies_failed",
+                    "tests": {
+                        "test_ok": {
+                            "assertion": "OK",
+                            "status": "passed",
+                            "duration_seconds": 1.0,
+                            "depends_on": [],
+                        },
+                        "test_skip": {
+                            "assertion": "Skip",
+                            "status": "dependencies_failed",
+                            "duration_seconds": 0,
+                            "depends_on": [],
+                        },
+                    },
+                    "subsets": [],
+                },
+            },
+        }
+        result = generate_html_report(report)
+        import json as _json
+        graph_json = result.split("var GRAPH_DATA=")[1].split(";</script>")[0]
+        graph = _json.loads(graph_json)
+        colors = {n["data"]["id"]: n["data"]["dag_color"]
+                  for n in graph["nodes"]}
+        assert colors["test_ok"] == "green"
+        assert colors["test_skip"] == "grey"
+        assert colors["suite"] == "green"
