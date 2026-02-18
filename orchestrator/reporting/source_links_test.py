@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 import subprocess
 
 from orchestrator.reporting.source_links import (
+    _cwd_repo_prefix,
     _is_commit_on_remote,
     _parse_github_remote,
     build_source_link,
@@ -105,9 +106,27 @@ class TestResolveSourceLinkBase:
         ), patch(
             "orchestrator.reporting.source_links._is_commit_on_remote",
             return_value=True,
+        ), patch(
+            "orchestrator.reporting.source_links._cwd_repo_prefix",
+            return_value="",
         ):
             result = resolve_source_link_base("abc123")
             assert result == "https://github.com/owner/repo/blob/abc123"
+
+    def test_includes_workspace_prefix(self):
+        """Base URL includes workspace-to-repo-root prefix when present."""
+        with patch(
+            "orchestrator.reporting.source_links._parse_github_remote",
+            return_value="https://github.com/owner/repo",
+        ), patch(
+            "orchestrator.reporting.source_links._is_commit_on_remote",
+            return_value=True,
+        ), patch(
+            "orchestrator.reporting.source_links._cwd_repo_prefix",
+            return_value="examples",
+        ):
+            result = resolve_source_link_base("abc123")
+            assert result == "https://github.com/owner/repo/blob/abc123/examples"
 
     def test_non_github_remote_returns_none(self):
         """Non-GitHub remote returns None."""
@@ -127,6 +146,51 @@ class TestResolveSourceLinkBase:
             return_value=False,
         ):
             assert resolve_source_link_base("abc123") is None
+
+
+class TestCwdRepoPrefix:
+    """Tests for _cwd_repo_prefix."""
+
+    def test_no_env_var_returns_empty(self):
+        """Returns empty when BUILD_WORKSPACE_DIRECTORY is not set."""
+        with patch.dict("os.environ", {}, clear=True):
+            assert _cwd_repo_prefix() == ""
+
+    def test_subdirectory_returns_prefix(self):
+        """Returns relative path when workspace is a subdirectory of repo."""
+        result = MagicMock(returncode=0, stdout="/home/user/repo\n")
+        with patch.dict(
+            "os.environ",
+            {"BUILD_WORKSPACE_DIRECTORY": "/home/user/repo/examples"},
+        ), patch("subprocess.run", return_value=result):
+            assert _cwd_repo_prefix() == "examples"
+
+    def test_repo_root_returns_empty(self):
+        """Returns empty when workspace is the repo root."""
+        result = MagicMock(returncode=0, stdout="/home/user/repo\n")
+        with patch.dict(
+            "os.environ",
+            {"BUILD_WORKSPACE_DIRECTORY": "/home/user/repo"},
+        ), patch("subprocess.run", return_value=result):
+            assert _cwd_repo_prefix() == ""
+
+    def test_git_failure_returns_empty(self):
+        """Returns empty when git command fails."""
+        result = MagicMock(returncode=128, stdout="", stderr="error")
+        with patch.dict(
+            "os.environ",
+            {"BUILD_WORKSPACE_DIRECTORY": "/home/user/repo/examples"},
+        ), patch("subprocess.run", return_value=result):
+            assert _cwd_repo_prefix() == ""
+
+    def test_nested_subdirectory(self):
+        """Returns nested relative path."""
+        result = MagicMock(returncode=0, stdout="/home/user/repo\n")
+        with patch.dict(
+            "os.environ",
+            {"BUILD_WORKSPACE_DIRECTORY": "/home/user/repo/a/b"},
+        ), patch("subprocess.run", return_value=result):
+            assert _cwd_repo_prefix() == "a/b"
 
 
 class TestBuildSourceLink:
