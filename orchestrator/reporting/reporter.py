@@ -53,6 +53,7 @@ class Reporter:
         self.lifecycle_data: dict[str, dict[str, Any]] = {}
         self.lifecycle_config: dict[str, Any] | None = None
         self.reliability_demoted_tests: list[str] = []
+        self.source_link_base: str | None = None
 
     def set_manifest(self, manifest: dict[str, Any]) -> None:
         """Set the manifest for hierarchical report generation.
@@ -143,6 +144,16 @@ class Reporter:
         """
         self.lifecycle_config = config
 
+    def set_source_link_base(self, base: str | None) -> None:
+        """Set the source link base URL for source code links in the report.
+
+        Args:
+            base: GitHub blob URL prefix (e.g.
+                ``https://github.com/owner/repo/blob/<sha>``) or
+                ``None`` for local file path display.
+        """
+        self.source_link_base = base
+
     def add_result(self, result: TestResult) -> None:
         """Add a test result to the report.
 
@@ -179,6 +190,9 @@ class Reporter:
 
         if self.commit_hash:
             report["commit"] = self.commit_hash
+
+        if self.source_link_base is not None:
+            report["source_link_base"] = self.source_link_base
 
         if self.manifest:
             report["test_set"] = self._build_hierarchical_report()

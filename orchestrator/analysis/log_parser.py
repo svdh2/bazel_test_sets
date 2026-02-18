@@ -112,6 +112,14 @@ def _finalize_block(seg: BlockSegment) -> BlockSegment:
     return seg
 
 
+def _copy_source(dst: dict[str, Any], src: dict[str, Any]) -> None:
+    """Copy ``_file`` and ``_line`` source metadata if present."""
+    if "_file" in src:
+        dst["_file"] = src["_file"]
+    if "_line" in src:
+        dst["_line"] = src["_line"]
+
+
 def parse_test_output(
     lines: list[str] | str,
 ) -> ParsedOutput:
@@ -204,7 +212,8 @@ def parse_test_output(
             if event_type == "feature":
                 name = entry.get("name", "")
                 block_tag = current_block.block if current_block else None
-                feat = {"name": name, "block": block_tag}
+                feat: dict[str, Any] = {"name": name, "block": block_tag}
+                _copy_source(feat, entry)
                 if current_block is not None:
                     current_block.features.append(feat)
                 else:
@@ -218,7 +227,8 @@ def parse_test_output(
                 name = entry.get("name", "")
                 value = entry.get("value")
                 block_tag = current_block.block if current_block else None
-                m = {"name": name, "value": value, "block": block_tag}
+                m: dict[str, Any] = {"name": name, "value": value, "block": block_tag}
+                _copy_source(m, entry)
                 if current_block is not None:
                     current_block.measurements.append(m)
                 else:
@@ -231,7 +241,8 @@ def parse_test_output(
                 status = entry.get("status", "")
                 message = entry.get("message", "")
                 block_tag = current_block.block if current_block else None
-                r = {"status": status, "message": message, "block": block_tag}
+                r: dict[str, Any] = {"status": status, "message": message, "block": block_tag}
+                _copy_source(r, entry)
                 if current_block is not None:
                     current_block.results.append(r)
                 else:
@@ -243,7 +254,8 @@ def parse_test_output(
             elif event_type == "error":
                 message = entry.get("message", "")
                 block_tag = current_block.block if current_block else None
-                e = {"message": message, "block": block_tag}
+                e: dict[str, Any] = {"message": message, "block": block_tag}
+                _copy_source(e, entry)
                 if current_block is not None:
                     current_block.errors.append(e)
                 else:
@@ -329,6 +341,7 @@ def _normalize_assertion(entry: dict[str, Any]) -> dict[str, Any]:
     """Normalize a result event into an assertion dict.
 
     Handles both ``name``/``passed`` and ``status``/``message`` formats.
+    Preserves ``_file`` and ``_line`` source metadata if present.
     """
     if "name" in entry:
         passed = entry.get("passed")
@@ -336,11 +349,15 @@ def _normalize_assertion(entry: dict[str, Any]) -> dict[str, Any]:
             status = "passed" if passed else "failed"
         else:
             status = str(passed) if passed is not None else "unknown"
-        return {"description": entry["name"], "status": status}
+        result: dict[str, Any] = {"description": entry["name"], "status": status}
+        _copy_source(result, entry)
+        return result
 
     status = entry.get("status", "unknown")
     message = entry.get("message", "")
-    return {"description": message, "status": status}
+    result = {"description": message, "status": status}
+    _copy_source(result, entry)
+    return result
 
 
 def parse_stdout_segments(stdout: str) -> list[Segment]:
@@ -437,6 +454,7 @@ def parse_stdout_segments(stdout: str) -> list[Segment]:
                 action = entry.get("action")
                 if action is not None:
                     feat["action"] = action
+                _copy_source(feat, entry)
                 current_block.features.append(feat)
 
             elif event_type == "measurement":
@@ -447,15 +465,16 @@ def parse_stdout_segments(stdout: str) -> list[Segment]:
                 unit = entry.get("unit")
                 if unit is not None:
                     m["unit"] = unit
+                _copy_source(m, entry)
                 current_block.measurements.append(m)
 
             elif event_type == "result":
                 current_block.assertions.append(_normalize_assertion(entry))
 
             elif event_type == "error":
-                current_block.errors.append(
-                    {"message": entry.get("message", "")}
-                )
+                err: dict[str, Any] = {"message": entry.get("message", "")}
+                _copy_source(err, entry)
+                current_block.errors.append(err)
 
             # Unknown event types: already in logs, skip silently
 

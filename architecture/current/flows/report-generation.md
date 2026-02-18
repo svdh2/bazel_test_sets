@@ -25,7 +25,18 @@ reporter.add_results(results)
 
 **Components**: Orchestrator Main, Reporter
 
-### 2. JSON Report Generation
+### 2. Source Link Resolution
+
+```python
+from orchestrator.reporting.source_links import resolve_source_link_base
+reporter.set_source_link_base(resolve_source_link_base(commit_sha))
+```
+
+After git context (commit hash) is established, `resolve_source_link_base()` from `source_links.py` determines whether source links should point to GitHub or use local file paths. It returns a GitHub blob URL prefix when the commit is clean, the `origin` remote points to GitHub, and the commit exists on a remote branch; otherwise returns `None`. The result is stored in the report JSON via `set_source_link_base()` for the HTML reporter to use when rendering structured log events.
+
+**Components**: Source Links, Reporter
+
+### 3. JSON Report Generation
 
 ```python
 reporter.write_report(args.output)
@@ -40,7 +51,7 @@ The Reporter:
 
 **Components**: Reporter
 
-### 3. HTML Report Generation
+### 4. HTML Report Generation
 
 ```python
 report_data = reporter.generate_report()
@@ -64,6 +75,15 @@ list[TestResult]
 Reporter.add_results()
     |
     v
+resolve_source_link_base(commit_sha)
+    |
+    +---> GitHub blob URL (clean commit on remote)
+    |     or None (dirty / local / non-GitHub)
+    |
+    v
+Reporter.set_source_link_base()
+    |
+    v
 Reporter.generate_report()
     |
     +---> _compute_summary()
@@ -78,7 +98,7 @@ Reporter.generate_report()
     |     {test_set: {name, assertion, status, tests: {...}}}
     |
     v
-report_data = {"report": {...}}
+report_data = {"report": {..., "source_link_base": ...}}
     |
     +---> json.dump() -> my_tests.json
     |

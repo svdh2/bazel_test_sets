@@ -30,6 +30,7 @@ class Reporter:
     def set_e_value_verdict(self, verdict_data)
     def set_lifecycle_data(self, data: dict)
     def set_lifecycle_config(self, config: dict)
+    def set_source_link_base(self, base: str | None)
 
     # Report generation
     def generate_report(self) -> dict
@@ -87,6 +88,7 @@ class Reporter:
       "min_reliability": 0.99,
       "statistical_significance": 0.95
     },
+    "source_link_base": "https://github.com/owner/repo/blob/<sha>",  // When git remote is GitHub and commit is clean
     "regression_selection": {},  // When --regression flag was used
     "e_value_verdict": {              // When --verdict flag was used
       "verdict": "GREEN",            // GREEN, RED, or UNDECIDED
@@ -135,7 +137,7 @@ class Reporter:
 
 3. **Five-status model**: The reporter supports all five statuses including the combined race-condition statuses (`passed+dependencies_failed`, `failed+dependencies_failed`), ensuring no information is lost during reporting.
 
-4. **Optional enrichment**: Burn-in progress, inferred dependencies, regression selection, E-value verdict data, and lifecycle state are all optional additions. The reporter works with just TestResult objects for simple use cases. Structured log data in stdout is parsed at HTML render time by the log parser's `parse_stdout_segments()` function, not stored as a separate report field.
+4. **Optional enrichment**: Burn-in progress, inferred dependencies, regression selection, E-value verdict data, lifecycle state, and source link base are all optional additions. The reporter works with just TestResult objects for simple use cases. Structured log data in stdout is parsed at HTML render time by the log parser's `parse_stdout_segments()` function, not stored as a separate report field.
 
 5. **Lifecycle aggregation**: When `set_lifecycle_data()` is called, each test set node includes a `lifecycle_summary` with state counts and aggregate reliability computed bottom-up through the tree. The `lifecycle_config` thresholds are included at the report top level so readers understand what "stable" and "flaky" mean quantitatively.
 

@@ -53,6 +53,8 @@ Builds `BlockSegment` objects as it encounters `block_start`/`block_end` events.
 | `result` | `name`/`passed` or `status`/`message` | Records a test result within a block |
 | `error` | `message` | Records an error within a block |
 
+All event types also support optional `_file` and `_line` metadata fields indicating the source location that emitted the event. These are preserved through parsing into the structured dicts (features, measurements, results, errors) via the `_copy_source()` helper.
+
 ### Helper Functions
 
 ```python

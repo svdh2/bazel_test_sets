@@ -58,6 +58,32 @@ class TestReporterBasics:
         assert len(report["report"]["tests"]) == 2
 
 
+class TestSourceLinkBase:
+    """Tests for source link base in reports."""
+
+    def test_source_link_base_in_report(self):
+        """source_link_base appears in generated report when set."""
+        reporter = Reporter()
+        reporter.set_source_link_base("https://github.com/owner/repo/blob/abc123")
+        report = reporter.generate_report()
+        assert report["report"]["source_link_base"] == (
+            "https://github.com/owner/repo/blob/abc123"
+        )
+
+    def test_source_link_base_absent_when_none(self):
+        """source_link_base is omitted from report when None."""
+        reporter = Reporter()
+        reporter.set_source_link_base(None)
+        report = reporter.generate_report()
+        assert "source_link_base" not in report["report"]
+
+    def test_source_link_base_absent_by_default(self):
+        """source_link_base is omitted from report by default."""
+        reporter = Reporter()
+        report = reporter.generate_report()
+        assert "source_link_base" not in report["report"]
+
+
 class TestAllFiveStatuses:
     """Tests for the five-status model."""
 

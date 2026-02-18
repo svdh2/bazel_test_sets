@@ -16,6 +16,7 @@ from orchestrator.analysis.log_parser import (
     TextSegment,
     parse_stdout_segments,
 )
+from orchestrator.reporting.source_links import render_source_link
 
 
 # Status color mapping
@@ -405,6 +406,17 @@ pre {
     font-weight: 600;
     margin: 4px 0;
 }
+.source-link {
+    font-size: 11px;
+    color: #888;
+    text-decoration: none;
+    margin-left: 8px;
+    font-family: monospace;
+}
+a.source-link:hover {
+    color: #0d6efd;
+    text-decoration: underline;
+}
 """
 
 
@@ -419,6 +431,7 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
         Complete HTML string.
     """
     report = report_data.get("report", {})
+    source_link_base = report.get("source_link_base")
     parts: list[str] = []
 
     parts.append("<!DOCTYPE html>")
@@ -442,9 +455,13 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
         parts.append(_render_test_set(
             report["test_set"], history,
             lifecycle_config=lifecycle_config,
+            source_link_base=source_link_base,
         ))
     elif "tests" in report:
-        parts.append(_render_flat_tests(report["tests"], history))
+        parts.append(_render_flat_tests(
+            report["tests"], history,
+            source_link_base=source_link_base,
+        ))
 
     # E-value verdict section
     if "e_value_verdict" in report:
@@ -568,6 +585,7 @@ def _render_test_set(
     history: dict[str, list[dict[str, Any]]],
     is_root: bool = True,
     lifecycle_config: dict[str, Any] | None = None,
+    source_link_base: str | None = None,
 ) -> str:
     """Render a test set section, recursing into subsets.
 
@@ -624,7 +642,10 @@ def _render_test_set(
         parts.append('<div class="test-list">')
         for test_name, test_data in tests.items():
             parts.append(
-                _render_test_entry(test_name, test_data, history.get(test_name, []))
+                _render_test_entry(
+                    test_name, test_data, history.get(test_name, []),
+                    source_link_base=source_link_base,
+                )
             )
         parts.append("</div>")
 
@@ -633,6 +654,7 @@ def _render_test_set(
         parts.append(_render_test_set(
             subset, history, is_root=False,
             lifecycle_config=lifecycle_config,
+            source_link_base=source_link_base,
         ))
 
     # Close wrappers
@@ -648,6 +670,7 @@ def _render_test_set(
 def _render_test_entry(
     name: str, data: dict[str, Any],
     history_entries: list[dict[str, Any]] | None = None,
+    source_link_base: str | None = None,
 ) -> str:
     """Render a single test entry with expandable details."""
     parts: list[str] = []
@@ -694,7 +717,9 @@ def _render_test_entry(
             segments = parse_stdout_segments(stdout)
             has_blocks = any(isinstance(s, BlockSegment) for s in segments)
             if has_blocks:
-                parts.append(_render_stdout_segments(segments))
+                parts.append(_render_stdout_segments(
+                    segments, source_link_base=source_link_base,
+                ))
             else:
                 parts.append(f"<pre>{html.escape(stdout)}</pre>")
         if stderr:
@@ -716,7 +741,10 @@ def _render_test_entry(
     return "\n".join(parts)
 
 
-def _render_stdout_segments(segments: list[TextSegment | BlockSegment]) -> str:
+def _render_stdout_segments(
+    segments: list[TextSegment | BlockSegment],
+    source_link_base: str | None = None,
+) -> str:
     """Render parsed stdout segments as unified HTML."""
     parts: list[str] = []
     for seg in segments:
@@ -725,11 +753,16 @@ def _render_stdout_segments(segments: list[TextSegment | BlockSegment]) -> str:
             if text:
                 parts.append(f"<pre>{html.escape(text)}</pre>")
         elif isinstance(seg, BlockSegment):
-            parts.append(_render_block_segment(seg))
+            parts.append(_render_block_segment(
+                seg, source_link_base=source_link_base,
+            ))
     return "\n".join(parts)
 
 
-def _render_block_segment(block: BlockSegment) -> str:
+def _render_block_segment(
+    block: BlockSegment,
+    source_link_base: str | None = None,
+) -> str:
     """Render a single structured block as an HTML card."""
     btype = block.block
     parts: list[str] = []
@@ -750,21 +783,29 @@ def _render_block_segment(block: BlockSegment) -> str:
 
     # Features
     if block.features:
-        feat_strs = [html.escape(f.get("name", "")) for f in block.features]
+        feat_parts: list[str] = []
+        for f in block.features:
+            name_html = html.escape(f.get("name", ""))
+            link = render_source_link(f, source_link_base)
+            feat_parts.append(f"{name_html}{link}")
         parts.append(
-            f'<div class="block-features">Features: {", ".join(feat_strs)}</div>'
+            f'<div class="block-features">Features: {", ".join(feat_parts)}</div>'
         )
 
     # Measurements table
     if block.measurements:
         parts.append('<table class="measurements-table">')
-        parts.append("<tr><th>Name</th><th>Value</th><th>Unit</th></tr>")
+        parts.append(
+            "<tr><th>Name</th><th>Value</th><th>Unit</th><th>Source</th></tr>"
+        )
         for m in block.measurements:
             mname = html.escape(str(m.get("name", "")))
             mval = html.escape(str(m.get("value", "")))
             munit = html.escape(str(m.get("unit", "")))
+            mlink = render_source_link(m, source_link_base)
             parts.append(
-                f"<tr><td>{mname}</td><td>{mval}</td><td>{munit}</td></tr>"
+                f"<tr><td>{mname}</td><td>{mval}</td>"
+                f"<td>{munit}</td><td>{mlink}</td></tr>"
             )
         parts.append("</table>")
 
@@ -775,7 +816,8 @@ def _render_block_segment(block: BlockSegment) -> str:
             desc = html.escape(str(a.get("description", "")))
             status = a.get("status", "unknown")
             css_class = "assertion-pass" if status == "passed" else "assertion-fail"
-            parts.append(f'<li class="{css_class}">{desc}</li>')
+            link = render_source_link(a, source_link_base)
+            parts.append(f'<li class="{css_class}">{desc}{link}</li>')
         parts.append("</ul>")
 
     # Block logs (raw timeline — collapsed by default)
@@ -789,8 +831,9 @@ def _render_block_segment(block: BlockSegment) -> str:
     for err in block.errors:
         msg = err.get("message", "") if isinstance(err, dict) else str(err)
         if msg:
+            link = render_source_link(err, source_link_base) if isinstance(err, dict) else ""
             parts.append(
-                f'<div class="block-error">Error: {html.escape(msg)}</div>'
+                f'<div class="block-error">Error: {html.escape(msg)}{link}</div>'
             )
 
     parts.append("</div>")
@@ -926,7 +969,9 @@ def _render_lifecycle_summary(
 
 
 def _render_flat_tests(
-    tests: list[dict[str, Any]], history: dict[str, list[dict[str, Any]]]
+    tests: list[dict[str, Any]],
+    history: dict[str, list[dict[str, Any]]],
+    source_link_base: str | None = None,
 ) -> str:
     """Render a flat (non-hierarchical) test list."""
     parts: list[str] = []
@@ -934,7 +979,10 @@ def _render_flat_tests(
     parts.append("<h2>Test Results</h2>")
     for test in tests:
         name = test.get("name", "unknown")
-        parts.append(_render_test_entry(name, test, history.get(name, [])))
+        parts.append(_render_test_entry(
+            name, test, history.get(name, []),
+            source_link_base=source_link_base,
+        ))
     parts.append("</div>")
     return "\n".join(parts)
 

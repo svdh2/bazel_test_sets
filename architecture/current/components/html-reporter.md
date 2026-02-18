@@ -31,6 +31,7 @@ def write_html_report(report_data: dict, output_path: Path)
 | **Lifecycle badge** | Per-test badge showing lifecycle state (stable/burning_in/flaky/new/disabled) with reliability rate |
 | **Lifecycle summary** | Per-test-set summary showing state counts and aggregate reliability with config thresholds |
 | **Regression section** | Changed files list, test scores table |
+| **Source links** | Structured log events with `_file`/`_line` metadata render clickable source links. When `source_link_base` is present in the report JSON, links point to GitHub (`<a>` tags); otherwise display local `path:line` format (`<span>` tags). Uses `render_source_link()` from `source_links.py` |
 
 ### Status Colors
 
@@ -55,6 +56,7 @@ def write_html_report(report_data: dict, output_path: Path)
 ## Dependencies
 
 - Standard library: `json` (loading reports), `html` (escaping)
+- **Source Links** (`orchestrator.reporting.source_links`): `render_source_link()` for building HTML source code links
 
 ## Dependents
 
