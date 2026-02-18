@@ -44,7 +44,48 @@ def resolve_source_link_base(
     if not _is_commit_on_remote(commit_sha):
         return None
 
-    return f"{github_url}/blob/{commit_sha}"
+    prefix = _cwd_repo_prefix()
+    base = f"{github_url}/blob/{commit_sha}"
+    if prefix:
+        base = f"{base}/{prefix}"
+    return base
+
+
+def _cwd_repo_prefix() -> str:
+    """Return the Bazel workspace path relative to the git repo root.
+
+    Compares ``BUILD_WORKSPACE_DIRECTORY`` (set by ``bazel run``) against
+    ``git rev-parse --show-toplevel`` to compute the prefix.  For example,
+    when the Bazel workspace lives in ``<repo>/examples/``, returns
+    ``examples``.
+
+    Returns an empty string when already at the repo root, outside Bazel,
+    or if git is unavailable.
+    """
+    import os
+
+    workspace_dir = os.environ.get("BUILD_WORKSPACE_DIRECTORY")
+    if not workspace_dir:
+        return ""
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=workspace_dir,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode != 0:
+        return ""
+
+    repo_root = result.stdout.strip()
+    prefix = os.path.relpath(workspace_dir, repo_root)
+    if prefix == ".":
+        return ""
+    return prefix
 
 
 def _parse_github_remote() -> str | None:
