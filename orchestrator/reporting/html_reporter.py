@@ -133,6 +133,18 @@ body {
     color: #666;
     margin-top: 4px;
 }
+details.log-details {
+    margin-top: 8px;
+}
+details.log-details > summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: #555;
+    font-weight: 500;
+}
+details.log-details > summary:hover {
+    color: #000;
+}
 .log-section {
     margin-top: 8px;
 }
@@ -677,9 +689,12 @@ def _render_block_segment(
             parts.append(f'<li class="{css_class}">{desc}{link}</li>')
         parts.append("</ul>")
 
-    # Block logs (raw timeline)
+    # Block logs (raw timeline — collapsed by default)
     if block.logs:
+        parts.append('<details class="log-details">')
+        parts.append("<summary>Raw logs</summary>")
         parts.append(f"<pre>{html.escape(block.logs)}</pre>")
+        parts.append("</details>")
 
     # Errors
     for err in block.errors:
