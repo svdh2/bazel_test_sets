@@ -195,10 +195,24 @@ pre {
 }
 .history-timeline {
     display: flex;
-    gap: 1px;
+    gap: 2px;
     margin: 6px 0;
     overflow: hidden;
     max-width: 100%;
+    align-items: center;
+}
+.history-timeline .ht-commit {
+    display: flex;
+    gap: 1px;
+    align-items: center;
+    padding: 3px 0;
+    border-radius: 2px;
+}
+.history-timeline .ht-commit-a {
+    background: #e0e0e0;
+}
+.history-timeline .ht-commit-b {
+    background: #ccc;
 }
 .history-timeline .ht-box {
     flex: 0 0 4px;
@@ -730,22 +744,48 @@ _TIMELINE_COLORS: dict[str, str] = {
 def _render_history_timeline(entries: list[dict[str, Any]]) -> str:
     """Render a compact horizontal pass/fail history timeline.
 
-    Each entry becomes a small colored box. Hovering shows the commit hash.
-    Entries are displayed in chronological order (oldest left, newest right).
+    Each entry becomes a small colored box.  Consecutive entries that
+    share the same commit are grouped inside a commit wrapper that
+    alternates between two background colors and extends slightly above
+    and below the status boxes, making commit boundaries visible.
+
+    Entries are displayed in chronological order (oldest left, newest
+    right).
     """
     if not entries:
         return ""
+
+    # Group consecutive entries by commit identity.
+    groups: list[tuple[str, list[dict[str, Any]]]] = []
+    prev_commit: str | None = None
+    for entry in entries:
+        commit = entry.get("commit", "")
+        if commit != prev_commit:
+            groups.append((commit, []))
+        groups[-1][1].append(entry)
+        prev_commit = commit
+
     parts: list[str] = []
     parts.append('<div class="history-timeline">')
-    for entry in entries:
-        status = entry.get("status", "no_tests")
-        color = _TIMELINE_COLORS.get(status, "#999")
-        commit = entry.get("commit", "")
-        tooltip = html.escape(commit[:12]) if commit else html.escape(status)
-        parts.append(
-            f'<div class="ht-box" style="background:{color}" '
-            f'title="{tooltip}"></div>'
-        )
+    for idx, (commit_key, group) in enumerate(groups):
+        cls = "ht-commit-a" if idx % 2 == 0 else "ht-commit-b"
+        commit_tip = html.escape(commit_key[:12]) if commit_key else ""
+        title_attr = f' title="{commit_tip}"' if commit_tip else ""
+        parts.append(f'<div class="ht-commit {cls}"{title_attr}>')
+        for entry in group:
+            status = entry.get("status", "no_tests")
+            color = _TIMELINE_COLORS.get(status, "#999")
+            entry_commit = entry.get("commit", "")
+            tooltip = (
+                html.escape(entry_commit[:12])
+                if entry_commit
+                else html.escape(status)
+            )
+            parts.append(
+                f'<div class="ht-box" style="background:{color}" '
+                f'title="{tooltip}"></div>'
+            )
+        parts.append("</div>")
     parts.append("</div>")
     return "\n".join(parts)
 
