@@ -274,17 +274,16 @@ class TestNestedTestSets:
 class TestExpandableSections:
     """Tests for expandable log and measurement sections."""
 
-    def test_stdout_in_details_element(self):
-        """Stdout content appears within a details/summary element."""
+    def test_stdout_rendered_in_log_section(self):
+        """Stdout content appears within a log section."""
         tests = [{
             "name": "t", "status": "passed", "duration_seconds": 1.0,
             "stdout": "Hello from test",
         }]
         report = _make_flat_report(tests=tests)
         result = generate_html_report(report)
-        assert "<details" in result
+        assert 'class="log-section"' in result
         assert "Hello from test" in result
-        assert "Logs" in result
 
     def test_stderr_rendered(self):
         """Stderr content appears in output."""
@@ -296,13 +295,12 @@ class TestExpandableSections:
         result = generate_html_report(report)
         assert "Error occurred" in result
 
-    def test_no_logs_no_details(self):
-        """No details element when no logs present."""
+    def test_no_logs_no_log_section(self):
+        """No log section when no logs present."""
         tests = [{"name": "t", "status": "passed", "duration_seconds": 1.0}]
         report = _make_flat_report(tests=tests)
         result = generate_html_report(report)
-        # Should not have a Logs details element
-        assert "Logs" not in result
+        assert 'class="log-section"' not in result
 
     def test_structured_stdout_measurements_in_table(self):
         """Measurements from [TST] stdout appear in a table."""

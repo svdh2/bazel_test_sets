@@ -133,17 +133,14 @@ body {
     color: #666;
     margin-top: 4px;
 }
-details.log-details {
+.log-section {
     margin-top: 8px;
 }
-details.log-details > summary {
-    cursor: pointer;
+.log-section-label {
     font-size: 13px;
     color: #555;
     font-weight: 500;
-}
-details.log-details > summary:hover {
-    color: #000;
+    margin-bottom: 4px;
 }
 pre {
     background: #1e1e1e;
@@ -572,8 +569,7 @@ def _render_test_entry(
     stdout = data.get("stdout", "")
     stderr = data.get("stderr", "")
     if stdout or stderr:
-        parts.append('<details class="log-details">')
-        parts.append("<summary>Logs</summary>")
+        parts.append('<div class="log-section">')
         if stdout:
             segments = parse_stdout_segments(stdout)
             has_blocks = any(isinstance(s, BlockSegment) for s in segments)
@@ -586,7 +582,7 @@ def _render_test_entry(
         if stderr:
             parts.append(f'<pre style="border-left:3px solid #FFB6C1">'
                          f"{html.escape(stderr)}</pre>")
-        parts.append("</details>")
+        parts.append("</div>")
 
     # Burn-in progress
     burn_in = data.get("burn_in")
@@ -681,12 +677,9 @@ def _render_block_segment(
             parts.append(f'<li class="{css_class}">{desc}{link}</li>')
         parts.append("</ul>")
 
-    # Block logs (raw timeline — collapsed by default)
+    # Block logs (raw timeline)
     if block.logs:
-        parts.append('<details class="log-details">')
-        parts.append("<summary>Raw logs</summary>")
         parts.append(f"<pre>{html.escape(block.logs)}</pre>")
-        parts.append("</details>")
 
     # Errors
     for err in block.errors:
@@ -751,14 +744,14 @@ def _render_burn_in(burn_in: dict[str, Any]) -> str:
 def _render_inferred_deps(deps: list[dict[str, Any]]) -> str:
     """Render inferred dependencies section."""
     parts: list[str] = []
-    parts.append('<details class="log-details">')
-    parts.append("<summary>Inferred Dependencies</summary>")
+    parts.append('<div class="log-section">')
+    parts.append('<div class="log-section-label">Inferred Dependencies</div>')
     parts.append("<ul>")
     for dep in deps:
         dep_str = html.escape(str(dep.get("name", dep)))
         parts.append(f"<li>{dep_str}</li>")
     parts.append("</ul>")
-    parts.append("</details>")
+    parts.append("</div>")
     return "\n".join(parts)
 
 
