@@ -94,13 +94,6 @@ body {
     font-weight: 600;
     font-size: 14px;
 }
-.test-set {
-    background: #fff;
-    border-radius: 8px;
-    padding: 16px;
-    margin-bottom: 12px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-}
 .test-set-header {
     display: flex;
     align-items: center;
@@ -124,12 +117,6 @@ body {
     font-weight: 600;
     color: #333;
 }
-.test-list {
-    background: #f5f5f5;
-    border-radius: 6px;
-    padding: 8px 12px;
-    margin-top: 8px;
-}
 .test-entry {
     border-left: 4px solid #ddd;
     margin: 8px 0;
@@ -145,38 +132,6 @@ body {
     font-size: 12px;
     color: #666;
     margin-top: 4px;
-}
-details.test-set-details {
-    margin: 10px 0 10px 12px;
-}
-details.test-set-details > summary {
-    cursor: pointer;
-    font-size: 15px;
-    font-weight: 600;
-    color: #333;
-    list-style: none;
-    padding: 8px 0;
-}
-details.test-set-details > summary::-webkit-details-marker {
-    display: none;
-}
-details.test-set-details > summary::before {
-    content: '\\25B6';
-    display: inline-block;
-    margin-right: 8px;
-    font-size: 11px;
-    transition: transform 0.15s;
-}
-details.test-set-details[open] > summary::before {
-    transform: rotate(90deg);
-}
-details.test-set-details > .test-set-nested {
-    background: #fff;
-    border-radius: 8px;
-    padding: 12px 16px;
-    margin-top: 4px;
-    border-left: 3px solid #ddd;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
 }
 details.log-details {
     margin-top: 8px;
@@ -452,16 +407,16 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
 
     # DAG visualization (only for hierarchical reports)
     if "test_set" in report:
-        parts.append(_render_dag_section(report))
-
-    # Test set (hierarchical) or flat tests
-    if "test_set" in report:
-        parts.append(_render_test_set(
-            report["test_set"], history,
+        parts.append(_render_dag_section(
+            report,
+            history=history,
             lifecycle_config=lifecycle_config,
             source_link_base=source_link_base,
         ))
-    elif "tests" in report:
+
+    # Flat tests (non-hierarchical reports only; hierarchical data is
+    # rendered as hidden elements inside the DAG section above)
+    if "test_set" not in report and "tests" in report:
         parts.append(_render_flat_tests(
             report["tests"], history,
             source_link_base=source_link_base,
@@ -567,114 +522,6 @@ def _render_header(report: dict[str, Any]) -> str:
         parts.append("</div>")
 
     parts.append("</div>")
-    return "\n".join(parts)
-
-
-def _has_descendant_failure(test_set: dict[str, Any]) -> bool:
-    """Return True if any test or nested subset has a failure."""
-    status = test_set.get("status", "")
-    if "failed" in status:
-        return True
-    for test_data in test_set.get("tests", {}).values():
-        if "failed" in test_data.get("status", ""):
-            return True
-    for subset in test_set.get("subsets", []):
-        if _has_descendant_failure(subset):
-            return True
-    return False
-
-
-def _render_test_set(
-    test_set: dict[str, Any],
-    history: dict[str, list[dict[str, Any]]],
-    is_root: bool = True,
-    lifecycle_config: dict[str, Any] | None = None,
-    source_link_base: str | None = None,
-) -> str:
-    """Render a test set section, recursing into subsets.
-
-    Root renders as a plain ``<div>``; nested sets render inside
-    collapsible ``<details>`` elements (collapsed by default,
-    auto-expanded when they contain a failure).
-    """
-    parts: list[str] = []
-    name = test_set.get("name", "Test Set")
-    status = test_set.get("status", "no_tests")
-    assertion = test_set.get("assertion", "")
-    color = STATUS_COLORS.get(status, "#e8e8e8")
-    label = STATUS_LABELS.get(status, status.upper())
-
-    badge = (
-        f'<span class="status-badge" style="background:{color}">'
-        f"{html.escape(label)}</span>"
-    )
-
-    if is_root:
-        # Root: always-visible card
-        parts.append('<div class="test-set">')
-        parts.append('<div class="test-set-header">')
-        parts.append(f"<h2>{html.escape(name)}</h2>")
-        parts.append(badge)
-        parts.append("</div>")
-        if assertion:
-            parts.append(
-                f'<div class="test-meta">Assertion: {html.escape(assertion)}</div>'
-            )
-    else:
-        # Nested: collapsible <details>
-        open_attr = " open" if _has_descendant_failure(test_set) else ""
-        parts.append(f'<details class="test-set-details"{open_attr}>')
-        parts.append(
-            f"<summary>{html.escape(name)} {badge}</summary>"
-        )
-        parts.append('<div class="test-set-nested">')
-        if assertion:
-            parts.append(
-                f'<div class="test-meta">Assertion: {html.escape(assertion)}</div>'
-            )
-
-    # Lifecycle summary for this test set
-    lifecycle_summary = test_set.get("lifecycle_summary")
-    if lifecycle_summary:
-        parts.append(_render_lifecycle_summary(
-            lifecycle_summary, lifecycle_config,
-        ))
-
-    # Hidden summary card for the DAG detail pane
-    set_test_names = _collect_test_names(test_set)
-    set_history = _compute_set_history(set_test_names, history)
-    parts.append(_render_set_summary_card(
-        test_set, lifecycle_config, set_history,
-    ))
-
-    # Direct tests inside a test-list container
-    tests = test_set.get("tests", {})
-    if tests:
-        parts.append('<div class="test-list">')
-        for test_name, test_data in tests.items():
-            parts.append(
-                _render_test_entry(
-                    test_name, test_data, history.get(test_name, []),
-                    source_link_base=source_link_base,
-                )
-            )
-        parts.append("</div>")
-
-    # Recurse into subsets
-    for subset in test_set.get("subsets", []):
-        parts.append(_render_test_set(
-            subset, history, is_root=False,
-            lifecycle_config=lifecycle_config,
-            source_link_base=source_link_base,
-        ))
-
-    # Close wrappers
-    if is_root:
-        parts.append("</div>")
-    else:
-        parts.append("</div>")   # .test-set-nested
-        parts.append("</details>")
-
     return "\n".join(parts)
 
 
@@ -1706,7 +1553,62 @@ def _walk_dag_for_graph(
         )
 
 
-def _render_dag_section(report: dict[str, Any]) -> str:
+def _render_dag_data_elements(
+    test_set: dict[str, Any],
+    history: dict[str, list[dict[str, Any]]],
+    lifecycle_config: dict[str, Any] | None = None,
+    source_link_base: str | None = None,
+) -> str:
+    """Render hidden data elements for the DAG detail pane.
+
+    Produces hidden test-entry divs (``data-test-name``) and set
+    summary cards (``data-set-name``) so that the Cytoscape tap
+    handlers can clone them into the detail pane.
+    """
+    parts: list[str] = []
+    parts.append('<div style="display:none">')
+    _walk_for_data_elements(
+        test_set, history, lifecycle_config, source_link_base, parts,
+    )
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+def _walk_for_data_elements(
+    test_set: dict[str, Any],
+    history: dict[str, list[dict[str, Any]]],
+    lifecycle_config: dict[str, Any] | None,
+    source_link_base: str | None,
+    parts: list[str],
+) -> None:
+    """Recursively collect hidden data elements for every set and test."""
+    # Set summary card
+    set_test_names = _collect_test_names(test_set)
+    set_history = _compute_set_history(set_test_names, history)
+    parts.append(_render_set_summary_card(
+        test_set, lifecycle_config, set_history,
+    ))
+
+    # Individual test entries
+    for test_name, test_data in test_set.get("tests", {}).items():
+        parts.append(_render_test_entry(
+            test_name, test_data, history.get(test_name, []),
+            source_link_base=source_link_base,
+        ))
+
+    # Recurse into subsets
+    for subset in test_set.get("subsets", []):
+        _walk_for_data_elements(
+            subset, history, lifecycle_config, source_link_base, parts,
+        )
+
+
+def _render_dag_section(
+    report: dict[str, Any],
+    history: dict[str, list[dict[str, Any]]] | None = None,
+    lifecycle_config: dict[str, Any] | None = None,
+    source_link_base: str | None = None,
+) -> str:
     """Render the interactive DAG visualization section."""
     test_set = report.get("test_set", {})
     graph_data = _build_graph_data(test_set)
@@ -1743,6 +1645,13 @@ def _render_dag_section(report: dict[str, Any]) -> str:
     parts.append("</div>")  # dag-split
     parts.append("</div>")  # dag-container
     parts.append("</div>")  # dag-section
+
+    # Hidden data elements for detail pane (test entries + set summaries)
+    parts.append(_render_dag_data_elements(
+        test_set, history or {},
+        lifecycle_config=lifecycle_config,
+        source_link_base=source_link_base,
+    ))
 
     # Embedded data
     graph_json = json.dumps(graph_data, separators=(",", ":"))

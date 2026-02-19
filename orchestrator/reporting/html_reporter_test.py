@@ -227,7 +227,7 @@ class TestHierarchicalReport:
 
 
 class TestNestedTestSets:
-    """Tests for hierarchical collapsible test set rendering."""
+    """Tests for nested test set data in DAG hidden elements."""
 
     def _make_nested_report(self, child_status="passed", root_status=None):
         if root_status is None:
@@ -256,43 +256,19 @@ class TestNestedTestSets:
             },
         }
 
-    def test_nested_set_in_details_element(self):
-        """Nested test sets render inside details elements."""
+    def test_nested_set_data_present(self):
+        """Nested test set data is present in hidden DAG data elements."""
         result = generate_html_report(self._make_nested_report())
-        assert 'class="test-set-details"' in result
         assert "child_set" in result
-
-    def test_root_not_in_details(self):
-        """Root test set renders as a plain div, not details."""
-        result = generate_html_report(self._make_nested_report())
-        # Root name appears before first <details
-        before_details = result.split("<details")[0]
-        assert "root_set" in before_details
-
-    def test_nested_collapsed_by_default(self):
-        """Nested test sets without failures are collapsed."""
-        result = generate_html_report(self._make_nested_report())
-        assert '<details class="test-set-details">' in result
-        # No open attribute
-        assert 'test-set-details" open>' not in result
-
-    def test_nested_expanded_on_failure(self):
-        """Nested test sets with failures are auto-expanded."""
-        result = generate_html_report(
-            self._make_nested_report(child_status="failed", root_status="failed")
-        )
-        assert '<details class="test-set-details" open>' in result
-
-    def test_test_list_container_present(self):
-        """Direct tests are wrapped in a test-list container."""
-        result = generate_html_report(self._make_nested_report())
-        assert 'class="test-list"' in result
+        assert 'data-set-name="child_set"' in result
 
     def test_nested_tests_rendered(self):
-        """Tests inside nested subsets are rendered."""
+        """Tests inside nested subsets are rendered in hidden data elements."""
         result = generate_html_report(self._make_nested_report())
         assert "test_a" in result
         assert "test_b" in result
+        assert 'data-test-name="test_a"' in result
+        assert 'data-test-name="test_b"' in result
 
 
 class TestExpandableSections:
