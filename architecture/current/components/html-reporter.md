@@ -22,7 +22,7 @@ def write_html_report(report_data: dict, output_path: Path)
 |---------|-------------|
 | **Header** | Report title, generation timestamp, commit hash, summary badges |
 | **Summary badges** | Color-coded counts: total (grey), passed (green), failed (pink), deps failed (light grey) |
-| **DAG visualization** | Interactive graph of test_set groups (compound nodes) and test_set_test nodes with `depends_on` edges. Uses Cytoscape.js with dagre layout. Supports zoom/pan, collapse/expand of groups, and click-to-inspect detail pane via `srcdoc` iframe. |
+| **DAG visualization** | Interactive graph of test_set groups and test_set_test nodes with `depends_on` edges. Uses Cytoscape.js with dagre layout. Supports zoom/pan and click-to-inspect detail pane. Clicking a test node shows its full entry; clicking a group (set) node shows name, status badge, assertion, lifecycle summary, and threshold. |
 | **Test set section** | Hierarchical: set name, aggregated status badge, nested test entries |
 | **Test entry** | Name, status badge, assertion, duration, exit code, color-coded border |
 | **Logs** | Expandable `<details>` with stdout (dark theme pre) and stderr (pink border) |
@@ -70,7 +70,7 @@ def write_html_report(report_data: dict, output_path: Path)
 
 2. **DAG graph data embedding**: The test_set hierarchy and `depends_on` edges are serialized as `GRAPH_DATA` and `TEST_DATA` JSON variables in `<script>` tags. Cytoscape.js reads these on page load. Test set nodes become compound (parent) nodes; test nodes are children with directed edges for dependencies.
 
-3. **`srcdoc` iframe for detail pane**: Clicking a test node renders its details (status, assertion, stdout/stderr) into an iframe via the `srcdoc` attribute. This works from `file://` (no cross-origin issues) and provides scroll isolation from the main page.
+3. **DOM-cloning detail pane**: Clicking a test node clones its rendered `data-test-name` entry into the detail pane. Clicking a group (set) node clones a hidden `data-set-name` summary card containing the set's header, assertion, lifecycle summary, and config threshold. Both use `outerHTML` cloning so the detail pane mirrors the lower-panel styling.
 
 4. **Expandable sections**: Logs and structured data use HTML `<details>/<summary>` elements for progressive disclosure. Reports with many tests remain scannable.
 

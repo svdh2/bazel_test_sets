@@ -1240,3 +1240,114 @@ class TestDagVisualization:
         assert colors["test_ok"] == "green"
         assert colors["test_skip"] == "grey"
         assert colors["suite"] == "green"
+
+    def test_set_summary_cards_have_data_set_name(self):
+        """Hidden set summary cards carry data-set-name for each set."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        assert 'data-set-name="root_set"' in result
+        assert 'data-set-name="child_set"' in result
+
+    def test_group_node_click_handler_in_js(self):
+        """JS includes a tap handler for node.group to populate detail pane."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        assert "node.group" in result
+        assert "data-set-name" in result
+
+    def test_set_summary_card_contains_assertion(self):
+        """Hidden set summary card includes the set's assertion text."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        # Extract the hidden card for root_set
+        marker = 'data-set-name="root_set"'
+        idx = result.index(marker)
+        # The card's closing </div> is within a reasonable distance
+        card_snippet = result[idx:idx + 500]
+        assert "Root assertion" in card_snippet
+
+    def test_set_summary_card_hidden_by_default(self):
+        """Hidden set summary cards use display:none."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        assert 'data-set-name="root_set" style="display:none"' in result
+
+    def test_set_summary_card_includes_lifecycle_summary(self):
+        """Hidden set summary card includes lifecycle summary when present."""
+        report = _make_dag_report()
+        report["report"]["test_set"]["lifecycle_summary"] = {
+            "total": 3, "stable": 2, "flaky": 1, "burning_in": 0,
+            "new": 0, "disabled": 0,
+            "aggregate_runs": 300, "aggregate_passes": 295,
+            "aggregate_reliability": 0.983,
+        }
+        result = generate_html_report(report)
+        marker = 'data-set-name="root_set"'
+        idx = result.index(marker)
+        card_snippet = result[idx:idx + 1000]
+        assert "2 STABLE" in card_snippet
+        assert "1 FLAKY" in card_snippet
+        assert "98.3%" in card_snippet
+
+    def test_set_summary_card_includes_history_timeline(self):
+        """Hidden set summary card includes aggregated history timeline."""
+        report = _make_dag_report()
+        report["report"]["history"] = {
+            "test_a": [
+                {"status": "passed", "commit": "aaa", "duration_seconds": 1.0,
+                 "timestamp": "2026-01-01T00:00:00+00:00"},
+                {"status": "passed", "commit": "bbb", "duration_seconds": 1.0,
+                 "timestamp": "2026-01-02T00:00:00+00:00"},
+            ],
+            "test_b": [
+                {"status": "passed", "commit": "aaa", "duration_seconds": 1.0,
+                 "timestamp": "2026-01-01T00:00:00+00:00"},
+                {"status": "failed", "commit": "bbb", "duration_seconds": 1.0,
+                 "timestamp": "2026-01-02T00:00:00+00:00"},
+            ],
+            "test_c": [
+                {"status": "passed", "commit": "aaa", "duration_seconds": 1.0,
+                 "timestamp": "2026-01-01T00:00:00+00:00"},
+                {"status": "failed", "commit": "bbb", "duration_seconds": 1.0,
+                 "timestamp": "2026-01-02T00:00:00+00:00"},
+            ],
+        }
+        result = generate_html_report(report)
+        # root_set contains test_a, test_b and child_set (which has test_c)
+        marker = 'data-set-name="root_set"'
+        idx = result.index(marker)
+        card_snippet = result[idx:idx + 2000]
+        # Should have a history timeline inside the card
+        assert "history-timeline" in card_snippet
+        # commit aaa: all passed → green (#2da44e)
+        assert "#2da44e" in card_snippet
+        # commit bbb: test_b failed → red (#cf222e)
+        assert "#cf222e" in card_snippet
+
+    def test_set_summary_card_no_history_without_data(self):
+        """Set summary card has no timeline when no history is present."""
+        report = _make_dag_report()
+        result = generate_html_report(report)
+        marker = 'data-set-name="root_set"'
+        idx = result.index(marker)
+        card_snippet = result[idx:idx + 1000]
+        assert "history-timeline" not in card_snippet
+
+    def test_set_history_aggregates_child_set_tests(self):
+        """Set history includes tests from nested child sets."""
+        report = _make_dag_report()
+        # Only test_c (in child_set) has history, root_set should still
+        # show a timeline since test_c is a descendant
+        report["report"]["history"] = {
+            "test_c": [
+                {"status": "failed", "commit": "xxx", "duration_seconds": 1.0,
+                 "timestamp": "2026-01-01T00:00:00+00:00"},
+            ],
+        }
+        result = generate_html_report(report)
+        marker = 'data-set-name="root_set"'
+        idx = result.index(marker)
+        card_snippet = result[idx:idx + 2000]
+        assert "history-timeline" in card_snippet
+        # test_c failed → root_set should show red
+        assert "#cf222e" in card_snippet
