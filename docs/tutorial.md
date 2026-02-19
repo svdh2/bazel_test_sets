@@ -187,7 +187,34 @@ if __name__ == "__main__":
 
 The orchestrator parses these events and includes them in the JSON report.
 
-## Step 8: Hierarchical Nesting
+## Step 8: View the HTML Report
+
+The orchestrator writes a JSON report to `target/reports/`. Generate a
+self-contained HTML report you can open in a browser:
+
+```python
+from pathlib import Path
+from orchestrator.reporting.html_reporter import write_html_report
+import json
+
+report_data = json.loads(Path("target/reports/service_tests.json").read_text())
+write_html_report(report_data, Path("report.html"))
+```
+
+The HTML report includes:
+
+- A summary header with pass/fail counts and duration
+- An **interactive DAG** showing test sets and tests as graph nodes — click
+  any node to open a detail pane with its assertion, structured log blocks,
+  measurements, and history timeline
+- Color-coded structured log blocks (rigging, stimulation, checkpoint, verdict)
+  with inline measurement tables and assertion checklists
+- Lifecycle badges (`STABLE`, `BURNING IN`, `FLAKY`) and reliability percentages
+  when a status file is configured
+
+See the [Reporting guide](reporting.md) for full details.
+
+## Step 9: Hierarchical Nesting
 
 Create parent test sets that include child test sets as subsets:
 
@@ -212,6 +239,7 @@ test_set(
 
 - See [API Reference](api-reference.md) for all rule attributes
 - See [Execution Modes](execution-modes.md) for diagnostic vs detection modes and the regression flag
+- See [Reporting](reporting.md) for the interactive HTML report and DAG visualization
 - See [Structured Logging](structured-logging.md) for the event schema
 - See [Burn-in](burn-in.md) for the test maturity lifecycle
 - See [Parameterization](parameterization.md) for matrix test sets

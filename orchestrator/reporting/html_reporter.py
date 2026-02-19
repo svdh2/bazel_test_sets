@@ -60,12 +60,18 @@ STATUS_LABELS: dict[str, str] = {
 }
 
 _CSS = """\
+html, body {
+    height: 100%;
+    margin: 0;
+}
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    margin: 0;
     padding: 20px;
     background: #f5f5f5;
     color: #333;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
 }
 .report-header {
     background: #fff;
@@ -94,13 +100,6 @@ body {
     font-weight: 600;
     font-size: 14px;
 }
-.test-set {
-    background: #fff;
-    border-radius: 8px;
-    padding: 16px;
-    margin-bottom: 12px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-}
 .test-set-header {
     display: flex;
     align-items: center;
@@ -124,12 +123,6 @@ body {
     font-weight: 600;
     color: #333;
 }
-.test-list {
-    background: #f5f5f5;
-    border-radius: 6px;
-    padding: 8px 12px;
-    margin-top: 8px;
-}
 .test-entry {
     border-left: 4px solid #ddd;
     margin: 8px 0;
@@ -146,38 +139,6 @@ body {
     color: #666;
     margin-top: 4px;
 }
-details.test-set-details {
-    margin: 10px 0 10px 12px;
-}
-details.test-set-details > summary {
-    cursor: pointer;
-    font-size: 15px;
-    font-weight: 600;
-    color: #333;
-    list-style: none;
-    padding: 8px 0;
-}
-details.test-set-details > summary::-webkit-details-marker {
-    display: none;
-}
-details.test-set-details > summary::before {
-    content: '\\25B6';
-    display: inline-block;
-    margin-right: 8px;
-    font-size: 11px;
-    transition: transform 0.15s;
-}
-details.test-set-details[open] > summary::before {
-    transform: rotate(90deg);
-}
-details.test-set-details > .test-set-nested {
-    background: #fff;
-    border-radius: 8px;
-    padding: 12px 16px;
-    margin-top: 4px;
-    border-left: 3px solid #ddd;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.06);
-}
 details.log-details {
     margin-top: 8px;
 }
@@ -189,6 +150,15 @@ details.log-details > summary {
 }
 details.log-details > summary:hover {
     color: #000;
+}
+.log-section {
+    margin-top: 8px;
+}
+.log-section-label {
+    font-size: 13px;
+    color: #555;
+    font-weight: 500;
+    margin-bottom: 4px;
 }
 pre {
     background: #1e1e1e;
@@ -225,10 +195,24 @@ pre {
 }
 .history-timeline {
     display: flex;
-    gap: 1px;
+    gap: 2px;
     margin: 6px 0;
     overflow: hidden;
     max-width: 100%;
+    align-items: center;
+}
+.history-timeline .ht-commit {
+    display: flex;
+    gap: 1px;
+    align-items: center;
+    padding: 3px 0;
+    border-radius: 2px;
+}
+.history-timeline .ht-commit-a {
+    background: #e0e0e0;
+}
+.history-timeline .ht-commit-b {
+    background: #ccc;
 }
 .history-timeline .ht-box {
     flex: 0 0 4px;
@@ -452,16 +436,16 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
 
     # DAG visualization (only for hierarchical reports)
     if "test_set" in report:
-        parts.append(_render_dag_section(report))
-
-    # Test set (hierarchical) or flat tests
-    if "test_set" in report:
-        parts.append(_render_test_set(
-            report["test_set"], history,
+        parts.append(_render_dag_section(
+            report,
+            history=history,
             lifecycle_config=lifecycle_config,
             source_link_base=source_link_base,
         ))
-    elif "tests" in report:
+
+    # Flat tests (non-hierarchical reports only; hierarchical data is
+    # rendered as hidden elements inside the DAG section above)
+    if "test_set" not in report and "tests" in report:
         parts.append(_render_flat_tests(
             report["tests"], history,
             source_link_base=source_link_base,
@@ -570,114 +554,6 @@ def _render_header(report: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
-def _has_descendant_failure(test_set: dict[str, Any]) -> bool:
-    """Return True if any test or nested subset has a failure."""
-    status = test_set.get("status", "")
-    if "failed" in status:
-        return True
-    for test_data in test_set.get("tests", {}).values():
-        if "failed" in test_data.get("status", ""):
-            return True
-    for subset in test_set.get("subsets", []):
-        if _has_descendant_failure(subset):
-            return True
-    return False
-
-
-def _render_test_set(
-    test_set: dict[str, Any],
-    history: dict[str, list[dict[str, Any]]],
-    is_root: bool = True,
-    lifecycle_config: dict[str, Any] | None = None,
-    source_link_base: str | None = None,
-) -> str:
-    """Render a test set section, recursing into subsets.
-
-    Root renders as a plain ``<div>``; nested sets render inside
-    collapsible ``<details>`` elements (collapsed by default,
-    auto-expanded when they contain a failure).
-    """
-    parts: list[str] = []
-    name = test_set.get("name", "Test Set")
-    status = test_set.get("status", "no_tests")
-    assertion = test_set.get("assertion", "")
-    color = STATUS_COLORS.get(status, "#e8e8e8")
-    label = STATUS_LABELS.get(status, status.upper())
-
-    badge = (
-        f'<span class="status-badge" style="background:{color}">'
-        f"{html.escape(label)}</span>"
-    )
-
-    if is_root:
-        # Root: always-visible card
-        parts.append('<div class="test-set">')
-        parts.append('<div class="test-set-header">')
-        parts.append(f"<h2>{html.escape(name)}</h2>")
-        parts.append(badge)
-        parts.append("</div>")
-        if assertion:
-            parts.append(
-                f'<div class="test-meta">Assertion: {html.escape(assertion)}</div>'
-            )
-    else:
-        # Nested: collapsible <details>
-        open_attr = " open" if _has_descendant_failure(test_set) else ""
-        parts.append(f'<details class="test-set-details"{open_attr}>')
-        parts.append(
-            f"<summary>{html.escape(name)} {badge}</summary>"
-        )
-        parts.append('<div class="test-set-nested">')
-        if assertion:
-            parts.append(
-                f'<div class="test-meta">Assertion: {html.escape(assertion)}</div>'
-            )
-
-    # Lifecycle summary for this test set
-    lifecycle_summary = test_set.get("lifecycle_summary")
-    if lifecycle_summary:
-        parts.append(_render_lifecycle_summary(
-            lifecycle_summary, lifecycle_config,
-        ))
-
-    # Hidden summary card for the DAG detail pane
-    set_test_names = _collect_test_names(test_set)
-    set_history = _compute_set_history(set_test_names, history)
-    parts.append(_render_set_summary_card(
-        test_set, lifecycle_config, set_history,
-    ))
-
-    # Direct tests inside a test-list container
-    tests = test_set.get("tests", {})
-    if tests:
-        parts.append('<div class="test-list">')
-        for test_name, test_data in tests.items():
-            parts.append(
-                _render_test_entry(
-                    test_name, test_data, history.get(test_name, []),
-                    source_link_base=source_link_base,
-                )
-            )
-        parts.append("</div>")
-
-    # Recurse into subsets
-    for subset in test_set.get("subsets", []):
-        parts.append(_render_test_set(
-            subset, history, is_root=False,
-            lifecycle_config=lifecycle_config,
-            source_link_base=source_link_base,
-        ))
-
-    # Close wrappers
-    if is_root:
-        parts.append("</div>")
-    else:
-        parts.append("</div>")   # .test-set-nested
-        parts.append("</details>")
-
-    return "\n".join(parts)
-
-
 def _render_test_entry(
     name: str, data: dict[str, Any],
     history_entries: list[dict[str, Any]] | None = None,
@@ -725,8 +601,7 @@ def _render_test_entry(
     stdout = data.get("stdout", "")
     stderr = data.get("stderr", "")
     if stdout or stderr:
-        parts.append('<details class="log-details">')
-        parts.append("<summary>Logs</summary>")
+        parts.append('<div class="log-section">')
         if stdout:
             segments = parse_stdout_segments(stdout)
             has_blocks = any(isinstance(s, BlockSegment) for s in segments)
@@ -739,7 +614,7 @@ def _render_test_entry(
         if stderr:
             parts.append(f'<pre style="border-left:3px solid #FFB6C1">'
                          f"{html.escape(stderr)}</pre>")
-        parts.append("</details>")
+        parts.append("</div>")
 
     # Burn-in progress
     burn_in = data.get("burn_in")
@@ -869,22 +744,48 @@ _TIMELINE_COLORS: dict[str, str] = {
 def _render_history_timeline(entries: list[dict[str, Any]]) -> str:
     """Render a compact horizontal pass/fail history timeline.
 
-    Each entry becomes a small colored box. Hovering shows the commit hash.
-    Entries are displayed in chronological order (oldest left, newest right).
+    Each entry becomes a small colored box.  Consecutive entries that
+    share the same commit are grouped inside a commit wrapper that
+    alternates between two background colors and extends slightly above
+    and below the status boxes, making commit boundaries visible.
+
+    Entries are displayed in chronological order (oldest left, newest
+    right).
     """
     if not entries:
         return ""
+
+    # Group consecutive entries by commit identity.
+    groups: list[tuple[str, list[dict[str, Any]]]] = []
+    prev_commit: str | None = None
+    for entry in entries:
+        commit = entry.get("commit", "")
+        if commit != prev_commit:
+            groups.append((commit, []))
+        groups[-1][1].append(entry)
+        prev_commit = commit
+
     parts: list[str] = []
     parts.append('<div class="history-timeline">')
-    for entry in entries:
-        status = entry.get("status", "no_tests")
-        color = _TIMELINE_COLORS.get(status, "#999")
-        commit = entry.get("commit", "")
-        tooltip = html.escape(commit[:12]) if commit else html.escape(status)
-        parts.append(
-            f'<div class="ht-box" style="background:{color}" '
-            f'title="{tooltip}"></div>'
-        )
+    for idx, (commit_key, group) in enumerate(groups):
+        cls = "ht-commit-a" if idx % 2 == 0 else "ht-commit-b"
+        commit_tip = html.escape(commit_key[:12]) if commit_key else ""
+        title_attr = f' title="{commit_tip}"' if commit_tip else ""
+        parts.append(f'<div class="ht-commit {cls}"{title_attr}>')
+        for entry in group:
+            status = entry.get("status", "no_tests")
+            color = _TIMELINE_COLORS.get(status, "#999")
+            entry_commit = entry.get("commit", "")
+            tooltip = (
+                html.escape(entry_commit[:12])
+                if entry_commit
+                else html.escape(status)
+            )
+            parts.append(
+                f'<div class="ht-box" style="background:{color}" '
+                f'title="{tooltip}"></div>'
+            )
+        parts.append("</div>")
     parts.append("</div>")
     return "\n".join(parts)
 
@@ -904,14 +805,14 @@ def _render_burn_in(burn_in: dict[str, Any]) -> str:
 def _render_inferred_deps(deps: list[dict[str, Any]]) -> str:
     """Render inferred dependencies section."""
     parts: list[str] = []
-    parts.append('<details class="log-details">')
-    parts.append("<summary>Inferred Dependencies</summary>")
+    parts.append('<div class="log-section">')
+    parts.append('<div class="log-section-label">Inferred Dependencies</div>')
     parts.append("<ul>")
     for dep in deps:
         dep_str = html.escape(str(dep.get("name", dep)))
         parts.append(f"<li>{dep_str}</li>")
     parts.append("</ul>")
-    parts.append("</details>")
+    parts.append("</div>")
     return "\n".join(parts)
 
 
@@ -1294,15 +1195,24 @@ _DAG_CSS = """\
     padding: 16px;
     margin-bottom: 12px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 .dag-section h2 {
     margin: 0 0 12px 0;
     font-size: 18px;
+    flex-shrink: 0;
 }
 .dag-container {
     border: 1px solid #ddd;
     border-radius: 6px;
     overflow: hidden;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 .dag-toolbar {
     display: flex;
@@ -1310,6 +1220,7 @@ _DAG_CSS = """\
     padding: 8px 12px;
     background: #f5f5f5;
     border-bottom: 1px solid #ddd;
+    flex-shrink: 0;
 }
 .dag-toolbar button {
     padding: 4px 12px;
@@ -1324,7 +1235,8 @@ _DAG_CSS = """\
 }
 .dag-split {
     display: flex;
-    height: 500px;
+    flex: 1;
+    min-height: 0;
 }
 .dag-canvas {
     flex: 1;
@@ -1496,6 +1408,15 @@ _DAG_JS = """\
                     'arrow-scale': 0.8,
                     'line-style': 'dashed'
                 }
+            },
+            {
+                selector: 'edge.highlighted',
+                style: {
+                    'width': 3,
+                    'line-color': '#0d6efd',
+                    'target-arrow-color': '#0d6efd',
+                    'z-index': 10
+                }
             }
         ],
         layout: {
@@ -1523,8 +1444,19 @@ _DAG_JS = """\
         cy.fit(undefined, 30);
     });
 
+    /* Highlight connected edges for a node */
+    function highlightNode(node) {
+        cy.edges().removeClass('highlighted');
+        node.connectedEdges().addClass('highlighted');
+    }
+
+    function clearHighlights() {
+        cy.edges().removeClass('highlighted');
+    }
+
     /* Click test node to show detail pane */
     cy.on('tap', 'node.test', function(evt) {
+        highlightNode(evt.target);
         var nodeId = evt.target.data('id');
         var entries = document.querySelectorAll('[data-test-name]');
         var found = null;
@@ -1543,6 +1475,7 @@ _DAG_JS = """\
 
     /* Click group (set) node to show detail pane */
     cy.on('tap', 'node.group', function(evt) {
+        highlightNode(evt.target);
         var nodeId = evt.target.data('id');
         var entries = document.querySelectorAll('[data-set-name]');
         var found = null;
@@ -1561,9 +1494,18 @@ _DAG_JS = """\
         content.innerHTML = clone.outerHTML;
     });
 
+    /* Click background to clear selection and highlights */
+    cy.on('tap', function(evt) {
+        if (evt.target === cy) {
+            clearHighlights();
+        }
+    });
+
     document.getElementById('dag-detail-close').addEventListener('click',
         function() {
             document.getElementById('dag-detail').style.display = 'none';
+            clearHighlights();
+            cy.elements().unselect();
         });
 })();
 """
@@ -1706,7 +1648,62 @@ def _walk_dag_for_graph(
         )
 
 
-def _render_dag_section(report: dict[str, Any]) -> str:
+def _render_dag_data_elements(
+    test_set: dict[str, Any],
+    history: dict[str, list[dict[str, Any]]],
+    lifecycle_config: dict[str, Any] | None = None,
+    source_link_base: str | None = None,
+) -> str:
+    """Render hidden data elements for the DAG detail pane.
+
+    Produces hidden test-entry divs (``data-test-name``) and set
+    summary cards (``data-set-name``) so that the Cytoscape tap
+    handlers can clone them into the detail pane.
+    """
+    parts: list[str] = []
+    parts.append('<div style="display:none">')
+    _walk_for_data_elements(
+        test_set, history, lifecycle_config, source_link_base, parts,
+    )
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+def _walk_for_data_elements(
+    test_set: dict[str, Any],
+    history: dict[str, list[dict[str, Any]]],
+    lifecycle_config: dict[str, Any] | None,
+    source_link_base: str | None,
+    parts: list[str],
+) -> None:
+    """Recursively collect hidden data elements for every set and test."""
+    # Set summary card
+    set_test_names = _collect_test_names(test_set)
+    set_history = _compute_set_history(set_test_names, history)
+    parts.append(_render_set_summary_card(
+        test_set, lifecycle_config, set_history,
+    ))
+
+    # Individual test entries
+    for test_name, test_data in test_set.get("tests", {}).items():
+        parts.append(_render_test_entry(
+            test_name, test_data, history.get(test_name, []),
+            source_link_base=source_link_base,
+        ))
+
+    # Recurse into subsets
+    for subset in test_set.get("subsets", []):
+        _walk_for_data_elements(
+            subset, history, lifecycle_config, source_link_base, parts,
+        )
+
+
+def _render_dag_section(
+    report: dict[str, Any],
+    history: dict[str, list[dict[str, Any]]] | None = None,
+    lifecycle_config: dict[str, Any] | None = None,
+    source_link_base: str | None = None,
+) -> str:
     """Render the interactive DAG visualization section."""
     test_set = report.get("test_set", {})
     graph_data = _build_graph_data(test_set)
@@ -1743,6 +1740,13 @@ def _render_dag_section(report: dict[str, Any]) -> str:
     parts.append("</div>")  # dag-split
     parts.append("</div>")  # dag-container
     parts.append("</div>")  # dag-section
+
+    # Hidden data elements for detail pane (test entries + set summaries)
+    parts.append(_render_dag_data_elements(
+        test_set, history or {},
+        lifecycle_config=lifecycle_config,
+        source_link_base=source_link_base,
+    ))
 
     # Embedded data
     graph_json = json.dumps(graph_data, separators=(",", ":"))

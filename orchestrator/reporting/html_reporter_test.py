@@ -227,7 +227,7 @@ class TestHierarchicalReport:
 
 
 class TestNestedTestSets:
-    """Tests for hierarchical collapsible test set rendering."""
+    """Tests for nested test set data in DAG hidden elements."""
 
     def _make_nested_report(self, child_status="passed", root_status=None):
         if root_status is None:
@@ -256,59 +256,34 @@ class TestNestedTestSets:
             },
         }
 
-    def test_nested_set_in_details_element(self):
-        """Nested test sets render inside details elements."""
+    def test_nested_set_data_present(self):
+        """Nested test set data is present in hidden DAG data elements."""
         result = generate_html_report(self._make_nested_report())
-        assert 'class="test-set-details"' in result
         assert "child_set" in result
-
-    def test_root_not_in_details(self):
-        """Root test set renders as a plain div, not details."""
-        result = generate_html_report(self._make_nested_report())
-        # Root name appears before first <details
-        before_details = result.split("<details")[0]
-        assert "root_set" in before_details
-
-    def test_nested_collapsed_by_default(self):
-        """Nested test sets without failures are collapsed."""
-        result = generate_html_report(self._make_nested_report())
-        assert '<details class="test-set-details">' in result
-        # No open attribute
-        assert 'test-set-details" open>' not in result
-
-    def test_nested_expanded_on_failure(self):
-        """Nested test sets with failures are auto-expanded."""
-        result = generate_html_report(
-            self._make_nested_report(child_status="failed", root_status="failed")
-        )
-        assert '<details class="test-set-details" open>' in result
-
-    def test_test_list_container_present(self):
-        """Direct tests are wrapped in a test-list container."""
-        result = generate_html_report(self._make_nested_report())
-        assert 'class="test-list"' in result
+        assert 'data-set-name="child_set"' in result
 
     def test_nested_tests_rendered(self):
-        """Tests inside nested subsets are rendered."""
+        """Tests inside nested subsets are rendered in hidden data elements."""
         result = generate_html_report(self._make_nested_report())
         assert "test_a" in result
         assert "test_b" in result
+        assert 'data-test-name="test_a"' in result
+        assert 'data-test-name="test_b"' in result
 
 
 class TestExpandableSections:
     """Tests for expandable log and measurement sections."""
 
-    def test_stdout_in_details_element(self):
-        """Stdout content appears within a details/summary element."""
+    def test_stdout_rendered_in_log_section(self):
+        """Stdout content appears within a log section."""
         tests = [{
             "name": "t", "status": "passed", "duration_seconds": 1.0,
             "stdout": "Hello from test",
         }]
         report = _make_flat_report(tests=tests)
         result = generate_html_report(report)
-        assert "<details" in result
+        assert 'class="log-section"' in result
         assert "Hello from test" in result
-        assert "Logs" in result
 
     def test_stderr_rendered(self):
         """Stderr content appears in output."""
@@ -320,13 +295,12 @@ class TestExpandableSections:
         result = generate_html_report(report)
         assert "Error occurred" in result
 
-    def test_no_logs_no_details(self):
-        """No details element when no logs present."""
+    def test_no_logs_no_log_section(self):
+        """No log section when no logs present."""
         tests = [{"name": "t", "status": "passed", "duration_seconds": 1.0}]
         report = _make_flat_report(tests=tests)
         result = generate_html_report(report)
-        # Should not have a Logs details element
-        assert "Logs" not in result
+        assert 'class="log-section"' not in result
 
     def test_structured_stdout_measurements_in_table(self):
         """Measurements from [TST] stdout appear in a table."""
@@ -677,6 +651,97 @@ class TestHistoryTimeline:
         }
         result = generate_html_report(report)
         assert "#999" in result
+
+    def test_commit_grouping_renders_wrappers(self):
+        """Entries are wrapped in ht-commit divs grouping by commit."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed", "failed", "passed"],
+                ["aaa", "bbb", "ccc"],
+            ),
+        }
+        result = generate_html_report(report)
+        assert "ht-commit" in result
+        assert "ht-commit-a" in result
+        assert "ht-commit-b" in result
+
+    def test_commit_grouping_alternates_colors(self):
+        """Consecutive different commits alternate ht-commit-a / ht-commit-b."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed", "passed", "passed", "passed"],
+                ["aaa", "bbb", "ccc", "ddd"],
+            ),
+        }
+        result = generate_html_report(report)
+        # 4 different commits → 4 ht-commit wrappers: a, b, a, b
+        assert result.count("ht-commit-a") >= 2
+        assert result.count("ht-commit-b") >= 2
+
+    def test_same_commit_entries_in_single_wrapper(self):
+        """Multiple entries with the same commit share one ht-commit wrapper."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed", "failed"],
+                ["aaa", "aaa"],
+            ),
+        }
+        result = generate_html_report(report)
+        # Only one commit group (both entries have commit "aaa")
+        # The timeline section should have exactly 1 ht-commit wrapper
+        timeline_start = result.index('class="history-timeline"')
+        timeline_end = result.index("</div>", result.index("</div>", timeline_start) + 1)
+        timeline_snippet = result[timeline_start:timeline_end + 200]
+        assert timeline_snippet.count("ht-commit ") == 1
+
+    def test_commit_wrapper_has_tooltip(self):
+        """The ht-commit wrapper div shows the commit hash as tooltip."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed"], ["abcdef123456789"],
+            ),
+        }
+        result = generate_html_report(report)
+        # Both the wrapper and the inner box have the truncated commit tooltip
+        assert 'class="ht-commit ht-commit-a" title="abcdef123456"' in result
+
+    def test_dirty_commit_is_separate_group(self):
+        """A dirty commit (different string) is grouped separately."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(
+                ["passed", "passed"],
+                ["abc123", "abc123-dirty"],
+            ),
+        }
+        result = generate_html_report(report)
+        # Two different commit strings → two separate ht-commit wrappers
+        timeline_start = result.index('class="history-timeline"')
+        timeline_snippet = result[timeline_start:timeline_start + 1000]
+        assert "ht-commit-a" in timeline_snippet
+        assert "ht-commit-b" in timeline_snippet
+
+    def test_commit_wrapper_no_title_without_commit(self):
+        """The ht-commit wrapper has no title attribute when commit is absent."""
+        report = _make_flat_report()
+        report["report"]["history"] = {
+            "test_a": self._make_history_entries(["passed"]),
+        }
+        result = generate_html_report(report)
+        # The wrapper should not have a title attribute
+        assert 'class="ht-commit ht-commit-a">' in result
+
+    def test_commit_css_classes_present(self):
+        """Commit group CSS classes are defined in the stylesheet."""
+        report = _make_flat_report()
+        result = generate_html_report(report)
+        assert ".ht-commit" in result
+        assert ".ht-commit-a" in result
+        assert ".ht-commit-b" in result
 
 
 class TestLifecycleRendering:

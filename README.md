@@ -13,7 +13,7 @@ Standard test runners treat tests as independent, unordered units. In practice, 
 - **Choose execution strategies** &mdash; run everything (diagnostic) or fail fast (detection), optionally narrowed to tests correlated with changed files (regression)
 - **Track test maturity** through a burn-in lifecycle backed by statistical testing (SPRT)
 - **Generate parameterized tests** from matrices or variant configurations
-- **Collect structured measurements** and produce JSON/HTML reports
+- **Collect structured measurements** and produce JSON/HTML reports with an interactive DAG visualization
 
 ## Strengths and limitations
 
@@ -23,10 +23,10 @@ This workflow is well suited for large-scale testing:
 - **Test sets bridge requirements and tests** &mdash; assertions on test sets map directly to product requirements, making test outcomes meaningful beyond pass/fail.
 - **Hierarchical decomposition** &mdash; breaking large suites into nested test sets makes it easy to understand how an individual test failure affects overall product quality.
 
-However, the current implementation has serious limitations that make it unsuitable for production use at scale without further investment:
+However, the current implementation has limitations that make it unsuitable for production use at scale without further investment:
 
 - **JSON-in-repo history** &mdash; historic test data is stored as JSON files committed to the repository. At scale this should be replaced with an external results database.
-- **Monolithic HTML reports** &mdash; reports are self-contained HTML files. A proper solution would be an interactive application backed by the results database.
+- **Self-contained HTML reports** &mdash; reports are single-file HTML documents. While they include an interactive DAG visualization, at scale a dedicated dashboard backed by a results database would be more practical.
 - **Local execution only** &mdash; all tests run locally within this repository. For large-scale testing, Bazel remote execution should be enabled.
 
 ## Quick start
@@ -83,6 +83,18 @@ bazel test //path/to:auth_tests
 # Pass extra flags to the orchestrator (use `bazel run`, not `bazel test`)
 bazel run //path/to:auth_tests -- --mode detection
 ```
+
+## HTML reports
+
+Running a test set produces a self-contained HTML report with:
+
+- **Summary header** &mdash; total/passed/failed counts, duration, and commit SHA
+- **Interactive DAG** &mdash; a Cytoscape.js graph showing test sets, individual tests, and dependency edges. Click any node to open a detail pane with assertions, structured log blocks, measurements, history timeline, and lifecycle badges.
+- **Structured log rendering** &mdash; rigging, stimulation, checkpoint, and verdict blocks are color-coded with inline measurement tables and assertion checklists
+- **History timeline** &mdash; compact pass/fail timeline grouped by commit
+- **E-value verdict** &mdash; when using `--effort converge` or `--effort max`, the report shows per-test E-values and the overall GREEN/RED/UNDECIDED verdict
+
+![Test report with interactive DAG visualization](docs/test_report.png)
 
 ## Execution modes
 
@@ -155,11 +167,11 @@ new  ──>  burning_in  ──>  stable
                 └──>  flaky
 ```
 
-Only `stable` tests participate in detection mode and regression selection. The `ci_tool` manages transitions:
+Only `stable` tests participate in detection mode and regression selection. The `ci_tool` manages state transitions:
 
 ```bash
-bazel run //ci_tool:main -- burn-in --status-file .tests/status my_test
-bazel run //ci_tool:main -- deflake --status-file .tests/status flaky_test
+bazel run //ci_tool:main -- burn-in my_test        # new -> burning_in
+bazel run //ci_tool:main -- deflake flaky_test      # flaky -> burning_in
 bazel run //ci_tool:main -- test-status --state stable
 ```
 
@@ -216,6 +228,7 @@ bazel test //...
 | [Burn-in](docs/burn-in.md) | SPRT-based test maturity lifecycle |
 | [Regression](docs/regression-mode.md) | Co-occurrence analysis and test selection |
 | [Structured Logging](docs/structured-logging.md) | Event schema and integration guide |
+| [Reporting](docs/reporting.md) | HTML report features and DAG visualization |
 | [Parameterization](docs/parameterization.md) | Matrix and parameterized test set macros |
 
 ## Requirements
