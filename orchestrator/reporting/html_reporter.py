@@ -1368,6 +1368,15 @@ _DAG_JS = """\
                     'arrow-scale': 0.8,
                     'line-style': 'dashed'
                 }
+            },
+            {
+                selector: 'edge.highlighted',
+                style: {
+                    'width': 3,
+                    'line-color': '#0d6efd',
+                    'target-arrow-color': '#0d6efd',
+                    'z-index': 10
+                }
             }
         ],
         layout: {
@@ -1395,8 +1404,19 @@ _DAG_JS = """\
         cy.fit(undefined, 30);
     });
 
+    /* Highlight connected edges for a node */
+    function highlightNode(node) {
+        cy.edges().removeClass('highlighted');
+        node.connectedEdges().addClass('highlighted');
+    }
+
+    function clearHighlights() {
+        cy.edges().removeClass('highlighted');
+    }
+
     /* Click test node to show detail pane */
     cy.on('tap', 'node.test', function(evt) {
+        highlightNode(evt.target);
         var nodeId = evt.target.data('id');
         var entries = document.querySelectorAll('[data-test-name]');
         var found = null;
@@ -1415,6 +1435,7 @@ _DAG_JS = """\
 
     /* Click group (set) node to show detail pane */
     cy.on('tap', 'node.group', function(evt) {
+        highlightNode(evt.target);
         var nodeId = evt.target.data('id');
         var entries = document.querySelectorAll('[data-set-name]');
         var found = null;
@@ -1433,9 +1454,18 @@ _DAG_JS = """\
         content.innerHTML = clone.outerHTML;
     });
 
+    /* Click background to clear selection and highlights */
+    cy.on('tap', function(evt) {
+        if (evt.target === cy) {
+            clearHighlights();
+        }
+    });
+
     document.getElementById('dag-detail-close').addEventListener('click',
         function() {
             document.getElementById('dag-detail').style.display = 'none';
+            clearHighlights();
+            cy.elements().unselect();
         });
 })();
 """
