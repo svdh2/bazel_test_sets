@@ -1351,3 +1351,34 @@ class TestDagVisualization:
         assert "history-timeline" in card_snippet
         # test_c failed → root_set should show red
         assert "#cf222e" in card_snippet
+
+    def test_set_history_multiple_runs_same_commit(self):
+        """Multiple runs at the same commit produce separate timeline boxes."""
+        report = _make_dag_report()
+        report["report"]["history"] = {
+            "test_a": [
+                {"status": "passed", "commit": "aaa", "duration_seconds": 1.0,
+                 "timestamp": "2026-01-01T00:00:00+00:00"},
+                {"status": "passed", "commit": "aaa", "duration_seconds": 1.0,
+                 "timestamp": "2026-01-01T01:00:00+00:00"},
+            ],
+            "test_b": [
+                {"status": "passed", "commit": "aaa", "duration_seconds": 1.0,
+                 "timestamp": "2026-01-01T00:00:00+00:00"},
+                {"status": "failed", "commit": "aaa", "duration_seconds": 1.0,
+                 "timestamp": "2026-01-01T01:00:00+00:00"},
+            ],
+        }
+        result = generate_html_report(report)
+        marker = 'data-set-name="root_set"'
+        idx = result.index(marker)
+        # Narrow to just the hidden card (ends at first closing </div> sequence)
+        end_marker = "history-timeline"
+        timeline_idx = result.index(end_marker, idx)
+        # Grab enough to cover the timeline div but not the test entries
+        card_snippet = result[timeline_idx:timeline_idx + 300]
+        # Should have two ht-box elements (one per run), not one
+        assert card_snippet.count("ht-box") == 2
+        # Run 1: all passed → green; Run 2: test_b failed → red
+        assert "#2da44e" in card_snippet
+        assert "#cf222e" in card_snippet

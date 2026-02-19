@@ -996,35 +996,21 @@ def _compute_set_history(
 ) -> list[dict[str, Any]]:
     """Aggregate per-test histories into a set-level timeline.
 
-    Groups entries by commit hash (or timestamp when no commit is
-    available) and computes an aggregate status per group:
-    failed if any test failed, dependencies_failed if all grey,
-    passed otherwise.
+    Uses positional indexing: entry *i* in each test's history list
+    corresponds to the *i*-th run.  At each position the aggregate
+    status is: failed if any test failed, dependencies_failed if all
+    grey, passed otherwise.  Tests added later simply have shorter
+    histories and are skipped for earlier positions.
     """
     if not test_names or not history:
         return []
 
-    # Build ordered list of unique keys (commit preferred, timestamp fallback)
-    ordered_keys: list[tuple[str, str | None]] = []
-    seen: set[str] = set()
-    for name in test_names:
-        for hist in history.get(name, []):
-            commit = hist.get("commit")
-            key = commit or hist.get("timestamp", "")
-            if key and key not in seen:
-                ordered_keys.append((key, commit))
-                seen.add(key)
-
-    if not ordered_keys:
+    max_len = max(
+        (len(history.get(name, [])) for name in test_names),
+        default=0,
+    )
+    if max_len == 0:
         return []
-
-    # Index entries by (test_name, key) for fast lookup
-    entry_map: dict[tuple[str, str], str] = {}
-    for name in test_names:
-        for hist in history.get(name, []):
-            key = hist.get("commit") or hist.get("timestamp", "")
-            if key:
-                entry_map[(name, key)] = hist.get("status", "no_tests")
 
     _FAILED_STATUSES = frozenset({
         "failed", "failed+dependencies_failed",
@@ -1034,12 +1020,16 @@ def _compute_set_history(
     })
 
     result: list[dict[str, Any]] = []
-    for key, commit in ordered_keys:
-        statuses = [
-            entry_map[(name, key)]
-            for name in test_names
-            if (name, key) in entry_map
-        ]
+    for i in range(max_len):
+        statuses: list[str] = []
+        commit: str | None = None
+        for name in test_names:
+            entries = history.get(name, [])
+            if i < len(entries):
+                statuses.append(entries[i].get("status", "no_tests"))
+                if commit is None:
+                    commit = entries[i].get("commit")
+
         if not statuses:
             continue
 
