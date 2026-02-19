@@ -640,6 +640,13 @@ def _render_test_set(
             lifecycle_summary, lifecycle_config,
         ))
 
+    # Hidden summary card for the DAG detail pane
+    set_test_names = _collect_test_names(test_set)
+    set_history = _compute_set_history(set_test_names, history)
+    parts.append(_render_set_summary_card(
+        test_set, lifecycle_config, set_history,
+    ))
+
     # Direct tests inside a test-list container
     tests = test_set.get("tests", {})
     if tests:
@@ -972,6 +979,128 @@ def _render_lifecycle_summary(
             f"at {sig*100:.0f}% confidence</div>"
         )
 
+    return "\n".join(parts)
+
+
+def _collect_test_names(test_set: dict[str, Any]) -> list[str]:
+    """Recursively collect all test names from a test set."""
+    names = list(test_set.get("tests", {}).keys())
+    for subset in test_set.get("subsets", []):
+        names.extend(_collect_test_names(subset))
+    return names
+
+
+def _compute_set_history(
+    test_names: list[str],
+    history: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Aggregate per-test histories into a set-level timeline.
+
+    Groups entries by commit hash (or timestamp when no commit is
+    available) and computes an aggregate status per group:
+    failed if any test failed, dependencies_failed if all grey,
+    passed otherwise.
+    """
+    if not test_names or not history:
+        return []
+
+    # Build ordered list of unique keys (commit preferred, timestamp fallback)
+    ordered_keys: list[tuple[str, str | None]] = []
+    seen: set[str] = set()
+    for name in test_names:
+        for hist in history.get(name, []):
+            commit = hist.get("commit")
+            key = commit or hist.get("timestamp", "")
+            if key and key not in seen:
+                ordered_keys.append((key, commit))
+                seen.add(key)
+
+    if not ordered_keys:
+        return []
+
+    # Index entries by (test_name, key) for fast lookup
+    entry_map: dict[tuple[str, str], str] = {}
+    for name in test_names:
+        for hist in history.get(name, []):
+            key = hist.get("commit") or hist.get("timestamp", "")
+            if key:
+                entry_map[(name, key)] = hist.get("status", "no_tests")
+
+    _FAILED_STATUSES = frozenset({
+        "failed", "failed+dependencies_failed",
+    })
+    _GREY_STATUSES = frozenset({
+        "dependencies_failed", "no_tests",
+    })
+
+    result: list[dict[str, Any]] = []
+    for key, commit in ordered_keys:
+        statuses = [
+            entry_map[(name, key)]
+            for name in test_names
+            if (name, key) in entry_map
+        ]
+        if not statuses:
+            continue
+
+        if any(s in _FAILED_STATUSES for s in statuses):
+            agg = "failed"
+        elif all(s in _GREY_STATUSES for s in statuses):
+            agg = "dependencies_failed"
+        else:
+            agg = "passed"
+
+        entry: dict[str, Any] = {"status": agg}
+        if commit:
+            entry["commit"] = commit
+        result.append(entry)
+
+    return result
+
+
+def _render_set_summary_card(
+    test_set: dict[str, Any],
+    lifecycle_config: dict[str, Any] | None = None,
+    history_entries: list[dict[str, Any]] | None = None,
+) -> str:
+    """Render a hidden summary card for the DAG detail pane.
+
+    The card carries a ``data-set-name`` attribute so the JavaScript
+    click handler on group nodes can locate and clone it into the
+    detail pane, mirroring the pattern used for test entries.
+    """
+    name = test_set.get("name", "Test Set")
+    status = test_set.get("status", "no_tests")
+    assertion = test_set.get("assertion", "")
+    color = STATUS_COLORS.get(status, "#e8e8e8")
+    label = STATUS_LABELS.get(status, status.upper())
+
+    parts: list[str] = []
+    parts.append(
+        f'<div data-set-name="{html.escape(name, quote=True)}"'
+        f' style="display:none">'
+    )
+    parts.append('<div class="test-set-header">')
+    parts.append(f"<h2>{html.escape(name)}</h2>")
+    parts.append(
+        f'<span class="status-badge" style="background:{color}">'
+        f"{html.escape(label)}</span>"
+    )
+    parts.append("</div>")
+
+    if assertion:
+        parts.append(
+            f'<div class="test-meta">Assertion: {html.escape(assertion)}</div>'
+        )
+
+    lifecycle_summary = test_set.get("lifecycle_summary")
+    if lifecycle_summary:
+        parts.append(_render_lifecycle_summary(lifecycle_summary, lifecycle_config))
+
+    if history_entries:
+        parts.append(_render_history_timeline(history_entries))
+
+    parts.append("</div>")
     return "\n".join(parts)
 
 
@@ -1347,6 +1476,14 @@ _DAG_JS = """\
                 }
             },
             {
+                selector: 'node.group:selected',
+                style: {
+                    'border-width': 4,
+                    'border-style': 'double',
+                    'border-color': '#0d6efd'
+                }
+            },
+            {
                 selector: 'edge.member',
                 style: {
                     'width': 2,
@@ -1412,6 +1549,26 @@ _DAG_JS = """\
         var content = document.getElementById('dag-detail-content');
         detailPane.style.display = 'block';
         content.innerHTML = found.outerHTML;
+    });
+
+    /* Click group (set) node to show detail pane */
+    cy.on('tap', 'node.group', function(evt) {
+        var nodeId = evt.target.data('id');
+        var entries = document.querySelectorAll('[data-set-name]');
+        var found = null;
+        for (var j = 0; j < entries.length; j++) {
+            if (entries[j].getAttribute('data-set-name') === nodeId) {
+                found = entries[j];
+                break;
+            }
+        }
+        if (!found) return;
+        var detailPane = document.getElementById('dag-detail');
+        var content = document.getElementById('dag-detail-content');
+        detailPane.style.display = 'block';
+        var clone = found.cloneNode(true);
+        clone.style.display = '';
+        content.innerHTML = clone.outerHTML;
     });
 
     document.getElementById('dag-detail-close').addEventListener('click',
