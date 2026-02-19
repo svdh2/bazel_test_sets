@@ -131,15 +131,31 @@ to `target/reports/` automatically. You can also specify a custom path:
 bazel run //path/to:my_tests -- --output results.json
 ```
 
-The report includes:
+The JSON report includes:
 - Summary statistics (total, passed, failed, duration)
 - Per-test results with timing and logs
 - Hierarchical structure mirroring the DAG
 - Structured log data (if tests emit `[TST]` events)
+- History timelines and lifecycle metadata (when a status file is configured)
+- E-value verdict and effort classifications (when using `--effort`)
 
-Generate HTML from the JSON report:
+### HTML Reports
+
+Generate a self-contained HTML report from any JSON report:
 
 ```python
-from orchestrator.reporting.html_reporter import generate_html_from_file
+from pathlib import Path
+from orchestrator.reporting.html_reporter import generate_html_from_file, write_html_report
+
+# From file
 html = generate_html_from_file(Path("results.json"))
+
+# Or write directly
+import json
+report_data = json.loads(Path("results.json").read_text())
+write_html_report(report_data, Path("report.html"))
 ```
+
+The HTML report is a single file that can be opened in any browser. See the
+[Reporting guide](reporting.md) for details on the interactive DAG
+visualization and other report features.

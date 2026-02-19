@@ -44,46 +44,86 @@ bounds derived from the desired error rates (alpha, beta):
 
 ## Running Burn-in
 
-Use the CI tool to run burn-in tests:
+Burn-in is a two-step process: first transition tests into the `burning_in`
+state, then run the orchestrator with an effort mode that evaluates SPRT.
+
+### 1. Configure `.test_set_config`
+
+Set `status_file` and `max_reruns` in `.test_set_config`:
+
+```json
+{
+  "status_file": ".tests/status",
+  "max_reruns": 100,
+  "min_reliability": 0.99,
+  "statistical_significance": 0.95
+}
+```
+
+### 2. Transition tests to burning\_in
+
+Use the CI tool to move tests from `new` to `burning_in`:
 
 ```bash
-bazel run //ci_tool:main -- burn-in \
-    --manifest manifest.json \
-    --status-file .tests/status \
-    --max-runs 30
+bazel run //ci_tool:main -- burn-in my_test_wrapped
+```
+
+Without test names, it lists all tests currently in `burning_in` state:
+
+```bash
+bazel run //ci_tool:main -- burn-in
+```
+
+### 3. Run the orchestrator with effort mode
+
+The orchestrator performs the actual repeated execution with SPRT evaluation.
+Use `--effort converge` (reruns failures) or `--effort max` (reruns all):
+
+```bash
+bazel run //path/to:my_tests -- --effort max
 ```
 
 The burn-in process:
-1. Loads the status file to find tests in `new` or `burning_in` state
-2. Runs each test repeatedly
-3. After each run, evaluates SPRT
+1. Loads the status file to find tests in `burning_in` state
+2. Runs each test, then reruns using SPRT up to `max_reruns`
+3. After each rerun, evaluates SPRT against the configured thresholds
 4. Updates the status file with results
-5. Stops when SPRT reaches a decision or `--max-runs` is reached
+5. Stops when SPRT reaches a decision or the rerun budget is exhausted
 
 ## Status File Format
 
-The `.tests/status` file tracks test maturity state:
+The `.tests/status` file tracks test maturity state. Each test entry has a
+`state`, a rolling `history` of pass/fail results per commit, and a
+`last_updated` timestamp:
 
 ```json
 {
   "tests": {
-    "my_test_wrapped": {
-      "maturity": "stable",
-      "burn_in_runs": 30,
-      "burn_in_passes": 30,
-      "sprt_decision": "accept",
-      "last_run": "2026-02-10T12:00:00+00:00"
+    "@@//pkg:my_test": {
+      "state": "stable",
+      "history": [
+        {"passed": true, "commit": "abc123"},
+        {"passed": true, "commit": "abc123"},
+        {"passed": true, "commit": "def456"}
+      ],
+      "last_updated": "2026-02-10T12:00:00+00:00"
     },
-    "flaky_test_wrapped": {
-      "maturity": "flaky",
-      "burn_in_runs": 25,
-      "burn_in_passes": 18,
-      "sprt_decision": "reject",
-      "last_run": "2026-02-10T12:00:00+00:00"
+    "@@//pkg:flaky_test": {
+      "state": "flaky",
+      "history": [
+        {"passed": true, "commit": "abc123"},
+        {"passed": false, "commit": "abc123"},
+        {"passed": true, "commit": "def456"}
+      ],
+      "last_updated": "2026-02-10T12:00:00+00:00"
     }
   }
 }
 ```
+
+Runs and passes are derived from the `history` array (count of entries and
+count where `passed` is true). SPRT decisions are computed on the fly from
+this history against the thresholds in `.test_set_config`.
 
 ## Mode Interactions
 
@@ -95,15 +135,15 @@ Burn-in status affects execution modes:
 
 ## Deflaking
 
-After a test is marked `flaky`, you can re-evaluate it:
+After a test is marked `flaky`, transition it back to `burning_in` so the
+next orchestrator run re-evaluates it with SPRT:
 
 ```bash
-bazel run //ci_tool:main -- deflake \
-    --manifest manifest.json \
-    --status-file .tests/status
+bazel run //ci_tool:main -- deflake flaky_test_wrapped
 ```
 
-This re-runs flaky tests to check if a fix has made them stable.
+This resets the test's history and moves it to `burning_in`. Run the
+orchestrator again with `--effort converge` or `--effort max` to re-evaluate.
 
 ## Reverse-Chronological SPRT
 

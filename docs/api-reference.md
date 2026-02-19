@@ -162,6 +162,8 @@ Execution tuning parameters are set in `.test_set_config` (JSON):
 | `max_parallel` | int | CPU count | Maximum parallel test executions |
 | `max_failures` | int | unlimited | Stop after N failures |
 | `max_reruns` | int | `100` | Max reruns per test for converge/max effort modes |
+| `min_reliability` | float | `0.99` | Minimum pass rate for SPRT stable threshold |
+| `statistical_significance` | float | `0.95` | Confidence level for SPRT decisions |
 | `max_test_percentage` | float | `0.10` | Max fraction of stable tests for `--effort regression` |
 | `max_hops` | int | `2` | Max BFS hops in regression expansion |
 
@@ -175,8 +177,8 @@ bazel run //ci_tool:main -- [SUBCOMMAND] [OPTIONS]
 
 | Subcommand | Description |
 |------------|-------------|
-| `burn-in` | Run burn-in tests with SPRT evaluation |
-| `deflake` | Re-run flaky tests to confirm stability |
+| `burn-in` | Transition tests to `burning_in` state for SPRT evaluation |
+| `deflake` | Transition `flaky` tests back to `burning_in` with reset history |
 | `test-status` | Display test maturity status from state file |
 | `re-judge` | Re-evaluate judgements with stored measurements |
 | `build-graph` | Build/update co-occurrence graph from git history |
