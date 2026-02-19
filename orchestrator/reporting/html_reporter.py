@@ -60,12 +60,18 @@ STATUS_LABELS: dict[str, str] = {
 }
 
 _CSS = """\
+html, body {
+    height: 100%;
+    margin: 0;
+}
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    margin: 0;
     padding: 20px;
     background: #f5f5f5;
     color: #333;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
 }
 .report-header {
     background: #fff;
@@ -1149,15 +1155,24 @@ _DAG_CSS = """\
     padding: 16px;
     margin-bottom: 12px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 .dag-section h2 {
     margin: 0 0 12px 0;
     font-size: 18px;
+    flex-shrink: 0;
 }
 .dag-container {
     border: 1px solid #ddd;
     border-radius: 6px;
     overflow: hidden;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 .dag-toolbar {
     display: flex;
@@ -1165,6 +1180,7 @@ _DAG_CSS = """\
     padding: 8px 12px;
     background: #f5f5f5;
     border-bottom: 1px solid #ddd;
+    flex-shrink: 0;
 }
 .dag-toolbar button {
     padding: 4px 12px;
@@ -1179,7 +1195,8 @@ _DAG_CSS = """\
 }
 .dag-split {
     display: flex;
-    height: 500px;
+    flex: 1;
+    min-height: 0;
 }
 .dag-canvas {
     flex: 1;
