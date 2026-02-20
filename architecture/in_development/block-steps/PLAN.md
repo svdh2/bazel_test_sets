@@ -5,9 +5,9 @@ This implementation plan is based on: [architecture/in_development/block-steps/D
 
 ## Status Overview
 - **Overall Status**: In Progress
-- **Current Phase**: Phase 3: Segment Parser Extension
-- **Current Step**: Step 3.1: Step parsing in parse_stdout_segments()
-- **Completed Steps**: 4 / 9
+- **Current Phase**: Phase 4: HTML Rendering
+- **Current Step**: Step 4.1: Step rendering in HTML reporter
+- **Completed Steps**: 5 / 9
 - **Last Updated**: 2026-02-19
 
 ## How to Use This Plan
@@ -476,10 +476,10 @@ Extend the segment-based parser (`parse_stdout_segments()`) to build step trees 
 ---
 
 #### Step 3.1: Step parsing in parse_stdout_segments()
-**Status**: In Progress
+**Status**: Completed
 **Started**: 2026-02-19
-**Completed**:
-**PR/Commit**:
+**Completed**: 2026-02-19
+**PR/Commit**: 2adfe40
 
 **Objective**: Extend `parse_stdout_segments()` to handle `step_start`/`step_end` events and build the step tree within `BlockSegment` objects. This function follows the same patterns as `parse_test_output()`, applied to the segment-based parser used by the HTML reporter. Include all error recovery behavior.
 
@@ -535,7 +535,12 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 1.3 and Step 2.1
 
 **Implementation Notes**:
-[Filled in during implementation]
+Extended parse_stdout_segments() with raw line tracking and _parse_steps_in_block() post-processing. Added use_assertions parameter to _parse_steps_in_block() so the same helper works for both parsers: parse_test_output uses .results (with block tags), while parse_stdout_segments uses .assertions (via _normalize_assertion, no block tags, preserving action/unit fields). Added step_start-outside-block error recovery. All 97 parser tests pass, 732 total tests pass, mypy clean.
+
+---
+
+### Phase 3: Segment Parser Extension
+**Phase Status**: Completed
 
 ---
 
@@ -547,8 +552,8 @@ Extend the HTML reporter to render step trees as nested collapsible sections. Th
 ---
 
 #### Step 4.1: Step rendering in HTML reporter
-**Status**: Not Started
-**Started**:
+**Status**: In Progress
+**Started**: 2026-02-19
 **Completed**:
 **PR/Commit**:
 
@@ -894,6 +899,7 @@ Track major milestones and decisions during implementation:
 - Step 1.2 completed: Backward compatibility baseline test (932a0fb)
 - Step 1.3 completed: Step parsing in parse_test_output() (44f68e6)
 - Step 2.1 completed: Error recovery for all structural error cases (39b97e9)
+- Step 3.1 completed: Step parsing in parse_stdout_segments() (2adfe40)
 
 ## Future Enhancements
 Features from the design document that are deferred or out of scope for this implementation plan:
