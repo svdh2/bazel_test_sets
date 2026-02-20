@@ -15,3 +15,6 @@ examples/ecommerce/.tests/
 
 .claude-images/
 .claude/settings.local.json
+
+scratch/
+scratch*
