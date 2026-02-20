@@ -6,8 +6,8 @@ This implementation plan is based on: [architecture/in_development/block-steps/D
 ## Status Overview
 - **Overall Status**: In Progress
 - **Current Phase**: Phase 1: Core Parser
-- **Current Step**: Step 1.1: StepSegment dataclass and BlockSegment extension
-- **Completed Steps**: 0 / 9
+- **Current Step**: Step 1.2: Backward compatibility baseline test
+- **Completed Steps**: 1 / 9
 - **Last Updated**: 2026-02-19
 
 ## How to Use This Plan
@@ -136,17 +136,17 @@ graph TD
 ## Implementation Sequence
 
 ### Phase 1: Core Parser
-**Phase Status**: Not Started
+**Phase Status**: In Progress
 
 Establish the data model and core step-parsing logic in `parse_test_output()`. This is the foundation that all subsequent work depends on.
 
 ---
 
 #### Step 1.1: StepSegment dataclass and BlockSegment extension
-**Status**: In Progress
+**Status**: Completed
 **Started**: 2026-02-19
-**Completed**:
-**PR/Commit**:
+**Completed**: 2026-02-19
+**PR/Commit**: 3673d32
 
 **Objective**: Add the `StepSegment` dataclass and extend `BlockSegment` with a `steps` field. This establishes the data model without changing any parsing behavior.
 
@@ -201,13 +201,13 @@ Expected: Exit code 0, no new type errors
 **Dependencies**: None
 
 **Implementation Notes**:
-[Filled in during implementation]
+Added StepSegment dataclass before BlockSegment in log_parser.py with all required fields (step, description, status, logs, features, measurements, results, errors, assertions, steps). Extended BlockSegment with steps field defaulting to empty list. All 78 existing tests pass unchanged. mypy passes cleanly.
 
 ---
 
 #### Step 1.2: Backward compatibility baseline test
-**Status**: Not Started
-**Started**:
+**Status**: In Progress
+**Started**: 2026-02-19
 **Completed**:
 **PR/Commit**:
 
@@ -889,6 +889,7 @@ Track major milestones and decisions during implementation:
 
 ### 2026-02-19
 - Implementation plan created
+- Step 1.1 completed: StepSegment dataclass and BlockSegment.steps field (3673d32)
 
 ## Future Enhancements
 Features from the design document that are deferred or out of scope for this implementation plan:

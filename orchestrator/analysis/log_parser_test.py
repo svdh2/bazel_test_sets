@@ -8,6 +8,7 @@ from orchestrator.analysis.log_parser import (
     SENTINEL,
     BlockSegment,
     ParsedOutput,
+    StepSegment,
     TextSegment,
     parse_test_output,
     parse_stdout_segments,
@@ -1029,3 +1030,83 @@ class TestSourceMetadata:
         assert isinstance(seg, BlockSegment)
         assert seg.errors[0]["_file"] == "test.py"
         assert seg.errors[0]["_line"] == 8
+
+
+class TestStepParsing:
+    """Tests for step parsing within blocks.
+
+    This class contains all tests related to the step feature, starting
+    with the backward compatibility baseline test.
+    """
+
+    def test_backward_compat_no_steps(self):
+        """Block without step events produces identical output to current parser.
+
+        Verifies that a block with features, measurements, results, errors,
+        and plain text -- but no step_start/step_end events -- produces a
+        BlockSegment with steps == [] and all flat lists populated as before.
+        This test anchors backward compatibility for all subsequent step
+        parsing changes.
+        """
+        lines = [
+            '[TST] {"type": "block_start", "block": "rigging"}',
+            '[TST] {"type": "feature", "name": "payment_gateway"}',
+            '[TST] {"type": "feature", "name": "user_accounts"}',
+            '[TST] {"type": "block_end", "block": "rigging"}',
+            '[TST] {"type": "block_start", "block": "stimulation", '
+            '"description": "Place order for 3 items"}',
+            "Running order placement...",
+            '[TST] {"type": "measurement", "name": "order_total", '
+            '"value": 129.97}',
+            '[TST] {"type": "measurement", "name": "items_count", '
+            '"value": 3}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+            '[TST] {"type": "block_start", "block": "checkpoint"}',
+            '[TST] {"type": "result", "status": "pass", '
+            '"message": "order placed successfully"}',
+            '[TST] {"type": "error", "message": "minor warning"}',
+            '[TST] {"type": "block_end", "block": "checkpoint"}',
+            '[TST] {"type": "block_start", "block": "verdict"}',
+            '[TST] {"type": "result", "status": "pass", '
+            '"message": "all checks passed"}',
+            '[TST] {"type": "block_end", "block": "verdict"}',
+        ]
+        result = parse_test_output(lines)
+
+        # Block sequence is correct
+        assert result.block_sequence == [
+            "rigging", "stimulation", "checkpoint", "verdict",
+        ]
+
+        # Rigging block: features populated, steps empty
+        assert result.rigging is not None
+        assert len(result.rigging.features) == 2
+        assert result.rigging.features[0]["name"] == "payment_gateway"
+        assert result.rigging.features[1]["name"] == "user_accounts"
+        assert result.rigging.steps == []
+
+        # Stimulation block: measurements and plain text, steps empty
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        assert len(stim) == 1
+        assert len(stim[0].measurements) == 2
+        assert stim[0].measurements[0]["name"] == "order_total"
+        assert stim[0].measurements[1]["name"] == "items_count"
+        assert "Running order placement..." in stim[0].logs
+        assert stim[0].steps == []
+
+        # Checkpoint block: results and errors, steps empty
+        chk = [b for b in result.run_blocks if b.block == "checkpoint"]
+        assert len(chk) == 1
+        assert len(chk[0].results) == 1
+        assert chk[0].results[0]["status"] == "pass"
+        assert len(chk[0].errors) == 1
+        assert chk[0].errors[0]["message"] == "minor warning"
+        assert chk[0].steps == []
+
+        # Verdict block: results, steps empty
+        assert result.verdict is not None
+        assert len(result.verdict.results) == 1
+        assert result.verdict.steps == []
+
+        # No parser warnings
+        assert result.warnings == []
