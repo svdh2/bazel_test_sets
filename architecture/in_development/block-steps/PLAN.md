@@ -5,9 +5,9 @@ This implementation plan is based on: [architecture/in_development/block-steps/D
 
 ## Status Overview
 - **Overall Status**: In Progress
-- **Current Phase**: Phase 4: HTML Rendering
-- **Current Step**: Step 4.2: HTML reporter unit tests
-- **Completed Steps**: 6 / 9
+- **Current Phase**: Phase 5: Integration and Finalization
+- **Current Step**: Step 5.1: Package exports and integration example test
+- **Completed Steps**: 7 / 9
 - **Last Updated**: 2026-02-19
 
 ## How to Use This Plan
@@ -653,10 +653,10 @@ Added _render_step_segment() with recursive rendering, _step_should_expand() for
 ---
 
 #### Step 4.2: HTML reporter unit tests
-**Status**: In Progress
+**Status**: Completed
 **Started**: 2026-02-19
-**Completed**:
-**PR/Commit**:
+**Completed**: 2026-02-19
+**PR/Commit**: aa06809
 
 **Objective**: Create a dedicated HTML reporter test file for step rendering. Test all rendering scenarios: passed/failed/warning steps, ancestor expansion, step header content, measurements/errors in step body, nested steps, and backward compatibility (block without steps).
 
@@ -716,7 +716,12 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 4.1
 
 **Implementation Notes**:
-[Filled in during implementation]
+Created tests/test_html_reporter_steps.py with 9 unit tests covering all rendering scenarios: passed/failed/warning states, ancestor expansion, step header content, measurements and errors in step body, nested step DOM nesting, and backward compatibility for blocks without steps. All 741 tests pass, mypy clean.
+
+---
+
+### Phase 4: HTML Rendering
+**Phase Status**: Completed
 
 ---
 
@@ -728,8 +733,8 @@ Create the integration example test, update package exports, validate the full t
 ---
 
 #### Step 5.1: Package exports and integration example test
-**Status**: Not Started
-**Started**:
+**Status**: In Progress
+**Started**: 2026-02-19
 **Completed**:
 **PR/Commit**:
 
@@ -901,6 +906,7 @@ Track major milestones and decisions during implementation:
 - Step 2.1 completed: Error recovery for all structural error cases (39b97e9)
 - Step 3.1 completed: Step parsing in parse_stdout_segments() (2adfe40)
 - Step 4.1 completed: Step rendering in HTML reporter (82382f8)
+- Step 4.2 completed: HTML reporter unit tests (aa06809)
 
 ## Future Enhancements
 Features from the design document that are deferred or out of scope for this implementation plan:
