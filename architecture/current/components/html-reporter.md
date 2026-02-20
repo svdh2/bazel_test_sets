@@ -27,6 +27,7 @@ def write_html_report(report_data: dict, output_path: Path)
 | **Test entry** | Name, status badge, assertion, duration, exit code, color-coded border |
 | **Logs** | Expandable `<details>` with stdout (dark theme pre) and stderr (pink border) |
 | **Structured log** | Expandable section with block sequence, measurement table, results, errors |
+| **Step segments** | Nested collapsible `<details>` within blocks showing step hierarchy with status badges, measurements, assertions, errors, and raw logs. Passed steps collapsed; failed/warning steps and their ancestors expanded. |
 | **History timeline** | Compact horizontal bar of colored boxes showing pass/fail history; hover reveals commit hash |
 | **Burn-in info** | Blue info box with runs, passes, SPRT status |
 | **Lifecycle badge** | Per-test badge showing lifecycle state (stable/burning_in/flaky/new/disabled) with reliability rate |
@@ -44,6 +45,14 @@ def write_html_report(report_data: dict, output_path: Path)
 | `passed+dependencies_failed` | `#FFFFAD` (light yellow) |
 | `failed+dependencies_failed` | `#FFB6C1` (light pink) |
 
+### Step Status Colors
+
+| Status | Color |
+|--------|-------|
+| `passed` | `#90EE90` (light green) |
+| `failed` | `#FFB6C1` (light pink) |
+| `warning` | `#FFFFAD` (light yellow) |
+
 ### Lifecycle State Colors
 
 | State | Color |
@@ -57,6 +66,7 @@ def write_html_report(report_data: dict, output_path: Path)
 ## Dependencies
 
 - Standard library: `json` (loading reports, embedding graph data), `html` (escaping)
+- **Log Parser** (`orchestrator.analysis.log_parser`): `BlockSegment`, `StepSegment`, `TextSegment`, `parse_stdout_segments` for structured log parsing
 - **Source Links** (`orchestrator.reporting.source_links`): `render_source_link()` for building HTML source code links
 - **CDN (runtime)**: Cytoscape.js 3.30.4, dagre 0.8.5, cytoscape-dagre 2.5.0 from unpkg.com (loaded by the browser when viewing the report; requires internet access)
 

@@ -14,6 +14,19 @@ Parses structured test log events from test stdout. Tests emit machine-readable 
 
 ```python
 @dataclass
+class StepSegment:
+    step: str               # step name (e.g. "create_order")
+    description: str        # human-readable description
+    status: str             # "passed", "failed", or "warning"
+    logs: str               # plain text lines attributed to this step
+    features: list[dict]    # [{"name": ...}]
+    measurements: list[dict]  # [{"name": ..., "value": ...}]
+    results: list[dict]     # [{"status": ..., "message": ...}]
+    errors: list[dict]      # [{"message": ...}]
+    assertions: list[dict]  # normalized: [{"description": ..., "status": ...}]
+    steps: list[StepSegment]  # nested sub-steps (recursive)
+
+@dataclass
 class BlockSegment:
     block: str              # "rigging", "stimulation", "checkpoint", "verdict", "untyped"
     description: str        # from optional block_start description field
@@ -23,6 +36,7 @@ class BlockSegment:
     results: list[dict]     # [{"status": ..., "message": ..., "block": ...}]
     errors: list[dict]      # [{"message": ..., "block": ...}]
     assertions: list[dict]  # normalized for display: [{"description": ..., "status": ...}]
+    steps: list[StepSegment]  # step tree (empty if no step events in block)
 
 @dataclass
 class ParsedOutput:
@@ -48,6 +62,8 @@ Builds `BlockSegment` objects as it encounters `block_start`/`block_end` events.
 |------|--------|-------------|
 | `block_start` / `phase` | `block`, `description` (opt) | Opens a named block; sets current block context |
 | `block_end` | `block` | Closes a block; resets current block to None |
+| `step_start` | `step`, `description` | Opens a named step within a block; supports nesting |
+| `step_end` | `step` | Closes the innermost open step |
 | `feature` | `name`, `action` (opt) | Declares a feature exercised in the current block |
 | `measurement` | `name`, `value`, `unit` (opt) | Records a numeric measurement |
 | `result` | `name`/`passed` or `status`/`message` | Records a test result within a block |
@@ -71,6 +87,23 @@ def parse_stdout_segments(stdout: str) -> list[TextSegment | BlockSegment]
 Parses raw stdout into a sequence of interleaved `TextSegment` (plain text) and `BlockSegment` (structured blocks) for unified rendering. Used by the HTML reporter to detect and render structured logging inline with plain text.
 
 Result events are normalized into `assertions`: `name`/`passed` → `{"description": name, "status": "passed"/"failed"}`; `status`/`message` → `{"description": message, "status": status}`.
+
+### Step Parsing
+
+Both `parse_test_output` and `parse_stdout_segments` handle `step_start`/`step_end` events within blocks via the shared `_parse_steps_in_block()` post-processor. Steps subdivide blocks into named sub-operations with arbitrary nesting depth.
+
+**Behavior**:
+- Content events (features, measurements, results, errors) inside a step are stored in the innermost step with original names AND bubbled to the containing block with step-qualified names (e.g. `"step_a.step_b.measurement_name"`)
+- Error events set the step's `status` to `"failed"` and propagate that status to all ancestor steps
+- Plain text lines are attributed to the innermost step only (not duplicated to block logs)
+- Events outside steps but inside a block use existing behavior (stored in block flat lists with original names)
+
+**Error recovery** (valid-prefix-plus-undefined-remainder strategy):
+1. `step_end` name mismatch: keeps valid prefix, creates undefined step with `status="warning"` for remainder
+2. `step_start` outside any block: creates an undefined block to contain the orphan step
+3. `block_end` with unclosed steps: marks unclosed steps with `status="warning"`
+4. Duplicate step names in same scope: keeps first occurrence, collects duplicate into undefined step
+5. Precedence: `"failed"` > `"warning"` when a step has both an error event and a structural issue
 
 ## Dependencies
 
