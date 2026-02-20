@@ -6,8 +6,8 @@ This implementation plan is based on: [architecture/in_development/block-steps/D
 ## Status Overview
 - **Overall Status**: In Progress
 - **Current Phase**: Phase 4: HTML Rendering
-- **Current Step**: Step 4.1: Step rendering in HTML reporter
-- **Completed Steps**: 5 / 9
+- **Current Step**: Step 4.2: HTML reporter unit tests
+- **Completed Steps**: 6 / 9
 - **Last Updated**: 2026-02-19
 
 ## How to Use This Plan
@@ -552,10 +552,10 @@ Extend the HTML reporter to render step trees as nested collapsible sections. Th
 ---
 
 #### Step 4.1: Step rendering in HTML reporter
-**Status**: In Progress
+**Status**: Completed
 **Started**: 2026-02-19
-**Completed**:
-**PR/Commit**:
+**Completed**: 2026-02-19
+**PR/Commit**: 82382f8
 
 **Objective**: Extend `_render_block_segment()` to render step trees. Add a new `_render_step_segment()` function with collapsible `<details>` pattern, status badges, ancestor expansion logic, and warning state rendering. Add CSS for step styling.
 
@@ -648,13 +648,13 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 3.1
 
 **Implementation Notes**:
-[Filled in during implementation]
+Added _render_step_segment() with recursive rendering, _step_should_expand() for ancestor expansion, CSS for step styling, and integrated step rendering into _render_block_segment(). Steps render as nested collapsible <details> elements with status badges. Passed steps collapsed, failed/warning expanded. All 732 tests pass, mypy clean.
 
 ---
 
 #### Step 4.2: HTML reporter unit tests
-**Status**: Not Started
-**Started**:
+**Status**: In Progress
+**Started**: 2026-02-19
 **Completed**:
 **PR/Commit**:
 
@@ -900,6 +900,7 @@ Track major milestones and decisions during implementation:
 - Step 1.3 completed: Step parsing in parse_test_output() (44f68e6)
 - Step 2.1 completed: Error recovery for all structural error cases (39b97e9)
 - Step 3.1 completed: Step parsing in parse_stdout_segments() (2adfe40)
+- Step 4.1 completed: Step rendering in HTML reporter (82382f8)
 
 ## Future Enhancements
 Features from the design document that are deferred or out of scope for this implementation plan:
