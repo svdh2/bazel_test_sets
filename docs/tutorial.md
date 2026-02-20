@@ -172,7 +172,17 @@ def main() -> int:
     tst({"type": "block_end", "block": "rigging"})
 
     tst({"type": "block_start", "block": "stimulation"})
+
+    # Steps break down the block into named sub-operations
+    tst({"type": "step_start", "step": "send_request", "description": "Send GET /api/v1/users"})
     tst({"type": "measurement", "name": "response_time_ms", "value": 42, "unit": "ms"})
+    tst({"type": "step_end", "step": "send_request"})
+
+    tst({"type": "step_start", "step": "check_response", "description": "Validate response body"})
+    tst({"type": "result", "name": "status_code_200", "passed": True})
+    tst({"type": "result", "name": "body_has_users", "passed": True})
+    tst({"type": "step_end", "step": "check_response"})
+
     tst({"type": "block_end", "block": "stimulation"})
 
     tst({"type": "block_start", "block": "verdict"})
@@ -186,6 +196,8 @@ if __name__ == "__main__":
 ```
 
 The orchestrator parses these events and includes them in the JSON report.
+Steps appear as collapsible sections in the HTML report -- failed steps
+are expanded automatically so readers can quickly find what went wrong.
 
 ## Step 8: View the HTML Report
 

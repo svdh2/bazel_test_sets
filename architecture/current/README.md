@@ -121,5 +121,5 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 
 ## Git Sync
 
-- **Commit**: `674dcd7debd9d6f9a29adcb9a9acb454d085105c`
-- **Last updated**: 2026-02-17
+- **Commit**: `6974d81f19da85d8470a0853ecb7f884b7edc7cc`
+- **Last updated**: 2026-02-19

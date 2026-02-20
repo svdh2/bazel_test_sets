@@ -36,6 +36,40 @@ Standard block names:
 - `checkpoint`: Intermediate verification points
 - `verdict`: Final pass/fail determination
 
+### Step Events
+
+Steps subdivide blocks into named sub-operations with optional nesting.
+This helps readers of test results understand which specific operation
+failed, without needing to read the test source code.
+
+```python
+# Start a step (within a block)
+tst({"type": "step_start", "step": "validate_inventory", "description": "Check inventory for all items"})
+
+# Nested sub-step
+tst({"type": "step_start", "step": "check_warehouse", "description": "Query warehouse stock levels"})
+tst({"type": "step_end", "step": "check_warehouse"})
+
+# End the parent step
+tst({"type": "step_end", "step": "validate_inventory"})
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | string | yes | `"step_start"` or `"step_end"` |
+| `step` | string | yes | Unique step name (within the block) |
+| `description` | string | yes (start only) | User-friendly description of the step |
+
+**Rules:**
+- Steps must be inside a block.
+- Steps can nest to arbitrary depth.
+- `step_end` must name the innermost open step.
+- Logs between step start/end are attributed to that step.
+- Measurement, result, and feature events bubble to the containing block
+  with step-qualified names (e.g., `outer.inner.latency`).
+- Errors mark the current step and all ancestor steps as failed.
+- In HTML reports, passed steps are collapsed; failed steps are expanded.
+
 ### Measurement Events
 
 Record quantitative measurements during test execution:
@@ -109,16 +143,19 @@ def main() -> int:
     tst({"type": "feature", "name": "cache", "action": "flush"})
     tst({"type": "block_end", "block": "rigging"})
 
-    # Stimulation phase: apply test stimulus
+    # Stimulation phase: apply test stimulus with steps
     tst({"type": "block_start", "block": "stimulation"})
+
+    tst({"type": "step_start", "step": "run_query", "description": "Execute database query"})
     tst({"type": "measurement", "name": "query_time_ms", "value": 12, "unit": "ms"})
     tst({"type": "measurement", "name": "rows_returned", "value": 42, "unit": "rows"})
-    tst({"type": "block_end", "block": "stimulation"})
+    tst({"type": "step_end", "step": "run_query"})
 
-    # Checkpoint: intermediate verification
-    tst({"type": "block_start", "block": "checkpoint"})
+    tst({"type": "step_start", "step": "validate_results", "description": "Check query results"})
     tst({"type": "result", "name": "data_integrity", "passed": True})
-    tst({"type": "block_end", "block": "checkpoint"})
+    tst({"type": "step_end", "step": "validate_results"})
+
+    tst({"type": "block_end", "block": "stimulation"})
 
     # Verdict: final determination
     tst({"type": "block_start", "block": "verdict"})

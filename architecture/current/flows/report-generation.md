@@ -61,7 +61,7 @@ write_html_report(report_data, html_path)
 The HTML Reporter:
 1. Takes the same report data structure used for JSON
 2. Renders a self-contained HTML page with embedded CSS
-3. Parses stdout with `parse_stdout_segments()` to detect `[TST]` structured logging and renders unified view (block cards with measurements tables, assertions, features) or falls back to raw `<pre>` for plain stdout
+3. Parses stdout with `parse_stdout_segments()` to detect `[TST]` structured logging and renders unified view (block cards with measurements tables, assertions, features, and step trees rendered as nested collapsible sections) or falls back to raw `<pre>` for plain stdout
 4. Writes to the same path as JSON but with `.html` extension
 
 **Components**: HTML Reporter
@@ -149,7 +149,7 @@ report_data = {"report": {..., "source_link_base": ...}}
 | Summary bar | Color-coded count badges + duration |
 | Test set block | Hierarchical with aggregated status badge |
 | Per-test entry | Status badge, assertion, duration, expandable logs |
-| Block segments | Structured blocks parsed from stdout: type badge, features, measurements table, assertions, errors |
+| Block segments | Structured blocks parsed from stdout: type badge, features, measurements table, assertions, errors, step tree |
 | Burn-in info | Runs, passes, SPRT status (blue info box) |
 | Regression info | Changed files, test scores table |
 

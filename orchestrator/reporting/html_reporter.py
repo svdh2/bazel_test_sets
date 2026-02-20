@@ -13,6 +13,7 @@ from typing import Any
 
 from orchestrator.analysis.log_parser import (
     BlockSegment,
+    StepSegment,
     TextSegment,
     parse_stdout_segments,
 )
@@ -390,6 +391,42 @@ pre {
     font-weight: 600;
     margin: 4px 0;
 }
+.step-segment {
+    border-radius: 4px;
+    padding: 6px 10px;
+    margin: 4px 0 4px 12px;
+    border-left: 2px solid #ccc;
+    background: #f8f8f8;
+}
+.step-segment.step-passed {
+    border-left-color: #90EE90;
+}
+.step-segment.step-failed {
+    border-left-color: #FFB6C1;
+}
+.step-segment.step-warning {
+    border-left-color: #FFFFAD;
+}
+.step-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    cursor: pointer;
+}
+.step-status-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #333;
+}
+.step-name {
+    font-size: 11px;
+    color: #888;
+    font-family: monospace;
+}
 .source-link {
     font-size: 11px;
     color: #888;
@@ -648,6 +685,128 @@ def _render_stdout_segments(
     return "\n".join(parts)
 
 
+def _step_should_expand(step: StepSegment) -> bool:
+    """Return True if this step or any descendant has non-passed status."""
+    if step.status != "passed":
+        return True
+    return any(_step_should_expand(sub) for sub in step.steps)
+
+
+# Step status badge colors
+_STEP_STATUS_COLORS: dict[str, str] = {
+    "passed": "#90EE90",
+    "failed": "#FFB6C1",
+    "warning": "#FFFFAD",
+}
+
+# Step status display labels
+_STEP_STATUS_LABELS: dict[str, str] = {
+    "passed": "PASSED",
+    "failed": "FAILED",
+    "warning": "WARNING",
+}
+
+
+def _render_step_segment(
+    step: StepSegment,
+    source_link_base: str | None = None,
+) -> str:
+    """Render a single step as a collapsible HTML element.
+
+    Passed steps are collapsed by default; failed and warning steps
+    (and their ancestors) are expanded.
+    """
+    status = step.status
+    should_expand = _step_should_expand(step)
+    open_attr = " open" if should_expand else ""
+    status_color = _STEP_STATUS_COLORS.get(status, "#e8e8e8")
+    status_label = _STEP_STATUS_LABELS.get(status, status.upper())
+
+    parts: list[str] = []
+    parts.append(
+        f'<details class="step-segment step-{html.escape(status)}"{open_attr}>'
+    )
+    parts.append(
+        f'<summary class="step-header">'
+        f'<span class="step-status-badge" '
+        f'style="background:{status_color}">'
+        f'{html.escape(status_label)}</span> '
+        f'{html.escape(step.description)} '
+        f'<span class="step-name">{html.escape(step.step)}</span>'
+        f'</summary>'
+    )
+
+    # Features
+    if step.features:
+        feat_parts: list[str] = []
+        for f in step.features:
+            name_html = html.escape(f.get("name", ""))
+            link = render_source_link(f, source_link_base)
+            feat_parts.append(f"{name_html}{link}")
+        parts.append(
+            f'<div class="block-features">Features: '
+            f'{", ".join(feat_parts)}</div>'
+        )
+
+    # Measurements table
+    if step.measurements:
+        parts.append('<table class="measurements-table">')
+        parts.append(
+            "<tr><th>Name</th><th>Value</th><th>Unit</th><th>Source</th></tr>"
+        )
+        for m in step.measurements:
+            mname = html.escape(str(m.get("name", "")))
+            mval = html.escape(str(m.get("value", "")))
+            munit = html.escape(str(m.get("unit", "")))
+            mlink = render_source_link(m, source_link_base)
+            parts.append(
+                f"<tr><td>{mname}</td><td>{mval}</td>"
+                f"<td>{munit}</td><td>{mlink}</td></tr>"
+            )
+        parts.append("</table>")
+
+    # Assertions
+    if step.assertions:
+        parts.append('<ul class="assertion-list">')
+        for a in step.assertions:
+            desc = html.escape(str(a.get("description", "")))
+            a_status = a.get("status", "unknown")
+            css_class = (
+                "assertion-pass" if a_status == "passed"
+                else "assertion-fail"
+            )
+            link = render_source_link(a, source_link_base)
+            parts.append(f'<li class="{css_class}">{desc}{link}</li>')
+        parts.append("</ul>")
+
+    # Errors
+    for err in step.errors:
+        msg = err.get("message", "") if isinstance(err, dict) else str(err)
+        if msg:
+            link = (
+                render_source_link(err, source_link_base)
+                if isinstance(err, dict) else ""
+            )
+            parts.append(
+                f'<div class="block-error">Error: '
+                f'{html.escape(msg)}{link}</div>'
+            )
+
+    # Nested sub-steps
+    for sub in step.steps:
+        parts.append(_render_step_segment(sub, source_link_base))
+
+    # Raw logs (collapsed)
+    if step.logs:
+        parts.append('<details class="log-details">')
+        parts.append("<summary>Raw logs</summary>")
+        parts.append(f"<pre>{html.escape(step.logs)}</pre>")
+        parts.append("</details>")
+
+    parts.append("</details>")
+    return "\n".join(parts)
+
+
 def _render_block_segment(
     block: BlockSegment,
     source_link_base: str | None = None,
@@ -709,7 +868,11 @@ def _render_block_segment(
             parts.append(f'<li class="{css_class}">{desc}{link}</li>')
         parts.append("</ul>")
 
-    # Block logs (raw timeline — collapsed by default)
+    # Steps (rendered as nested collapsible sections)
+    for step in block.steps:
+        parts.append(_render_step_segment(step, source_link_base))
+
+    # Block logs (raw timeline -- collapsed by default)
     if block.logs:
         parts.append('<details class="log-details">')
         parts.append("<summary>Raw logs</summary>")

@@ -8,6 +8,7 @@ from orchestrator.analysis.log_parser import (
     SENTINEL,
     BlockSegment,
     ParsedOutput,
+    StepSegment,
     TextSegment,
     parse_test_output,
     parse_stdout_segments,
@@ -912,6 +913,122 @@ class TestParseStdoutSegments:
         assert isinstance(segments[4], TextSegment)
         assert "Test complete." in segments[4].text
 
+    def test_parse_stdout_segments_with_steps(self):
+        """parse_stdout_segments populates steps within blocks.
+
+        Verifies that step_start/step_end events are parsed into a step tree,
+        that content events bubble with step-qualified names (using assertions
+        instead of results), and that error recovery works.
+        """
+        stdout = (
+            '[TST] {"type": "block_start", "block": "stimulation", '
+            '"description": "Order flow"}\n'
+            # Step with measurement
+            '[TST] {"type": "step_start", "step": "create_order", '
+            '"description": "Create a new order"}\n'
+            '[TST] {"type": "measurement", "name": "order_total", '
+            '"value": 129.97, "unit": "USD"}\n'
+            # Nested step with assertion
+            '[TST] {"type": "step_start", "step": "validate", '
+            '"description": "Validate order"}\n'
+            '[TST] {"type": "result", "name": "order_valid", "passed": true}\n'
+            "Validation log output\n"
+            '[TST] {"type": "step_end", "step": "validate"}\n'
+            '[TST] {"type": "step_end", "step": "create_order"}\n'
+            # Event outside steps (at block level)
+            '[TST] {"type": "measurement", "name": "block_metric", '
+            '"value": 42}\n'
+            '[TST] {"type": "block_end", "block": "stimulation"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        assert len(segments) == 1
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.block == "stimulation"
+
+        # Step tree: create_order -> validate
+        assert len(seg.steps) == 1
+        create_order = seg.steps[0]
+        assert create_order.step == "create_order"
+        assert create_order.description == "Create a new order"
+        assert create_order.status == "passed"
+
+        # Measurement in create_order step (original name)
+        assert len(create_order.measurements) == 1
+        assert create_order.measurements[0]["name"] == "order_total"
+        assert create_order.measurements[0]["value"] == 129.97
+        assert create_order.measurements[0]["unit"] == "USD"
+
+        # Nested step: validate
+        assert len(create_order.steps) == 1
+        validate = create_order.steps[0]
+        assert validate.step == "validate"
+        assert validate.description == "Validate order"
+        assert validate.status == "passed"
+
+        # Assertion in validate step (normalized format)
+        assert len(validate.assertions) == 1
+        assert validate.assertions[0]["description"] == "order_valid"
+        assert validate.assertions[0]["status"] == "passed"
+
+        # Plain text attributed to validate step
+        assert "Validation log output" in validate.logs
+
+        # Bubbled to block: measurements use step-qualified names
+        m_names = [m["name"] for m in seg.measurements]
+        assert "create_order.order_total" in m_names
+        assert "block_metric" in m_names
+
+        # Bubbled to block: assertions use step-qualified descriptions
+        a_descs = [a["description"] for a in seg.assertions]
+        assert "create_order.validate.order_valid" in a_descs
+
+        # Block logs should NOT contain step-internal text
+        assert "Validation log output" not in seg.logs
+
+    def test_parse_stdout_segments_steps_error_recovery(self):
+        """parse_stdout_segments handles step error recovery.
+
+        Verifies that unclosed steps get warning status and error events
+        propagate failed status up the step stack.
+        """
+        stdout = (
+            '[TST] {"type": "block_start", "block": "stimulation"}\n'
+            '[TST] {"type": "step_start", "step": "risky", '
+            '"description": "Risky operation"}\n'
+            '[TST] {"type": "error", "message": "connection failed"}\n'
+            # Step never closed -- block ends
+            '[TST] {"type": "block_end", "block": "stimulation"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+
+        assert len(seg.steps) == 1
+        step = seg.steps[0]
+        assert step.step == "risky"
+        # "failed" takes precedence over "warning" (unclosed + error)
+        assert step.status == "failed"
+        assert len(step.errors) == 1
+        assert step.errors[0]["message"] == "connection failed"
+
+        # Error also bubbled to block
+        assert len(seg.errors) == 1
+
+    def test_parse_stdout_segments_no_steps_unchanged(self):
+        """Block without steps renders identically through segment parser."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "rigging"}\n'
+            '[TST] {"type": "feature", "name": "auth", "action": "connect"}\n'
+            '[TST] {"type": "block_end", "block": "rigging"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.steps == []
+        assert len(seg.features) == 1
+        assert seg.features[0] == {"name": "auth", "action": "connect"}
+
 
 class TestSourceMetadata:
     """Tests for _file/_line source metadata preservation."""
@@ -1029,3 +1146,561 @@ class TestSourceMetadata:
         assert isinstance(seg, BlockSegment)
         assert seg.errors[0]["_file"] == "test.py"
         assert seg.errors[0]["_line"] == 8
+
+
+class TestStepParsing:
+    """Tests for step parsing within blocks.
+
+    This class contains all tests related to the step feature, starting
+    with the backward compatibility baseline test.
+    """
+
+    def test_backward_compat_no_steps(self):
+        """Block without step events produces identical output to current parser.
+
+        Verifies that a block with features, measurements, results, errors,
+        and plain text -- but no step_start/step_end events -- produces a
+        BlockSegment with steps == [] and all flat lists populated as before.
+        This test anchors backward compatibility for all subsequent step
+        parsing changes.
+        """
+        lines = [
+            '[TST] {"type": "block_start", "block": "rigging"}',
+            '[TST] {"type": "feature", "name": "payment_gateway"}',
+            '[TST] {"type": "feature", "name": "user_accounts"}',
+            '[TST] {"type": "block_end", "block": "rigging"}',
+            '[TST] {"type": "block_start", "block": "stimulation", '
+            '"description": "Place order for 3 items"}',
+            "Running order placement...",
+            '[TST] {"type": "measurement", "name": "order_total", '
+            '"value": 129.97}',
+            '[TST] {"type": "measurement", "name": "items_count", '
+            '"value": 3}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+            '[TST] {"type": "block_start", "block": "checkpoint"}',
+            '[TST] {"type": "result", "status": "pass", '
+            '"message": "order placed successfully"}',
+            '[TST] {"type": "error", "message": "minor warning"}',
+            '[TST] {"type": "block_end", "block": "checkpoint"}',
+            '[TST] {"type": "block_start", "block": "verdict"}',
+            '[TST] {"type": "result", "status": "pass", '
+            '"message": "all checks passed"}',
+            '[TST] {"type": "block_end", "block": "verdict"}',
+        ]
+        result = parse_test_output(lines)
+
+        # Block sequence is correct
+        assert result.block_sequence == [
+            "rigging", "stimulation", "checkpoint", "verdict",
+        ]
+
+        # Rigging block: features populated, steps empty
+        assert result.rigging is not None
+        assert len(result.rigging.features) == 2
+        assert result.rigging.features[0]["name"] == "payment_gateway"
+        assert result.rigging.features[1]["name"] == "user_accounts"
+        assert result.rigging.steps == []
+
+        # Stimulation block: measurements and plain text, steps empty
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        assert len(stim) == 1
+        assert len(stim[0].measurements) == 2
+        assert stim[0].measurements[0]["name"] == "order_total"
+        assert stim[0].measurements[1]["name"] == "items_count"
+        assert "Running order placement..." in stim[0].logs
+        assert stim[0].steps == []
+
+        # Checkpoint block: results and errors, steps empty
+        chk = [b for b in result.run_blocks if b.block == "checkpoint"]
+        assert len(chk) == 1
+        assert len(chk[0].results) == 1
+        assert chk[0].results[0]["status"] == "pass"
+        assert len(chk[0].errors) == 1
+        assert chk[0].errors[0]["message"] == "minor warning"
+        assert chk[0].steps == []
+
+        # Verdict block: results, steps empty
+        assert result.verdict is not None
+        assert len(result.verdict.results) == 1
+        assert result.verdict.steps == []
+
+        # No parser warnings
+        assert result.warnings == []
+
+    def test_single_step_in_block(self):
+        """One step inside a block. Verify tree and bubbled events."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "create_order", '
+            '"description": "Create a new order"}',
+            '[TST] {"type": "measurement", "name": "order_id", "value": 12345}',
+            '[TST] {"type": "step_end", "step": "create_order"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        assert len(stim) == 1
+        block = stim[0]
+
+        # Step tree
+        assert len(block.steps) == 1
+        step = block.steps[0]
+        assert step.step == "create_order"
+        assert step.description == "Create a new order"
+        assert step.status == "passed"
+        assert len(step.measurements) == 1
+        assert step.measurements[0]["name"] == "order_id"
+        assert step.measurements[0]["value"] == 12345
+
+        # Bubbled measurement in block with step-qualified name
+        assert len(block.measurements) == 1
+        assert block.measurements[0]["name"] == "create_order.order_id"
+        assert block.measurements[0]["value"] == 12345
+
+        assert result.warnings == []
+
+    def test_nested_steps(self):
+        """Three levels of nesting: block > step A > step B > step C."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "A", "description": "Step A"}',
+            '[TST] {"type": "step_start", "step": "B", "description": "Step B"}',
+            '[TST] {"type": "step_start", "step": "C", "description": "Step C"}',
+            '[TST] {"type": "measurement", "name": "val", "value": 1}',
+            '[TST] {"type": "step_end", "step": "C"}',
+            '[TST] {"type": "step_end", "step": "B"}',
+            '[TST] {"type": "step_end", "step": "A"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        # Tree structure: A -> B -> C
+        assert len(block.steps) == 1
+        step_a = block.steps[0]
+        assert step_a.step == "A"
+        assert len(step_a.steps) == 1
+        step_b = step_a.steps[0]
+        assert step_b.step == "B"
+        assert len(step_b.steps) == 1
+        step_c = step_b.steps[0]
+        assert step_c.step == "C"
+        assert step_c.steps == []
+
+        # Measurement in innermost step C
+        assert len(step_c.measurements) == 1
+        assert step_c.measurements[0]["name"] == "val"
+
+        # Bubbled to block with fully qualified name
+        assert len(block.measurements) == 1
+        assert block.measurements[0]["name"] == "A.B.C.val"
+
+    def test_sequential_steps(self):
+        """Two sibling steps in the same block."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "first", '
+            '"description": "First step"}',
+            '[TST] {"type": "measurement", "name": "x", "value": 1}',
+            '[TST] {"type": "step_end", "step": "first"}',
+            '[TST] {"type": "step_start", "step": "second", '
+            '"description": "Second step"}',
+            '[TST] {"type": "measurement", "name": "y", "value": 2}',
+            '[TST] {"type": "step_end", "step": "second"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        assert len(block.steps) == 2
+        assert block.steps[0].step == "first"
+        assert block.steps[1].step == "second"
+
+        # Both steps have their own measurements
+        assert len(block.steps[0].measurements) == 1
+        assert block.steps[0].measurements[0]["name"] == "x"
+        assert len(block.steps[1].measurements) == 1
+        assert block.steps[1].measurements[0]["name"] == "y"
+
+        # Block has both bubbled measurements
+        assert len(block.measurements) == 2
+        assert block.measurements[0]["name"] == "first.x"
+        assert block.measurements[1]["name"] == "second.y"
+
+    def test_measurement_bubbling(self):
+        """Measurement in nested step has original name in step, qualified in block."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "outer", '
+            '"description": "Outer step"}',
+            '[TST] {"type": "step_start", "step": "inner", '
+            '"description": "Inner step"}',
+            '[TST] {"type": "measurement", "name": "charge_amount", '
+            '"value": 99.99}',
+            '[TST] {"type": "step_end", "step": "inner"}',
+            '[TST] {"type": "step_end", "step": "outer"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        # Original name in innermost step
+        inner = block.steps[0].steps[0]
+        assert inner.step == "inner"
+        assert len(inner.measurements) == 1
+        assert inner.measurements[0]["name"] == "charge_amount"
+        assert inner.measurements[0]["value"] == 99.99
+
+        # Qualified name in block
+        assert len(block.measurements) == 1
+        assert block.measurements[0]["name"] == "outer.inner.charge_amount"
+        assert block.measurements[0]["value"] == 99.99
+
+    def test_result_bubbling(self):
+        """Result in step appears in step .results and block .results."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "checkpoint"}',
+            '[TST] {"type": "step_start", "step": "verify", '
+            '"description": "Verify result"}',
+            '[TST] {"type": "result", "status": "pass", '
+            '"message": "order_placed"}',
+            '[TST] {"type": "step_end", "step": "verify"}',
+            '[TST] {"type": "block_end", "block": "checkpoint"}',
+        ]
+        result = parse_test_output(lines)
+
+        chk = [b for b in result.run_blocks if b.block == "checkpoint"]
+        block = chk[0]
+
+        # Result in step
+        step = block.steps[0]
+        assert len(step.results) == 1
+        assert step.results[0]["status"] == "pass"
+        assert step.results[0]["message"] == "order_placed"
+
+        # Result bubbled to block with qualified name
+        assert len(block.results) == 1
+        assert block.results[0]["status"] == "pass"
+        assert block.results[0]["message"] == "verify.order_placed"
+
+    def test_feature_bubbling(self):
+        """Feature in step appears in step .features and block .features."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "rigging"}',
+            '[TST] {"type": "step_start", "step": "setup_db", '
+            '"description": "Initialize database"}',
+            '[TST] {"type": "feature", "name": "auth_service"}',
+            '[TST] {"type": "step_end", "step": "setup_db"}',
+            '[TST] {"type": "block_end", "block": "rigging"}',
+        ]
+        result = parse_test_output(lines)
+
+        assert result.rigging is not None
+        block = result.rigging
+
+        # Feature in step
+        step = block.steps[0]
+        assert len(step.features) == 1
+        assert step.features[0]["name"] == "auth_service"
+
+        # Feature bubbled to block with qualified name
+        assert len(block.features) == 1
+        assert block.features[0]["name"] == "setup_db.auth_service"
+
+    def test_error_attribution(self):
+        """Error in inner step: error dict in innermost step and block,
+        status 'failed' on all ancestors."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "outer", '
+            '"description": "Outer"}',
+            '[TST] {"type": "step_start", "step": "inner", '
+            '"description": "Inner"}',
+            '[TST] {"type": "error", "message": "connection refused"}',
+            '[TST] {"type": "step_end", "step": "inner"}',
+            '[TST] {"type": "step_end", "step": "outer"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        outer = block.steps[0]
+        inner = outer.steps[0]
+
+        # Error dict in innermost step
+        assert len(inner.errors) == 1
+        assert inner.errors[0]["message"] == "connection refused"
+
+        # Error dict NOT in parent step's errors
+        assert len(outer.errors) == 0
+
+        # Error dict in block
+        assert len(block.errors) == 1
+        assert block.errors[0]["message"] == "connection refused"
+
+        # Status propagation: both steps are "failed"
+        assert inner.status == "failed"
+        assert outer.status == "failed"
+
+    def test_plain_text_attribution(self):
+        """Plain text in step goes to step .logs only, not block .logs."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            "Block-level text before step",
+            '[TST] {"type": "step_start", "step": "run", '
+            '"description": "Run test"}',
+            "Step-level log line 1",
+            "Step-level log line 2",
+            '[TST] {"type": "step_end", "step": "run"}',
+            "Block-level text after step",
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        step = block.steps[0]
+
+        # Plain text in step's logs
+        assert "Step-level log line 1" in step.logs
+        assert "Step-level log line 2" in step.logs
+
+        # Plain text NOT in block's logs
+        assert "Step-level log line 1" not in block.logs
+        assert "Step-level log line 2" not in block.logs
+
+        # Block-level text IS in block's logs
+        assert "Block-level text before step" in block.logs
+        assert "Block-level text after step" in block.logs
+
+    def test_events_outside_steps(self):
+        """Events inside a block but outside any step go directly to block."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "measurement", "name": "before_step", "value": 1}',
+            '[TST] {"type": "step_start", "step": "s1", '
+            '"description": "A step"}',
+            '[TST] {"type": "measurement", "name": "in_step", "value": 2}',
+            '[TST] {"type": "step_end", "step": "s1"}',
+            '[TST] {"type": "measurement", "name": "after_step", "value": 3}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        # Block measurements: before_step, s1.in_step (bubbled), after_step
+        names = [m["name"] for m in block.measurements]
+        assert "before_step" in names
+        assert "s1.in_step" in names
+        assert "after_step" in names
+
+        # Step measurement: original name
+        step = block.steps[0]
+        assert len(step.measurements) == 1
+        assert step.measurements[0]["name"] == "in_step"
+
+    def test_step_qualified_name_format(self):
+        """Deep nesting (3 levels) produces qualified name a.b.c.name."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "a", "description": "A"}',
+            '[TST] {"type": "step_start", "step": "b", "description": "B"}',
+            '[TST] {"type": "step_start", "step": "c", "description": "C"}',
+            '[TST] {"type": "measurement", "name": "metric", "value": 42}',
+            '[TST] {"type": "step_end", "step": "c"}',
+            '[TST] {"type": "step_end", "step": "b"}',
+            '[TST] {"type": "step_end", "step": "a"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        assert len(block.measurements) == 1
+        assert block.measurements[0]["name"] == "a.b.c.metric"
+
+    # --- Error recovery tests (Step 2.1) ---
+
+    def test_step_end_name_mismatch(self):
+        """step_end with wrong name: valid prefix kept, remainder in undefined step."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "A", "description": "Step A"}',
+            '[TST] {"type": "step_start", "step": "B", "description": "Step B"}',
+            '[TST] {"type": "measurement", "name": "m1", "value": 1}',
+            # Mismatch: innermost step is B but we end A
+            '[TST] {"type": "step_end", "step": "A"}',
+            '[TST] {"type": "measurement", "name": "m2", "value": 2}',
+            '[TST] {"type": "step_end", "step": "A"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        # Step A is the top-level step
+        assert len(block.steps) == 1
+        step_a = block.steps[0]
+        assert step_a.step == "A"
+
+        # Step B is under A (valid prefix)
+        assert len(step_a.steps) >= 1
+        step_b = step_a.steps[0]
+        assert step_b.step == "B"
+        assert len(step_b.measurements) == 1
+        assert step_b.measurements[0]["name"] == "m1"
+
+        # There should be an undefined step for the remainder
+        undef_steps = [
+            s for s in step_a.steps if s.step == "undefined"
+        ]
+        assert len(undef_steps) >= 1
+        undef = undef_steps[0]
+        assert undef.status == "warning"
+
+        # Parser warning recorded
+        assert any("mismatch" in w for w in result.warnings)
+
+    def test_step_start_outside_block(self):
+        """step_start before any block_start creates undefined block."""
+        lines = [
+            '[TST] {"type": "step_start", "step": "orphan", '
+            '"description": "Orphan step"}',
+            '[TST] {"type": "measurement", "name": "val", "value": 1}',
+            '[TST] {"type": "step_end", "step": "orphan"}',
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        # Should have an undefined block in run_blocks
+        undef_blocks = [
+            b for b in result.run_blocks if b.block == "undefined"
+        ]
+        assert len(undef_blocks) >= 1
+
+        # The undefined block should contain the orphan step
+        undef_block = undef_blocks[0]
+        assert len(undef_block.steps) >= 1
+        assert undef_block.steps[0].step == "orphan"
+
+        # Parser warning recorded
+        assert any("outside" in w for w in result.warnings)
+
+        # The stimulation block should still exist
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        assert len(stim) == 1
+
+    def test_block_end_unclosed_steps(self):
+        """block_end while steps still open: unclosed steps get warning status."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "first", '
+            '"description": "First step"}',
+            '[TST] {"type": "measurement", "name": "m1", "value": 1}',
+            '[TST] {"type": "step_end", "step": "first"}',
+            '[TST] {"type": "step_start", "step": "second", '
+            '"description": "Second step (never closed)"}',
+            '[TST] {"type": "measurement", "name": "m2", "value": 2}',
+            # No step_end for "second" -- block ends
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        # First step is properly closed (valid prefix)
+        assert len(block.steps) >= 2
+        first = block.steps[0]
+        assert first.step == "first"
+        assert first.status == "passed"
+
+        # Second step was never closed -- should have warning status
+        second = block.steps[1]
+        assert second.step == "second"
+        assert second.status == "warning"
+
+        # Block still contains bubbled measurements from both steps
+        names = [m["name"] for m in block.measurements]
+        assert "first.m1" in names
+        assert "second.m2" in names
+
+        # Parser warning about unclosed step
+        assert any("never closed" in w for w in result.warnings)
+
+    def test_duplicate_step_names(self):
+        """Duplicate step name in same scope: first kept, remainder in undefined."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "action", '
+            '"description": "First action"}',
+            '[TST] {"type": "measurement", "name": "m1", "value": 1}',
+            '[TST] {"type": "step_end", "step": "action"}',
+            # Duplicate name "action" in same scope (block level)
+            '[TST] {"type": "step_start", "step": "action", '
+            '"description": "Duplicate action"}',
+            '[TST] {"type": "measurement", "name": "m2", "value": 2}',
+            '[TST] {"type": "step_end", "step": "action"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        # First step "action" is kept as valid prefix
+        assert block.steps[0].step == "action"
+        assert len(block.steps[0].measurements) == 1
+        assert block.steps[0].measurements[0]["name"] == "m1"
+
+        # There should be an undefined step for the remainder
+        undef_steps = [
+            s for s in block.steps if s.step == "undefined"
+        ]
+        assert len(undef_steps) >= 1
+        undef = undef_steps[0]
+        assert undef.status == "warning"
+
+        # Parser warning about duplicate
+        assert any("duplicate" in w for w in result.warnings)
+
+    def test_failed_takes_precedence_over_warning(self):
+        """Step with both error event and structural issue: status is 'failed'."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "broken", '
+            '"description": "A broken step"}',
+            '[TST] {"type": "error", "message": "something broke"}',
+            # Step is never closed -- structural error
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        step = block.steps[0]
+        assert step.step == "broken"
+        # "failed" takes precedence over "warning"
+        assert step.status == "failed"
+
+        # Both warnings exist
+        assert any("never closed" in w for w in result.warnings)
+        # Error is recorded
+        assert len(step.errors) == 1
+        assert step.errors[0]["message"] == "something broke"

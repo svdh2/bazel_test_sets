@@ -72,6 +72,12 @@ py_test(
 )
 
 py_test(
+    name = "order_steps_raw_test",
+    srcs = ["order_steps_test.py"],
+    main = "order_steps_test.py",
+)
+
+py_test(
     name = "shipping_raw_test",
     srcs = ["shipping_test.py"],
     main = "shipping_test.py",
@@ -140,6 +146,16 @@ test_set_test(
         ":cart_wrapped",
         ":inventory_wrapped",
         ":credit_card_wrapped",
+    ],
+)
+
+test_set_test(
+    name = "order_steps_wrapped",
+    test = ":order_steps_raw_test",
+    assertion = "Order placement with steps completes all sub-operations",
+    requirement_id = "ORD-002",
+    depends_on = [
+        ":order_placement_wrapped",
     ],
 )
 
@@ -212,6 +228,7 @@ test_set(
         ":cart_wrapped",
         ":discount_wrapped",
         ":order_placement_wrapped",
+        ":order_steps_wrapped",
         ":shipping_wrapped",
         ":email_notification_wrapped",
         ":inventory_wrapped",
