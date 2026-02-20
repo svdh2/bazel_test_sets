@@ -6,8 +6,8 @@ This implementation plan is based on: [architecture/in_development/block-steps/D
 ## Status Overview
 - **Overall Status**: In Progress
 - **Current Phase**: Phase 1: Core Parser
-- **Current Step**: Step 1.2: Backward compatibility baseline test
-- **Completed Steps**: 1 / 9
+- **Current Step**: Step 1.3: Step parsing in parse_test_output()
+- **Completed Steps**: 2 / 9
 - **Last Updated**: 2026-02-19
 
 ## How to Use This Plan
@@ -206,10 +206,10 @@ Added StepSegment dataclass before BlockSegment in log_parser.py with all requir
 ---
 
 #### Step 1.2: Backward compatibility baseline test
-**Status**: In Progress
+**Status**: Completed
 **Started**: 2026-02-19
-**Completed**:
-**PR/Commit**:
+**Completed**: 2026-02-19
+**PR/Commit**: 932a0fb
 
 **Objective**: Add a dedicated test (`test_backward_compat_no_steps`) that explicitly verifies blocks without steps produce identical output to the current parser, including an empty `steps` list on `BlockSegment`. This locks in the invariant before any parsing changes.
 
@@ -253,13 +253,13 @@ Expected: Exit code 0, all tests pass
 **Dependencies**: Requires Step 1.1 (StepSegment dataclass must exist)
 
 **Implementation Notes**:
-[Filled in during implementation]
+Added TestStepParsing class with test_backward_compat_no_steps. Test covers all four block types (rigging, stimulation, checkpoint, verdict) with features, measurements, results, errors, and plain text. Explicitly asserts block.steps == [] for each block. All 79 tests pass.
 
 ---
 
 #### Step 1.3: Step parsing in parse_test_output()
-**Status**: Not Started
-**Started**:
+**Status**: In Progress
+**Started**: 2026-02-19
 **Completed**:
 **PR/Commit**:
 
@@ -890,6 +890,7 @@ Track major milestones and decisions during implementation:
 ### 2026-02-19
 - Implementation plan created
 - Step 1.1 completed: StepSegment dataclass and BlockSegment.steps field (3673d32)
+- Step 1.2 completed: Backward compatibility baseline test (932a0fb)
 
 ## Future Enhancements
 Features from the design document that are deferred or out of scope for this implementation plan:
