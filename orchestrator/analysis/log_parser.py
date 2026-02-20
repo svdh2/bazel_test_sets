@@ -16,6 +16,36 @@ SENTINEL = "[TST] "
 
 
 @dataclass
+class StepSegment:
+    """A named step within a block, forming a hierarchy of operations.
+
+    Steps subdivide blocks into named sub-operations with arbitrary
+    nesting depth.  Each step tracks its own logs, features, measurements,
+    results, errors, and assertions.  Content events (measurements, results,
+    features) are stored in the innermost step with their original names
+    and also bubbled to the containing ``BlockSegment`` with step-qualified
+    names (e.g. ``"step_a.step_b.measurement_name"``).
+
+    Error events set the step's ``status`` to ``"failed"`` and propagate
+    that status to all ancestor steps.  Plain text lines are attributed to
+    the innermost step only.
+
+    The ``steps`` field allows recursive nesting of sub-steps.
+    """
+
+    step: str
+    description: str
+    status: str = "passed"
+    logs: str = ""
+    features: list[dict[str, Any]] = field(default_factory=list)
+    measurements: list[dict[str, Any]] = field(default_factory=list)
+    results: list[dict[str, Any]] = field(default_factory=list)
+    errors: list[dict[str, Any]] = field(default_factory=list)
+    assertions: list[dict[str, Any]] = field(default_factory=list)
+    steps: list[StepSegment] = field(default_factory=list)
+
+
+@dataclass
 class BlockSegment:
     """A structured block delimited by block_start/block_end events.
 
@@ -42,6 +72,7 @@ class BlockSegment:
     results: list[dict[str, Any]] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
     assertions: list[dict[str, Any]] = field(default_factory=list)
+    steps: list[StepSegment] = field(default_factory=list)
 
 
 @dataclass
