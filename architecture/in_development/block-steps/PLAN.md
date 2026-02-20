@@ -5,9 +5,9 @@ This implementation plan is based on: [architecture/in_development/block-steps/D
 
 ## Status Overview
 - **Overall Status**: In Progress
-- **Current Phase**: Phase 1: Core Parser
-- **Current Step**: Step 1.3: Step parsing in parse_test_output()
-- **Completed Steps**: 2 / 9
+- **Current Phase**: Phase 2: Error Recovery
+- **Current Step**: Step 2.1: Error recovery for all structural error cases
+- **Completed Steps**: 3 / 9
 - **Last Updated**: 2026-02-19
 
 ## How to Use This Plan
@@ -136,7 +136,7 @@ graph TD
 ## Implementation Sequence
 
 ### Phase 1: Core Parser
-**Phase Status**: In Progress
+**Phase Status**: Completed
 
 Establish the data model and core step-parsing logic in `parse_test_output()`. This is the foundation that all subsequent work depends on.
 
@@ -258,10 +258,10 @@ Added TestStepParsing class with test_backward_compat_no_steps. Test covers all 
 ---
 
 #### Step 1.3: Step parsing in parse_test_output()
-**Status**: In Progress
+**Status**: Completed
 **Started**: 2026-02-19
-**Completed**:
-**PR/Commit**:
+**Completed**: 2026-02-19
+**PR/Commit**: 44f68e6
 
 **Objective**: Extend `parse_test_output()` to handle `step_start`/`step_end` events within blocks. Implement the three-phase top-down parsing approach: (1) split into blocks (existing), (2) split block lines into top-level steps, (3) recurse into each step. Implement bubbling of measurement, result, feature, and error events. Implement step-qualified names for bubbled events. Implement error status propagation.
 
@@ -375,7 +375,7 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 1.2
 
 **Implementation Notes**:
-[Filled in during implementation]
+Implemented three-phase top-down parsing via _parse_steps_in_block() post-processor. The main parse_test_output() builds blocks as before, tracking raw lines. The post-processor scans raw lines for step_start/step_end, builds the step tree, and re-attributes content events (clearing and rebuilding block flat lists). Bubbling uses copy.copy() for shallow dict copies with qualified names. Error status propagation walks the entire step_stack. All 89 tests pass (79 existing + 10 new).
 
 ---
 
@@ -387,8 +387,8 @@ Implement the valid-prefix-plus-undefined-remainder recovery strategy for all st
 ---
 
 #### Step 2.1: Error recovery for all structural error cases
-**Status**: Not Started
-**Started**:
+**Status**: In Progress
+**Started**: 2026-02-19
 **Completed**:
 **PR/Commit**:
 
@@ -891,6 +891,7 @@ Track major milestones and decisions during implementation:
 - Implementation plan created
 - Step 1.1 completed: StepSegment dataclass and BlockSegment.steps field (3673d32)
 - Step 1.2 completed: Backward compatibility baseline test (932a0fb)
+- Step 1.3 completed: Step parsing in parse_test_output() (44f68e6)
 
 ## Future Enhancements
 Features from the design document that are deferred or out of scope for this implementation plan:

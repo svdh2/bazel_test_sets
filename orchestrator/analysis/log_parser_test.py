@@ -1415,3 +1415,176 @@ class TestStepParsing:
 
         assert len(block.measurements) == 1
         assert block.measurements[0]["name"] == "a.b.c.metric"
+
+    # --- Error recovery tests (Step 2.1) ---
+
+    def test_step_end_name_mismatch(self):
+        """step_end with wrong name: valid prefix kept, remainder in undefined step."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "A", "description": "Step A"}',
+            '[TST] {"type": "step_start", "step": "B", "description": "Step B"}',
+            '[TST] {"type": "measurement", "name": "m1", "value": 1}',
+            # Mismatch: innermost step is B but we end A
+            '[TST] {"type": "step_end", "step": "A"}',
+            '[TST] {"type": "measurement", "name": "m2", "value": 2}',
+            '[TST] {"type": "step_end", "step": "A"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        # Step A is the top-level step
+        assert len(block.steps) == 1
+        step_a = block.steps[0]
+        assert step_a.step == "A"
+
+        # Step B is under A (valid prefix)
+        assert len(step_a.steps) >= 1
+        step_b = step_a.steps[0]
+        assert step_b.step == "B"
+        assert len(step_b.measurements) == 1
+        assert step_b.measurements[0]["name"] == "m1"
+
+        # There should be an undefined step for the remainder
+        undef_steps = [
+            s for s in step_a.steps if s.step == "undefined"
+        ]
+        assert len(undef_steps) >= 1
+        undef = undef_steps[0]
+        assert undef.status == "warning"
+
+        # Parser warning recorded
+        assert any("mismatch" in w for w in result.warnings)
+
+    def test_step_start_outside_block(self):
+        """step_start before any block_start creates undefined block."""
+        lines = [
+            '[TST] {"type": "step_start", "step": "orphan", '
+            '"description": "Orphan step"}',
+            '[TST] {"type": "measurement", "name": "val", "value": 1}',
+            '[TST] {"type": "step_end", "step": "orphan"}',
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        # Should have an undefined block in run_blocks
+        undef_blocks = [
+            b for b in result.run_blocks if b.block == "undefined"
+        ]
+        assert len(undef_blocks) >= 1
+
+        # The undefined block should contain the orphan step
+        undef_block = undef_blocks[0]
+        assert len(undef_block.steps) >= 1
+        assert undef_block.steps[0].step == "orphan"
+
+        # Parser warning recorded
+        assert any("outside" in w for w in result.warnings)
+
+        # The stimulation block should still exist
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        assert len(stim) == 1
+
+    def test_block_end_unclosed_steps(self):
+        """block_end while steps still open: unclosed steps get warning status."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "first", '
+            '"description": "First step"}',
+            '[TST] {"type": "measurement", "name": "m1", "value": 1}',
+            '[TST] {"type": "step_end", "step": "first"}',
+            '[TST] {"type": "step_start", "step": "second", '
+            '"description": "Second step (never closed)"}',
+            '[TST] {"type": "measurement", "name": "m2", "value": 2}',
+            # No step_end for "second" -- block ends
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        # First step is properly closed (valid prefix)
+        assert len(block.steps) >= 2
+        first = block.steps[0]
+        assert first.step == "first"
+        assert first.status == "passed"
+
+        # Second step was never closed -- should have warning status
+        second = block.steps[1]
+        assert second.step == "second"
+        assert second.status == "warning"
+
+        # Block still contains bubbled measurements from both steps
+        names = [m["name"] for m in block.measurements]
+        assert "first.m1" in names
+        assert "second.m2" in names
+
+        # Parser warning about unclosed step
+        assert any("never closed" in w for w in result.warnings)
+
+    def test_duplicate_step_names(self):
+        """Duplicate step name in same scope: first kept, remainder in undefined."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "action", '
+            '"description": "First action"}',
+            '[TST] {"type": "measurement", "name": "m1", "value": 1}',
+            '[TST] {"type": "step_end", "step": "action"}',
+            # Duplicate name "action" in same scope (block level)
+            '[TST] {"type": "step_start", "step": "action", '
+            '"description": "Duplicate action"}',
+            '[TST] {"type": "measurement", "name": "m2", "value": 2}',
+            '[TST] {"type": "step_end", "step": "action"}',
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        # First step "action" is kept as valid prefix
+        assert block.steps[0].step == "action"
+        assert len(block.steps[0].measurements) == 1
+        assert block.steps[0].measurements[0]["name"] == "m1"
+
+        # There should be an undefined step for the remainder
+        undef_steps = [
+            s for s in block.steps if s.step == "undefined"
+        ]
+        assert len(undef_steps) >= 1
+        undef = undef_steps[0]
+        assert undef.status == "warning"
+
+        # Parser warning about duplicate
+        assert any("duplicate" in w for w in result.warnings)
+
+    def test_failed_takes_precedence_over_warning(self):
+        """Step with both error event and structural issue: status is 'failed'."""
+        lines = [
+            '[TST] {"type": "block_start", "block": "stimulation"}',
+            '[TST] {"type": "step_start", "step": "broken", '
+            '"description": "A broken step"}',
+            '[TST] {"type": "error", "message": "something broke"}',
+            # Step is never closed -- structural error
+            '[TST] {"type": "block_end", "block": "stimulation"}',
+        ]
+        result = parse_test_output(lines)
+
+        stim = [b for b in result.run_blocks if b.block == "stimulation"]
+        block = stim[0]
+
+        step = block.steps[0]
+        assert step.step == "broken"
+        # "failed" takes precedence over "warning"
+        assert step.status == "failed"
+
+        # Both warnings exist
+        assert any("never closed" in w for w in result.warnings)
+        # Error is recorded
+        assert len(step.errors) == 1
+        assert step.errors[0]["message"] == "something broke"

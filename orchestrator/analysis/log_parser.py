@@ -206,6 +206,9 @@ def _parse_steps_in_block(
     # Step stack: list of (StepSegment, step_path) tuples.
     # step_path is the list of step names from the block root to this step.
     step_stack: list[tuple[StepSegment, list[str]]] = []
+    # Track step names per scope for duplicate detection.
+    # Key: id of the parent container (block or step), Value: set of names.
+    scope_names: dict[int, set[str]] = {id(block): set()}
 
     def _innermost_step() -> tuple[StepSegment, list[str]] | None:
         return step_stack[-1] if step_stack else None
@@ -215,7 +218,192 @@ def _parse_steps_in_block(
             return target_logs + "\n" + line
         return line
 
+    def _current_scope_id() -> int:
+        """Return the id of the current scope container for name tracking."""
+        if step_stack:
+            return id(step_stack[-1][0])
+        return id(block)
+
+    def _create_undefined_step(
+        warning_msg: str,
+    ) -> tuple[StepSegment, list[str]]:
+        """Create an undefined step with warning status and attach it.
+
+        Adds the step to the current parent (innermost open step or block).
+        Records a parser warning.  Returns the (step, step_path) tuple
+        for use as the new target for remaining lines.
+        """
+        undef = StepSegment(
+            step="undefined",
+            description=warning_msg,
+            status="warning",
+        )
+        if step_stack:
+            parent_step, parent_path = step_stack[-1]
+            parent_step.steps.append(undef)
+            undef_path = parent_path + ["undefined"]
+        else:
+            block.steps.append(undef)
+            undef_path = ["undefined"]
+        parser_warnings.append(warning_msg)
+        return undef, undef_path
+
+    def _dispatch_content_event(
+        line: str,
+        entry: dict[str, Any],
+        event_type: str,
+        target_step: StepSegment,
+        target_path: list[str],
+    ) -> None:
+        """Dispatch a content event to a step and bubble to block."""
+        target_step.logs = _append_to_logs(target_step.logs, line)
+
+        if event_type == "feature":
+            name = entry.get("name", "")
+            block_tag = block.block
+            feat: dict[str, Any] = {"name": name, "block": block_tag}
+            _copy_source(feat, entry)
+            target_step.features.append(feat)
+            qualified = copy.copy(feat)
+            qualified["name"] = _build_step_qualified_name(
+                target_path, name,
+            )
+            block.features.append(qualified)
+
+        elif event_type == "measurement":
+            name = entry.get("name", "")
+            value = entry.get("value")
+            block_tag = block.block
+            m: dict[str, Any] = {
+                "name": name, "value": value, "block": block_tag,
+            }
+            _copy_source(m, entry)
+            target_step.measurements.append(m)
+            qualified_m = copy.copy(m)
+            qualified_m["name"] = _build_step_qualified_name(
+                target_path, name,
+            )
+            block.measurements.append(qualified_m)
+
+        elif event_type == "result":
+            status = entry.get("status", "")
+            message = entry.get("message", "")
+            block_tag = block.block
+            r: dict[str, Any] = {
+                "status": status, "message": message,
+                "block": block_tag,
+            }
+            _copy_source(r, entry)
+            target_step.results.append(r)
+            qualified_r = copy.copy(r)
+            if message:
+                qualified_r["message"] = _build_step_qualified_name(
+                    target_path, message,
+                )
+            block.results.append(qualified_r)
+
+        elif event_type == "error":
+            message = entry.get("message", "")
+            block_tag = block.block
+            e: dict[str, Any] = {
+                "message": message, "block": block_tag,
+            }
+            _copy_source(e, entry)
+            target_step.errors.append(e)
+            block.errors.append(e)
+            # Propagate "failed" status up the step stack
+            for ancestor_step, _ in step_stack:
+                ancestor_step.status = "failed"
+            # "failed" takes precedence over "warning"
+            if target_step.status == "warning":
+                target_step.status = "failed"
+
+    def _dispatch_block_content(
+        line: str,
+        entry: dict[str, Any],
+        event_type: str,
+    ) -> None:
+        """Dispatch a content event to the block (outside any step)."""
+        block.logs = _append_to_logs(block.logs, line)
+
+        if event_type == "feature":
+            name = entry.get("name", "")
+            block_tag = block.block
+            feat_b: dict[str, Any] = {"name": name, "block": block_tag}
+            _copy_source(feat_b, entry)
+            block.features.append(feat_b)
+
+        elif event_type == "measurement":
+            name = entry.get("name", "")
+            value = entry.get("value")
+            block_tag = block.block
+            m_b: dict[str, Any] = {
+                "name": name, "value": value, "block": block_tag,
+            }
+            _copy_source(m_b, entry)
+            block.measurements.append(m_b)
+
+        elif event_type == "result":
+            status = entry.get("status", "")
+            message = entry.get("message", "")
+            block_tag = block.block
+            r_b: dict[str, Any] = {
+                "status": status, "message": message,
+                "block": block_tag,
+            }
+            _copy_source(r_b, entry)
+            block.results.append(r_b)
+
+        elif event_type == "error":
+            message = entry.get("message", "")
+            block_tag = block.block
+            e_b: dict[str, Any] = {"message": message, "block": block_tag}
+            _copy_source(e_b, entry)
+            block.errors.append(e_b)
+
+    # Whether we are currently collecting remainder into an undefined step
+    # at the block scope level (after a block-level structural error).
+    collecting_remainder: StepSegment | None = None
+    collecting_remainder_path: list[str] = []
+
     for line in raw_lines:
+        # If collecting remainder at block scope, redirect everything there
+        if collecting_remainder is not None and not step_stack:
+            if not line.startswith(SENTINEL):
+                collecting_remainder.logs = _append_to_logs(
+                    collecting_remainder.logs, line,
+                )
+                continue
+            json_str = line[len(SENTINEL):]
+            try:
+                entry = json.loads(json_str)
+            except (json.JSONDecodeError, TypeError):
+                collecting_remainder.logs = _append_to_logs(
+                    collecting_remainder.logs, line,
+                )
+                continue
+            if not isinstance(entry, dict):
+                collecting_remainder.logs = _append_to_logs(
+                    collecting_remainder.logs, line,
+                )
+                continue
+            event_type = entry.get("type")
+            if event_type in ("block_start", "block_end", "step_end"):
+                # Skip structural markers in remainder
+                continue
+            if event_type == "step_start":
+                # Nested step_start in remainder -- still just collect
+                collecting_remainder.logs = _append_to_logs(
+                    collecting_remainder.logs, line,
+                )
+                continue
+            # Content event in remainder
+            _dispatch_content_event(
+                line, entry, event_type or "",
+                collecting_remainder, collecting_remainder_path,
+            )
+            continue
+
         if not line.startswith(SENTINEL):
             # Plain text line
             inner = _innermost_step()
@@ -253,6 +441,24 @@ def _parse_steps_in_block(
         if event_type == "step_start":
             step_name = entry.get("step", "")
             description = entry.get("description", "")
+
+            # Case 4: Duplicate step names within same scope
+            scope_id = _current_scope_id()
+            if scope_id in scope_names and step_name in scope_names[scope_id]:
+                # Duplicate name -- create undefined step for remainder
+                undef, undef_path = _create_undefined_step(
+                    f"duplicate step name '{step_name}' in same scope"
+                )
+                if step_stack:
+                    # Inside a step -- push the undefined step so
+                    # subsequent lines go there
+                    step_stack.append((undef, undef_path))
+                else:
+                    # At block scope -- enter block-level remainder mode
+                    collecting_remainder = undef
+                    collecting_remainder_path = undef_path
+                continue
+
             new_step = StepSegment(step=step_name, description=description)
             step_path = (
                 [s.step for s, _ in step_stack] + [step_name]
@@ -267,6 +473,13 @@ def _parse_steps_in_block(
                 block.steps.append(new_step)
 
             step_stack.append((new_step, step_path))
+            # Track name in scope
+            if scope_id not in scope_names:
+                scope_names[scope_id] = set()
+            # The parent scope tracks this name (before pushing)
+            scope_names[scope_id].add(step_name)
+            # Initialize scope for the new step's children
+            scope_names[id(new_step)] = set()
 
         elif event_type == "step_end":
             step_name = entry.get("step", "")
@@ -275,13 +488,21 @@ def _parse_steps_in_block(
                 if current_step.step == step_name:
                     step_stack.pop()
                 else:
-                    # Mismatch -- minimal handling for now; full error
-                    # recovery is Step 2.1.  Just pop and warn.
-                    parser_warnings.append(
+                    # Case 1: step_end name mismatch
+                    # Keep valid prefix, pop the mismatched step first,
+                    # then create undefined step in the parent scope
+                    # for the remainder.
+                    step_stack.pop()
+                    undef, undef_path = _create_undefined_step(
                         f"step_end name mismatch: expected "
                         f"'{current_step.step}', got '{step_name}'"
                     )
-                    step_stack.pop()
+                    if step_stack:
+                        # Push undefined as collector for remainder
+                        step_stack.append((undef, undef_path))
+                    else:
+                        collecting_remainder = undef
+                        collecting_remainder_path = undef_path
             else:
                 parser_warnings.append(
                     f"step_end '{step_name}' without matching step_start"
@@ -298,114 +519,28 @@ def _parse_steps_in_block(
 
             if inner is not None:
                 step_seg, step_path = inner
-                # Store raw line in step logs
-                step_seg.logs = _append_to_logs(step_seg.logs, line)
-
-                if event_type == "feature":
-                    name = entry.get("name", "")
-                    block_tag = block.block
-                    feat: dict[str, Any] = {"name": name, "block": block_tag}
-                    _copy_source(feat, entry)
-                    step_seg.features.append(feat)
-                    # Bubble to block with qualified name
-                    qualified = copy.copy(feat)
-                    qualified["name"] = _build_step_qualified_name(
-                        step_path, name,
-                    )
-                    block.features.append(qualified)
-
-                elif event_type == "measurement":
-                    name = entry.get("name", "")
-                    value = entry.get("value")
-                    block_tag = block.block
-                    m: dict[str, Any] = {
-                        "name": name, "value": value, "block": block_tag,
-                    }
-                    _copy_source(m, entry)
-                    step_seg.measurements.append(m)
-                    # Bubble to block with qualified name
-                    qualified_m = copy.copy(m)
-                    qualified_m["name"] = _build_step_qualified_name(
-                        step_path, name,
-                    )
-                    block.measurements.append(qualified_m)
-
-                elif event_type == "result":
-                    status = entry.get("status", "")
-                    message = entry.get("message", "")
-                    block_tag = block.block
-                    r: dict[str, Any] = {
-                        "status": status, "message": message,
-                        "block": block_tag,
-                    }
-                    _copy_source(r, entry)
-                    step_seg.results.append(r)
-                    # Bubble to block with qualified name in message
-                    qualified_r = copy.copy(r)
-                    if message:
-                        qualified_r["message"] = _build_step_qualified_name(
-                            step_path, message,
-                        )
-                    block.results.append(qualified_r)
-
-                elif event_type == "error":
-                    message = entry.get("message", "")
-                    block_tag = block.block
-                    e: dict[str, Any] = {
-                        "message": message, "block": block_tag,
-                    }
-                    _copy_source(e, entry)
-                    # Error goes to innermost step AND block
-                    step_seg.errors.append(e)
-                    block.errors.append(e)
-                    # Propagate "failed" status up the step stack
-                    for ancestor_step, _ in step_stack:
-                        ancestor_step.status = "failed"
-
-                # else: unknown type -- already in step logs, skip
-
+                _dispatch_content_event(
+                    line, entry, event_type or "",
+                    step_seg, step_path,
+                )
             else:
-                # Event outside any step but inside block -- block-level
-                block.logs = _append_to_logs(block.logs, line)
+                _dispatch_block_content(line, entry, event_type or "")
 
-                if event_type == "feature":
-                    name = entry.get("name", "")
-                    block_tag = block.block
-                    feat_b: dict[str, Any] = {
-                        "name": name, "block": block_tag,
-                    }
-                    _copy_source(feat_b, entry)
-                    block.features.append(feat_b)
-
-                elif event_type == "measurement":
-                    name = entry.get("name", "")
-                    value = entry.get("value")
-                    block_tag = block.block
-                    m_b: dict[str, Any] = {
-                        "name": name, "value": value, "block": block_tag,
-                    }
-                    _copy_source(m_b, entry)
-                    block.measurements.append(m_b)
-
-                elif event_type == "result":
-                    status = entry.get("status", "")
-                    message = entry.get("message", "")
-                    block_tag = block.block
-                    r_b: dict[str, Any] = {
-                        "status": status, "message": message,
-                        "block": block_tag,
-                    }
-                    _copy_source(r_b, entry)
-                    block.results.append(r_b)
-
-                elif event_type == "error":
-                    message = entry.get("message", "")
-                    block_tag = block.block
-                    e_b: dict[str, Any] = {
-                        "message": message, "block": block_tag,
-                    }
-                    _copy_source(e_b, entry)
-                    block.errors.append(e_b)
+    # Case 3: block_end with unclosed steps.
+    # If any steps are still open, collect their unclosed content into
+    # an undefined step.
+    if step_stack:
+        # The step_stack still has open steps.  They were not properly
+        # closed.  Create an undefined step to signal the issue.
+        # The open steps themselves already contain their content as valid
+        # prefix.  We just need to record the warning.
+        for open_step, _ in step_stack:
+            if open_step.status == "passed":
+                open_step.status = "warning"
+            parser_warnings.append(
+                f"step '{open_step.step}' was never closed (block ended)"
+            )
+        step_stack.clear()
 
     # Strip trailing whitespace from step logs
     for step_seg in block.steps:
@@ -510,6 +645,18 @@ def parse_test_output(
 
         elif event_type == "block_end":
             _flush_block()
+
+        elif event_type == "step_start" and current_block is None:
+            # Case 2: step_start outside any block — create undefined block
+            _flush_text()
+            parser_warnings.append(
+                "step_start outside any block: creating undefined block"
+            )
+            current_block = BlockSegment(block="undefined")
+            block_raw_lines = [line]
+            if current_block.logs:
+                current_block.logs += "\n"
+            current_block.logs += line
 
         else:
             # Content event — preserve raw line in block logs
