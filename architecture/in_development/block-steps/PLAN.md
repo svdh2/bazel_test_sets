@@ -4,10 +4,10 @@
 This implementation plan is based on: [architecture/in_development/block-steps/DESIGN.md](DESIGN.md)
 
 ## Status Overview
-- **Overall Status**: In Progress
-- **Current Phase**: Phase 5: Integration and Finalization
-- **Current Step**: Step 5.1: Package exports and integration example test
-- **Completed Steps**: 7 / 9
+- **Overall Status**: Completed
+- **Current Phase**: All phases complete
+- **Current Step**: None (all steps completed)
+- **Completed Steps**: 9 / 9
 - **Last Updated**: 2026-02-19
 
 ## How to Use This Plan
@@ -469,7 +469,7 @@ Implemented all four error recovery cases. Refactored _parse_steps_in_block with
 ---
 
 ### Phase 3: Segment Parser Extension
-**Phase Status**: Not Started
+**Phase Status**: Completed
 
 Extend the segment-based parser (`parse_stdout_segments()`) to build step trees within `BlockSegment` objects. This parser is used by the HTML reporter.
 
@@ -545,7 +545,7 @@ Extended parse_stdout_segments() with raw line tracking and _parse_steps_in_bloc
 ---
 
 ### Phase 4: HTML Rendering
-**Phase Status**: Not Started
+**Phase Status**: Completed
 
 Extend the HTML reporter to render step trees as nested collapsible sections. This delivers the visible value of the feature to test result readers.
 
@@ -726,17 +726,17 @@ Created tests/test_html_reporter_steps.py with 9 unit tests covering all renderi
 ---
 
 ### Phase 5: Integration and Finalization
-**Phase Status**: Not Started
+**Phase Status**: Completed
 
 Create the integration example test, update package exports, validate the full test suite, and update architecture documentation.
 
 ---
 
 #### Step 5.1: Package exports and integration example test
-**Status**: In Progress
+**Status**: Completed
 **Started**: 2026-02-19
-**Completed**:
-**PR/Commit**:
+**Completed**: 2026-02-19
+**PR/Commit**: 6974d81
 
 **Objective**: Add `StepSegment` to the `orchestrator/analysis/__init__.py` exports. Create the `examples/ecommerce/order_steps_test.py` integration example that demonstrates steps within blocks in an end-to-end scenario. Add the new test to the examples BUILD.bazel.
 
@@ -797,15 +797,15 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 1.3 and Step 4.2
 
 **Implementation Notes**:
-[Filled in during implementation]
+Added StepSegment to orchestrator/analysis/__init__.py exports. Created examples/ecommerce/order_steps_test.py demonstrating nested steps within a stimulation block (create_order > validate_inventory, process_payment, send_confirmation). Added py_test, test_set_test, and added to checkout_flow_tests. All tests pass, mypy clean.
 
 ---
 
 #### Step 5.2: Architecture documentation update and full validation
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-19
+**Completed**: 2026-02-19
+**PR/Commit**: 2589bb4
 
 **Objective**: Update the architecture documentation in `architecture/current/` to reflect the new step feature. Run the full test suite (`./ci test`, `./ci check`, `./ci build`) to validate everything works end-to-end.
 
@@ -865,7 +865,7 @@ Expected: Exit code 0, all files exist
 **Dependencies**: Requires Step 5.1
 
 **Implementation Notes**:
-[Filled in during implementation]
+Updated architecture documentation: log-parser.md (StepSegment dataclass, step_start/step_end events, step parsing section with behavior and error recovery), html-reporter.md (step segments visual elements, step status colors, Log Parser dependency), report-generation.md (step tree references). Updated README.md Git Sync. Full validation passed: build (13 targets), Bazel tests (8/8), pytest (741/741), mypy (51 files, 0 issues).
 
 ---
 
@@ -907,6 +907,9 @@ Track major milestones and decisions during implementation:
 - Step 3.1 completed: Step parsing in parse_stdout_segments() (2adfe40)
 - Step 4.1 completed: Step rendering in HTML reporter (82382f8)
 - Step 4.2 completed: HTML reporter unit tests (aa06809)
+- Step 5.1 completed: Package exports and integration example test (6974d81)
+- Step 5.2 completed: Architecture docs and full suite validation (2589bb4)
+- All 9 steps completed. Implementation plan finished.
 
 ## Future Enhancements
 Features from the design document that are deferred or out of scope for this implementation plan:
