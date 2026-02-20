@@ -913,6 +913,122 @@ class TestParseStdoutSegments:
         assert isinstance(segments[4], TextSegment)
         assert "Test complete." in segments[4].text
 
+    def test_parse_stdout_segments_with_steps(self):
+        """parse_stdout_segments populates steps within blocks.
+
+        Verifies that step_start/step_end events are parsed into a step tree,
+        that content events bubble with step-qualified names (using assertions
+        instead of results), and that error recovery works.
+        """
+        stdout = (
+            '[TST] {"type": "block_start", "block": "stimulation", '
+            '"description": "Order flow"}\n'
+            # Step with measurement
+            '[TST] {"type": "step_start", "step": "create_order", '
+            '"description": "Create a new order"}\n'
+            '[TST] {"type": "measurement", "name": "order_total", '
+            '"value": 129.97, "unit": "USD"}\n'
+            # Nested step with assertion
+            '[TST] {"type": "step_start", "step": "validate", '
+            '"description": "Validate order"}\n'
+            '[TST] {"type": "result", "name": "order_valid", "passed": true}\n'
+            "Validation log output\n"
+            '[TST] {"type": "step_end", "step": "validate"}\n'
+            '[TST] {"type": "step_end", "step": "create_order"}\n'
+            # Event outside steps (at block level)
+            '[TST] {"type": "measurement", "name": "block_metric", '
+            '"value": 42}\n'
+            '[TST] {"type": "block_end", "block": "stimulation"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        assert len(segments) == 1
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.block == "stimulation"
+
+        # Step tree: create_order -> validate
+        assert len(seg.steps) == 1
+        create_order = seg.steps[0]
+        assert create_order.step == "create_order"
+        assert create_order.description == "Create a new order"
+        assert create_order.status == "passed"
+
+        # Measurement in create_order step (original name)
+        assert len(create_order.measurements) == 1
+        assert create_order.measurements[0]["name"] == "order_total"
+        assert create_order.measurements[0]["value"] == 129.97
+        assert create_order.measurements[0]["unit"] == "USD"
+
+        # Nested step: validate
+        assert len(create_order.steps) == 1
+        validate = create_order.steps[0]
+        assert validate.step == "validate"
+        assert validate.description == "Validate order"
+        assert validate.status == "passed"
+
+        # Assertion in validate step (normalized format)
+        assert len(validate.assertions) == 1
+        assert validate.assertions[0]["description"] == "order_valid"
+        assert validate.assertions[0]["status"] == "passed"
+
+        # Plain text attributed to validate step
+        assert "Validation log output" in validate.logs
+
+        # Bubbled to block: measurements use step-qualified names
+        m_names = [m["name"] for m in seg.measurements]
+        assert "create_order.order_total" in m_names
+        assert "block_metric" in m_names
+
+        # Bubbled to block: assertions use step-qualified descriptions
+        a_descs = [a["description"] for a in seg.assertions]
+        assert "create_order.validate.order_valid" in a_descs
+
+        # Block logs should NOT contain step-internal text
+        assert "Validation log output" not in seg.logs
+
+    def test_parse_stdout_segments_steps_error_recovery(self):
+        """parse_stdout_segments handles step error recovery.
+
+        Verifies that unclosed steps get warning status and error events
+        propagate failed status up the step stack.
+        """
+        stdout = (
+            '[TST] {"type": "block_start", "block": "stimulation"}\n'
+            '[TST] {"type": "step_start", "step": "risky", '
+            '"description": "Risky operation"}\n'
+            '[TST] {"type": "error", "message": "connection failed"}\n'
+            # Step never closed -- block ends
+            '[TST] {"type": "block_end", "block": "stimulation"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+
+        assert len(seg.steps) == 1
+        step = seg.steps[0]
+        assert step.step == "risky"
+        # "failed" takes precedence over "warning" (unclosed + error)
+        assert step.status == "failed"
+        assert len(step.errors) == 1
+        assert step.errors[0]["message"] == "connection failed"
+
+        # Error also bubbled to block
+        assert len(seg.errors) == 1
+
+    def test_parse_stdout_segments_no_steps_unchanged(self):
+        """Block without steps renders identically through segment parser."""
+        stdout = (
+            '[TST] {"type": "block_start", "block": "rigging"}\n'
+            '[TST] {"type": "feature", "name": "auth", "action": "connect"}\n'
+            '[TST] {"type": "block_end", "block": "rigging"}'
+        )
+        segments = parse_stdout_segments(stdout)
+        seg = segments[0]
+        assert isinstance(seg, BlockSegment)
+        assert seg.steps == []
+        assert len(seg.features) == 1
+        assert seg.features[0] == {"name": "auth", "action": "connect"}
+
 
 class TestSourceMetadata:
     """Tests for _file/_line source metadata preservation."""

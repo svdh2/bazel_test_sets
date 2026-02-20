@@ -165,6 +165,8 @@ def _parse_steps_in_block(
     block: BlockSegment,
     raw_lines: list[str],
     parser_warnings: list[str],
+    *,
+    use_assertions: bool = False,
 ) -> None:
     """Post-process a block's raw lines to extract step structure.
 
@@ -202,6 +204,8 @@ def _parse_steps_in_block(
     block.measurements.clear()
     block.results.clear()
     block.errors.clear()
+    if use_assertions:
+        block.assertions.clear()
 
     # Step stack: list of (StepSegment, step_path) tuples.
     # step_path is the list of step names from the block root to this step.
@@ -260,8 +264,12 @@ def _parse_steps_in_block(
 
         if event_type == "feature":
             name = entry.get("name", "")
-            block_tag = block.block
-            feat: dict[str, Any] = {"name": name, "block": block_tag}
+            feat: dict[str, Any] = {"name": name}
+            if not use_assertions:
+                feat["block"] = block.block
+            action = entry.get("action")
+            if action is not None:
+                feat["action"] = action
             _copy_source(feat, entry)
             target_step.features.append(feat)
             qualified = copy.copy(feat)
@@ -273,10 +281,12 @@ def _parse_steps_in_block(
         elif event_type == "measurement":
             name = entry.get("name", "")
             value = entry.get("value")
-            block_tag = block.block
-            m: dict[str, Any] = {
-                "name": name, "value": value, "block": block_tag,
-            }
+            m: dict[str, Any] = {"name": name, "value": value}
+            if not use_assertions:
+                m["block"] = block.block
+            unit = entry.get("unit")
+            if unit is not None:
+                m["unit"] = unit
             _copy_source(m, entry)
             target_step.measurements.append(m)
             qualified_m = copy.copy(m)
@@ -286,31 +296,43 @@ def _parse_steps_in_block(
             block.measurements.append(qualified_m)
 
         elif event_type == "result":
-            status = entry.get("status", "")
-            message = entry.get("message", "")
-            block_tag = block.block
-            r: dict[str, Any] = {
-                "status": status, "message": message,
-                "block": block_tag,
-            }
-            _copy_source(r, entry)
-            target_step.results.append(r)
-            qualified_r = copy.copy(r)
-            if message:
-                qualified_r["message"] = _build_step_qualified_name(
-                    target_path, message,
-                )
-            block.results.append(qualified_r)
+            if use_assertions:
+                assertion = _normalize_assertion(entry)
+                target_step.assertions.append(assertion)
+                qualified_a = copy.copy(assertion)
+                desc = assertion.get("description", "")
+                if desc:
+                    qualified_a["description"] = _build_step_qualified_name(
+                        target_path, desc,
+                    )
+                block.assertions.append(qualified_a)
+            else:
+                status = entry.get("status", "")
+                message = entry.get("message", "")
+                block_tag = block.block
+                r: dict[str, Any] = {
+                    "status": status, "message": message,
+                    "block": block_tag,
+                }
+                _copy_source(r, entry)
+                target_step.results.append(r)
+                qualified_r = copy.copy(r)
+                if message:
+                    qualified_r["message"] = _build_step_qualified_name(
+                        target_path, message,
+                    )
+                block.results.append(qualified_r)
 
         elif event_type == "error":
             message = entry.get("message", "")
-            block_tag = block.block
-            e: dict[str, Any] = {
-                "message": message, "block": block_tag,
-            }
-            _copy_source(e, entry)
-            target_step.errors.append(e)
-            block.errors.append(e)
+            if use_assertions:
+                err: dict[str, Any] = {"message": message}
+            else:
+                block_tag = block.block
+                err = {"message": message, "block": block_tag}
+            _copy_source(err, entry)
+            target_step.errors.append(err)
+            block.errors.append(err)
             # Propagate "failed" status up the step stack
             for ancestor_step, _ in step_stack:
                 ancestor_step.status = "failed"
@@ -328,38 +350,48 @@ def _parse_steps_in_block(
 
         if event_type == "feature":
             name = entry.get("name", "")
-            block_tag = block.block
-            feat_b: dict[str, Any] = {"name": name, "block": block_tag}
+            feat_b: dict[str, Any] = {"name": name}
+            if not use_assertions:
+                feat_b["block"] = block.block
+            action = entry.get("action")
+            if action is not None:
+                feat_b["action"] = action
             _copy_source(feat_b, entry)
             block.features.append(feat_b)
 
         elif event_type == "measurement":
             name = entry.get("name", "")
             value = entry.get("value")
-            block_tag = block.block
-            m_b: dict[str, Any] = {
-                "name": name, "value": value, "block": block_tag,
-            }
+            m_b: dict[str, Any] = {"name": name, "value": value}
+            if not use_assertions:
+                m_b["block"] = block.block
+            unit = entry.get("unit")
+            if unit is not None:
+                m_b["unit"] = unit
             _copy_source(m_b, entry)
             block.measurements.append(m_b)
 
         elif event_type == "result":
-            status = entry.get("status", "")
-            message = entry.get("message", "")
-            block_tag = block.block
-            r_b: dict[str, Any] = {
-                "status": status, "message": message,
-                "block": block_tag,
-            }
-            _copy_source(r_b, entry)
-            block.results.append(r_b)
+            if use_assertions:
+                block.assertions.append(_normalize_assertion(entry))
+            else:
+                status = entry.get("status", "")
+                message = entry.get("message", "")
+                block_tag = block.block
+                r_b: dict[str, Any] = {
+                    "status": status, "message": message,
+                    "block": block_tag,
+                }
+                _copy_source(r_b, entry)
+                block.results.append(r_b)
 
         elif event_type == "error":
             message = entry.get("message", "")
-            block_tag = block.block
-            e_b: dict[str, Any] = {"message": message, "block": block_tag}
-            _copy_source(e_b, entry)
-            block.errors.append(e_b)
+            err_b: dict[str, Any] = {"message": message}
+            if not use_assertions:
+                err_b["block"] = block.block
+            _copy_source(err_b, entry)
+            block.errors.append(err_b)
 
     # Whether we are currently collecting remainder into an undefined step
     # at the block scope level (after a block-level structural error).
@@ -825,6 +857,10 @@ def parse_stdout_segments(stdout: str) -> list[Segment]:
     events).  This allows unified rendering of structured and unstructured
     test output.
 
+    Blocks that contain ``step_start``/``step_end`` events will have their
+    ``steps`` field populated with a tree of ``StepSegment`` objects via
+    the shared ``_parse_steps_in_block()`` post-processor.
+
     Args:
         stdout: Raw stdout string from a test execution.
 
@@ -838,6 +874,10 @@ def parse_stdout_segments(stdout: str) -> list[Segment]:
     segments: list[Segment] = []
     text_accum: list[str] = []
     current_block: BlockSegment | None = None
+    # Track raw lines for step post-processing
+    block_raw_lines: list[str] = []
+    # Warnings from step parsing (not exposed but needed by helper)
+    parser_warnings: list[str] = []
 
     def _flush_text() -> None:
         if text_accum:
@@ -847,8 +887,15 @@ def parse_stdout_segments(stdout: str) -> list[Segment]:
     def _flush_block() -> None:
         nonlocal current_block
         if current_block is not None:
-            segments.append(_finalize_block(current_block))
+            _finalize_block(current_block)
+            # Post-process for steps (using assertion mode)
+            _parse_steps_in_block(
+                current_block, block_raw_lines, parser_warnings,
+                use_assertions=True,
+            )
+            segments.append(current_block)
             current_block = None
+            block_raw_lines.clear()
 
     for line in lines:
         if not line.startswith(SENTINEL):
@@ -857,6 +904,7 @@ def parse_stdout_segments(stdout: str) -> list[Segment]:
                 if current_block.logs:
                     current_block.logs += "\n"
                 current_block.logs += line
+                block_raw_lines.append(line)
             else:
                 text_accum.append(line)
             continue
@@ -865,11 +913,12 @@ def parse_stdout_segments(stdout: str) -> list[Segment]:
         try:
             entry = json.loads(json_str)
         except json.JSONDecodeError:
-            # Malformed sentinel line — treat as plain text
+            # Malformed sentinel line -- treat as plain text
             if current_block is not None:
                 if current_block.logs:
                     current_block.logs += "\n"
                 current_block.logs += line
+                block_raw_lines.append(line)
             else:
                 text_accum.append(line)
             continue
@@ -879,6 +928,7 @@ def parse_stdout_segments(stdout: str) -> list[Segment]:
                 if current_block.logs:
                     current_block.logs += "\n"
                 current_block.logs += line
+                block_raw_lines.append(line)
             else:
                 text_accum.append(line)
             continue
@@ -895,15 +945,29 @@ def parse_stdout_segments(stdout: str) -> list[Segment]:
                     block=block_name,
                     description=entry.get("description", ""),
                 )
+                block_raw_lines = []
 
         elif event_type == "block_end":
             _flush_block()
 
-        elif current_block is not None:
-            # Content event — preserve raw sentinel line in logs
+        elif event_type == "step_start" and current_block is None:
+            # step_start outside any block -- create undefined block
+            _flush_text()
+            parser_warnings.append(
+                "step_start outside any block: creating undefined block"
+            )
+            current_block = BlockSegment(block="undefined")
+            block_raw_lines = [line]
             if current_block.logs:
                 current_block.logs += "\n"
             current_block.logs += line
+
+        elif current_block is not None:
+            # Content event -- preserve raw sentinel line in logs
+            if current_block.logs:
+                current_block.logs += "\n"
+            current_block.logs += line
+            block_raw_lines.append(line)
 
             # Dispatch to structured fields
             if event_type == "feature":
@@ -933,9 +997,12 @@ def parse_stdout_segments(stdout: str) -> list[Segment]:
                 _copy_source(err, entry)
                 current_block.errors.append(err)
 
-            # Unknown event types: already in logs, skip silently
+            # Unknown event types (including step_start/step_end):
+            # already in logs and block_raw_lines, skip silently.
+            # Step events will be processed by _parse_steps_in_block().
 
-        # Events outside any block (other than block_start) are skipped
+        # Events outside any block (other than block_start/step_start)
+        # are skipped
 
     # Finalize anything still open
     _flush_block()

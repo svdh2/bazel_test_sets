@@ -5,9 +5,9 @@ This implementation plan is based on: [architecture/in_development/block-steps/D
 
 ## Status Overview
 - **Overall Status**: In Progress
-- **Current Phase**: Phase 2: Error Recovery
-- **Current Step**: Step 2.1: Error recovery for all structural error cases
-- **Completed Steps**: 3 / 9
+- **Current Phase**: Phase 3: Segment Parser Extension
+- **Current Step**: Step 3.1: Step parsing in parse_stdout_segments()
+- **Completed Steps**: 4 / 9
 - **Last Updated**: 2026-02-19
 
 ## How to Use This Plan
@@ -380,16 +380,17 @@ Implemented three-phase top-down parsing via _parse_steps_in_block() post-proces
 ---
 
 ### Phase 2: Error Recovery
-**Phase Status**: Not Started
+**Phase Status**: Completed
 
 Implement the valid-prefix-plus-undefined-remainder recovery strategy for all structural error cases. This is essential for parser robustness.
 
 ---
 
 #### Step 2.1: Error recovery for all structural error cases
-**Status**: In Progress
+**Status**: Completed
 **Started**: 2026-02-19
-**Completed**:
+**Completed**: 2026-02-19
+**PR/Commit**: 39b97e9
 **PR/Commit**:
 
 **Objective**: Implement the valid-prefix-plus-undefined-remainder error recovery strategy for all four structural error cases identified in the design: (1) `step_end` name mismatch, (2) `step_start` outside any block, (3) `block_end` while steps are still open, (4) duplicate step names within the same scope. Implement the "warning" status and the "undefined" step/block creation. Implement the rule that "failed" takes precedence over "warning".
@@ -463,7 +464,7 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 1.3
 
 **Implementation Notes**:
-[Filled in during implementation]
+Implemented all four error recovery cases. Refactored _parse_steps_in_block with helper functions (_dispatch_content_event, _dispatch_block_content, _create_undefined_step) and a collecting_remainder mode for block-level errors. Case 2 (step_start outside block) handled in parse_test_output. All 94 tests pass.
 
 ---
 
@@ -475,8 +476,8 @@ Extend the segment-based parser (`parse_stdout_segments()`) to build step trees 
 ---
 
 #### Step 3.1: Step parsing in parse_stdout_segments()
-**Status**: Not Started
-**Started**:
+**Status**: In Progress
+**Started**: 2026-02-19
 **Completed**:
 **PR/Commit**:
 
@@ -892,6 +893,7 @@ Track major milestones and decisions during implementation:
 - Step 1.1 completed: StepSegment dataclass and BlockSegment.steps field (3673d32)
 - Step 1.2 completed: Backward compatibility baseline test (932a0fb)
 - Step 1.3 completed: Step parsing in parse_test_output() (44f68e6)
+- Step 2.1 completed: Error recovery for all structural error cases (39b97e9)
 
 ## Future Enhancements
 Features from the design document that are deferred or out of scope for this implementation plan:
