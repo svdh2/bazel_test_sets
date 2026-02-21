@@ -1,0 +1,17 @@
+{
+  "name": "bazel-test-sets-tools",
+  "owner": {
+    "name": "svdh"
+  },
+  "metadata": {
+    "description": "Claude Code plugins for the bazel_test_sets framework - setup, documentation Q&A, test authoring, and lifecycle management"
+  },
+  "plugins": [
+    {
+      "name": "bazel-test-sets",
+      "source": "./plugins/bazel-test-sets",
+      "description": "Setup, author, query, and manage test sets with the bazel_test_sets framework",
+      "version": "1.0.0"
+    }
+  ]
+}

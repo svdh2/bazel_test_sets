@@ -1,0 +1,13 @@
+{
+  "name": "bazel-test-sets",
+  "version": "1.0.0",
+  "author": {"name": "svdh"},
+  "description": "Setup, author, query, and manage test sets with the bazel_test_sets framework - includes guided project setup, documentation Q&A, test authoring with structured logging, and lifecycle operations (burn-in, regression, deflake)",
+  "skills": "./skills/",
+  "agents": [
+    "./agents/setup/AGENT.md",
+    "./agents/ask/AGENT.md",
+    "./agents/author/AGENT.md",
+    "./agents/lifecycle/AGENT.md"
+  ]
+}
