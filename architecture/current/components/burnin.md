@@ -99,8 +99,7 @@ disabled  ----->  new
 
 ## Dependents
 
-- **CI Tool**: The `burn-in` subcommand triggers state transitions; the sweep loop would be invoked via orchestrator integration
-- **Orchestrator Main**: Invokes `process_results` after test execution when `status_file` is configured, driving state transitions from orchestrator results
+- **Orchestrator Main**: The `burn-in` subcommand triggers state transitions; invokes `process_results` after test execution when `status_file` is configured, driving state transitions from orchestrator results
 
 ## Key Design Decisions
 

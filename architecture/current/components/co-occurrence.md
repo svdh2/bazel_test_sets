@@ -79,7 +79,7 @@ def load_graph(input_path) -> dict | None
 ## Dependents
 
 - **Regression Selector**: Reads the graph to score tests by co-occurrence with changed files
-- **CI Tool** (`build-graph` subcommand): Invokes graph construction and persistence
+- **Orchestrator Main** (`build-graph` subcommand): Invokes graph construction and persistence
 - **Orchestrator Main**: Loads graph when `--regression` is used
 
 ## Key Design Decisions

@@ -6,7 +6,7 @@ Bazel rules for large-scale test orchestration with DAG-based dependency managem
 
 - **Build system**: Bazel 9.x with Bzlmod
 - **Language (rules/macros)**: Starlark
-- **Language (orchestrator/ci_tool)**: Python 3.12
+- **Language (orchestrator)**: Python 3.12
 - **Testing**: pytest (unit), Bazel test (integration)
 - **Type checking**: mypy
 - **Container tooling**: Docker (Ubuntu 22.04 base image)
@@ -14,7 +14,7 @@ Bazel rules for large-scale test orchestration with DAG-based dependency managem
 
 ## System Overview
 
-The repository provides **reusable Bazel rules** (rules/, macros/, orchestrator/) that any project can depend on. The ci_tool/ and examples/ directories are **consumers** that exist only for testing and demonstrating the rules within this repo.
+The repository provides **reusable Bazel rules** (rules/, macros/, orchestrator/) that any project can depend on. The examples/ directory is a **consumer** that exists only for testing and demonstrating the rules within this repo.
 
 ```
 REUSABLE LIBRARY
@@ -39,11 +39,11 @@ REUSABLE LIBRARY
 CONSUMERS (testing / examples within this repo)
 +-------------------------------------------------------------------+
 |                                                                   |
-|  +-----------------+  +-----------------+                         |
-|  |  CI Tool        |  |  Examples       |                         |
-|  |  (Python CLI)   |  |  (Bazel module) |                         |
-|  |  ci_tool/       |  |  examples/      |                         |
-|  +-----------------+  +-----------------+                         |
+|  +-----------------+                                              |
+|  |  Examples       |                                              |
+|  |  (Bazel module) |                                              |
+|  |  examples/      |                                              |
+|  +-----------------+                                              |
 |                                                                   |
 +-------------------------------------------------------------------+
 
@@ -66,7 +66,7 @@ DEVELOPMENT INFRASTRUCTURE
 +-------------------------------------------------------------------+
 ```
 
-The **reusable library** is what external projects consume: Starlark rules and macros produce a JSON manifest at build time, and the Python orchestrator reads that manifest at run time to execute tests in DAG order. The **CI tool** (`ci_tool/`) is a CLI wrapper around orchestrator internals (burn-in, deflake, re-judge, build-graph) that exists only for testing and operating this repo's own test sets. The **examples** directory (`examples/`) is a separate Bazel module that demonstrates rule usage. Both are consumers of the library, not part of it.
+The **reusable library** is what external projects consume: Starlark rules and macros produce a JSON manifest at build time, and the Python orchestrator reads that manifest at run time to execute tests in DAG order. The orchestrator also provides lifecycle subcommands (burn-in, deflake, re-judge, build-graph) for managing test maturity. The **examples** directory (`examples/`) is a separate Bazel module that demonstrates rule usage and is a consumer of the library, not part of it.
 
 The `./ci` script is development infrastructure: it launches itself inside a Docker container and invokes Bazel commands (build, test, run) there.
 
@@ -80,7 +80,7 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 | [test_set rule](components/test-set-rule.md) | `rules/` | Groups test_set_test targets and subsets into hierarchical sets; generates JSON manifest |
 | [matrix_test_set macro](components/matrix-test-set-macro.md) | `macros/` | Generates parameterized tests from a matrix of parameter combinations |
 | [parameterized_test_set macro](components/parameterized-test-set-macro.md) | `macros/` | Generates variant-specific tests with environment variables and args |
-| [Orchestrator Main](components/orchestrator-main.md) | `orchestrator/` | CLI entry point; parses args, loads manifest, dispatches to executor or effort mode |
+| [Orchestrator Main](components/orchestrator-main.md) | `orchestrator/` | CLI entry point; parses args, loads manifest, dispatches to executor or effort mode; lifecycle subcommands (burn-in, deflake, test-status, re-judge, build-graph) |
 | [DAG](components/dag.md) | `orchestrator/execution/` | TestNode/TestDAG data structures with topological sort and BFS ordering |
 | [Executor](components/executor.md) | `orchestrator/execution/` | Sequential and async parallel test execution with dependency gating |
 | [Effort Runner](components/effort.md) | `orchestrator/execution/` | SPRT-based rerun engine for converge/max effort modes with per-test classification |
@@ -99,11 +99,10 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 | [Inference](components/inference.md) | `orchestrator/analysis/` | Infers DAG dependencies from rigging feature events in structured logs |
 | [Judgement](components/judgement.md) | `orchestrator/analysis/` | Executes judgement targets with stored measurements for verdict re-evaluation |
 
-### Consumers / Development Infrastructure
+### Development Infrastructure
 
 | Component | Directory | Description |
 |-----------|-----------|-------------|
-| [CI Tool](components/ci-tool.md) | `ci_tool/` | CLI with burn-in, deflake, test-status, re-judge, and build-graph subcommands |
 | [CI Script](components/ci-script.md) | `./ci` | Docker-delegating build/test/check runner |
 
 ## Flow Index

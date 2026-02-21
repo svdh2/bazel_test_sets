@@ -223,7 +223,7 @@ test_set_test(
 Re-judge with stored measurements:
 
 ```bash
-bazel run //ci_tool:main -- re-judge \
+bazel run //orchestrator:main -- re-judge \
     --manifest manifest.json \
     --measurements-dir .tests/measurements/
 ```

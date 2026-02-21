@@ -7,7 +7,7 @@ Manages test maturity through a state machine driven by SPRT (Sequential Probabi
 ## State Machine
 
 ```
-                 CI tool: burn-in
+                 orchestrator: burn-in
     new  --------------------------->  burning_in
      ^                                    |
      |                        +-----------+-----------+
@@ -17,7 +17,7 @@ Manages test maturity through a state machine driven by SPRT (Sequential Probabi
      |                        v                       v
      |                     stable                   flaky
      |                        |                       |
-     |               failure + SPRT              CI tool: deflake
+     |               failure + SPRT              orchestrator: deflake
      |               evaluation                       |
      |                        |                       |
      |              +---------+---------+             |
@@ -53,15 +53,15 @@ Manages test maturity through a state machine driven by SPRT (Sequential Probabi
 
 A new `test_set_test` target is added to a BUILD file.
 
-### 2. CI Tool: Transition to burning_in
+### 2. Orchestrator Main: Transition to burning_in
 
 ```bash
-bazel run //ci_tool:main -- burn-in --status-file .tests/status //path/to:new_test
+bazel run //orchestrator:main -- burn-in --status-file .tests/status //path/to:new_test
 ```
 
-The CI tool sets the test state to `burning_in` with `runs=0, passes=0`.
+The orchestrator sets the test state to `burning_in` with `runs=0, passes=0`.
 
-**Components**: CI Tool (`cmd_burn_in`), Status File
+**Components**: Orchestrator Main (`cmd_burn_in`), Status File
 
 ### 3. Burn-in Sweep
 
@@ -138,15 +138,15 @@ For up to max_reruns (20):
 
 Developer fixes the underlying cause of flakiness.
 
-### 2. CI Tool: Deflake
+### 2. Orchestrator Main: Deflake
 
 ```bash
-bazel run //ci_tool:main -- deflake --status-file .tests/status //path/to:flaky_test
+bazel run //orchestrator:main -- deflake --status-file .tests/status //path/to:flaky_test
 ```
 
 Transitions from `flaky` to `burning_in` with counters reset to `runs=0, passes=0`.
 
-**Components**: CI Tool (`cmd_deflake`), Status File
+**Components**: Orchestrator Main (`cmd_deflake`), Status File
 
 ### 3. Re-enter Burn-in Sweep
 

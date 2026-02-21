@@ -55,10 +55,10 @@ The script acquires an exclusive file lock (`target/.ci.lock`) before running a 
 
 Inside the container, this script invokes:
 - **Bazel**: `bazel build`, `bazel test`, `bazel run`, `bazel query`
-- **pytest**: Python unit tests for orchestrator/ci_tool
+- **pytest**: Python unit tests for orchestrator
 - **mypy**: Type checking
 
-Bazel in turn triggers the **Orchestrator** (for test_set targets) and the **CI Tool** (via `bazel run //ci_tool:main`).
+Bazel in turn triggers the **Orchestrator** (for test_set targets and lifecycle subcommands via `bazel run //orchestrator:main`).
 
 ## Key Design Decisions
 
@@ -66,6 +66,6 @@ Bazel in turn triggers the **Orchestrator** (for test_set targets) and the **CI 
 
 2. **Stale symlink cleanup**: Before Bazel operations, the script removes stale `bazel-*` symlinks that may point to inaccessible locations from previous container runs.
 
-3. **Pytest alongside Bazel test**: The `test` command runs both `bazel test //...` (Starlark analysis, integration tests) and `pytest` (Python unit tests). This covers both the Bazel rule tests and the orchestrator/ci_tool unit tests.
+3. **Pytest alongside Bazel test**: The `test` command runs both `bazel test //...` (Starlark analysis, integration tests) and `pytest` (Python unit tests). This covers both the Bazel rule tests and the orchestrator unit tests.
 
 4. **Report generation via bazel run**: The `test-examples` command uses `bazel run` (not `bazel test`) for report-generating targets, because `bazel test` sandboxes output away from the workspace.

@@ -167,10 +167,10 @@ Execution tuning parameters are set in `.test_set_config` (JSON):
 | `max_test_percentage` | float | `0.10` | Max fraction of stable tests for `--effort regression` |
 | `max_hops` | int | `2` | Max BFS hops in regression expansion |
 
-## CLI: CI Tool
+## CLI: Lifecycle Subcommands
 
 ```bash
-bazel run //ci_tool:main -- [SUBCOMMAND] [OPTIONS]
+bazel run //orchestrator:main -- [SUBCOMMAND] [OPTIONS]
 ```
 
 ### Subcommands
