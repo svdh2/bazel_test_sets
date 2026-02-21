@@ -167,12 +167,12 @@ new  ──>  burning_in  ──>  stable
                 └──>  flaky
 ```
 
-Only `stable` tests participate in detection mode and regression selection. The `ci_tool` manages state transitions:
+Only `stable` tests participate in detection mode and regression selection. The orchestrator manages state transitions via subcommands:
 
 ```bash
-bazel run //ci_tool:main -- burn-in my_test        # new -> burning_in
-bazel run //ci_tool:main -- deflake flaky_test      # flaky -> burning_in
-bazel run //ci_tool:main -- test-status --state stable
+bazel run //orchestrator:main -- burn-in my_test        # new -> burning_in
+bazel run //orchestrator:main -- deflake flaky_test      # flaky -> burning_in
+bazel run //orchestrator:main -- test-status --state stable
 ```
 
 ## Structured logging
@@ -198,8 +198,8 @@ The orchestrator parses these events and includes them in JSON and HTML reports.
 rules/                 Bazel rules (test_set, test_set_test)
 macros/                Parameterization macros (matrix, parameterized)
 orchestrator/          Python execution engine (DAG ordering, parallel
-                       execution, regression scoring, burn-in, reporting)
-ci_tool/               Test lifecycle CLI (burn-in, deflake, status, re-judge)
+                       execution, regression scoring, burn-in, reporting,
+                       lifecycle CLI: burn-in, deflake, status, re-judge)
 docs/                  In-depth documentation (see below)
 examples/              Separate Bazel module with demo projects (see below)
 ```

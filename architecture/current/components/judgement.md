@@ -50,7 +50,7 @@ Returns tests that have both a judgement_executable and stored measurements.
 
 ## Dependents
 
-- **CI Tool** (`re-judge` subcommand): Invokes `execute_judgement` and `find_rejudgeable_tests`
+- **Orchestrator Main** (`re-judge` subcommand): Invokes `execute_judgement` and `find_rejudgeable_tests`
 
 ## Key Design Decisions
 

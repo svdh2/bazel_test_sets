@@ -6,7 +6,7 @@
 
 ## Purpose
 
-CLI entry point for the test set orchestrator. Parses command-line arguments, loads the JSON manifest, builds the test DAG, and dispatches execution to the appropriate executor. Supports diagnostic and detection modes, with an optional `--effort` flag that controls test execution thoroughness: regression (co-occurrence selection + quick verdict), converge (SPRT reruns on failures + hifi verdict), or max (SPRT reruns on all tests + hifi verdict).
+CLI entry point for the test set orchestrator and lifecycle management. Parses command-line arguments, loads the JSON manifest, builds the test DAG, and dispatches execution to the appropriate executor. Supports diagnostic and detection modes, with an optional `--effort` flag that controls test execution thoroughness: regression (co-occurrence selection + quick verdict), converge (SPRT reruns on failures + hifi verdict), or max (SPRT reruns on all tests + hifi verdict). Also provides lifecycle subcommands for burn-in, deflake, test-status, re-judge, and build-graph.
 
 ## Interface
 
@@ -14,7 +14,7 @@ CLI entry point for the test set orchestrator. Parses command-line arguments, lo
 
 | Argument | Type | Default | Description |
 |----------|------|---------|-------------|
-| `--manifest` | Path | Required | Path to the JSON manifest file |
+| `--manifest` | Path | Required (run mode) | Path to the JSON manifest file |
 | `--mode` | Choice | `diagnostic` | Execution mode: `diagnostic` or `detection` |
 | `--effort` | Choice | None | Effort mode: `regression`, `converge`, or `max` |
 | `--output` | Path | None | Path for JSON report output |
@@ -25,6 +25,16 @@ CLI entry point for the test set orchestrator. Parses command-line arguments, lo
 | `--co-occurrence-graph` | Path | `.tests/co_occurrence_graph.json` | Co-occurrence graph path |
 
 Execution tuning parameters and the status file path are read from `.test_set_config` (see [Test Set Config](test-set-config.md)).
+
+### Lifecycle Subcommands
+
+| Command | Description | Key Flags |
+|---------|-------------|-----------|
+| `burn-in` | Transition tests from `new` to `burning_in` | `--status-file`, positional test names |
+| `deflake` | Transition `flaky` tests back to `burning_in` with reset counters | `--status-file`, positional test names (required) |
+| `test-status` | Display tabular status of all tests | `--status-file`, `--state` filter |
+| `re-judge` | Re-evaluate judgements using stored measurements | `--manifest`, `--measurements-dir`, positional test names |
+| `build-graph` | Build/update co-occurrence graph from git history | `--output`, `--source-extensions`, `--test-patterns`, `--max-history`, `--repo-root` |
 
 ### Public Function
 
@@ -44,10 +54,13 @@ Returns exit code 0 if all tests pass, 1 if any test fails.
 - **Co-occurrence** (`orchestrator.regression.co_occurrence`): Loads co-occurrence graph (lazy import for `--effort regression`)
 - **Regression Selector** (`orchestrator.regression.regression_selector`): Selects tests for regression runs (lazy import)
 - **E-values** (`orchestrator.lifecycle.e_values`): Computes test set verdict (lazy import when effort mode implies a verdict)
+- **Status File** (`orchestrator.lifecycle.status.StatusFile`): Used by lifecycle subcommands (burn-in, deflake, test-status)
+- **Judgement** (`orchestrator.analysis.judgement`): Used by re-judge subcommand (lazy import)
+- **Co-occurrence (build-graph)** (`orchestrator.regression.co_occurrence`): Used by build-graph subcommand (lazy import)
 
 ## Dependents
 
-- **Bazel**: test_set rules invoke `orchestrator/main.py` at run time (during `bazel test` or `bazel run`). Bazel is triggered by the CI Script inside the container. Note: `main.py` remains at the top level of the orchestrator package.
+- **Bazel**: test_set rules invoke `orchestrator/main.py` at run time (during `bazel test` or `bazel run`). Lifecycle subcommands are invoked via `bazel run //orchestrator:main -- <subcommand>`. Bazel is triggered by the CI Script inside the container.
 
 ## Key Design Decisions
 

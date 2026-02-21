@@ -292,7 +292,7 @@ def test(ctx, profile):
 
     console.print("[bold]--- Running pytest ---[/bold]")
     pytest_args = [
-        "pytest", "orchestrator/", "ci_tool/", "tests/",
+        "pytest", "orchestrator/", "tests/",
         "-v", "--tb=short",
     ]
     _, dt = _timed("pytest", run_cmd, pytest_args)
@@ -312,7 +312,7 @@ def check(ctx):
         _delegate_to_container(["check"], force=ctx.obj["force"])
         return
     run_cmd([
-        "mypy", "orchestrator/", "ci_tool/", "tests/",
+        "mypy", "orchestrator/", "tests/",
         "--ignore-missing-imports",
     ])
 

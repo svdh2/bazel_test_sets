@@ -23,7 +23,7 @@ tests through shared commits.
 ### Building the Graph
 
 ```bash
-bazel run //ci_tool:main -- build-graph \
+bazel run //orchestrator:main -- build-graph \
     --repo-path /path/to/repo \
     --output .tests/co_occurrence_graph.json \
     --source-extensions .py .java .go \
@@ -67,10 +67,10 @@ it picks up from the last analyzed commit:
 
 ```bash
 # First build (analyzes entire history)
-bazel run //ci_tool:main -- build-graph --output .tests/co_occurrence_graph.json
+bazel run //orchestrator:main -- build-graph --output .tests/co_occurrence_graph.json
 
 # Later (only analyzes new commits)
-bazel run //ci_tool:main -- build-graph --output .tests/co_occurrence_graph.json
+bazel run //orchestrator:main -- build-graph --output .tests/co_occurrence_graph.json
 ```
 
 ## Running with Regression

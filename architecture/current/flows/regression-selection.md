@@ -28,7 +28,7 @@ bazel run //path/to:my_test_set -- \
 The co-occurrence graph must be built first:
 
 ```bash
-bazel run //ci_tool:main -- build-graph --output .tests/co_occurrence_graph.json
+bazel run //orchestrator:main -- build-graph --output .tests/co_occurrence_graph.json
 ```
 
 ## Steps

@@ -74,8 +74,7 @@ The `history` array is ordered newest-first and capped at 200 entries (`HISTORY_
 ## Dependents
 
 - **Burn-in** (`orchestrator.lifecycle.burnin`): Reads/writes test states and history during sweep and result processing
-- **Orchestrator Main** (`orchestrator.main`): Loads StatusFile when `status_file` is configured in `.test_set_config`, passes it to `process_results` after test execution
-- **CI Tool** (`ci_tool/main.py`): All subcommands (burn-in, deflake, test-status) use StatusFile
+- **Orchestrator Main** (`orchestrator.main`): Loads StatusFile when `status_file` is configured in `.test_set_config`, passes it to `process_results` after test execution; lifecycle subcommands (burn-in, deflake, test-status) also use StatusFile
 - **Regression Selector**: Could filter by burn-in state (currently treats all manifest tests as candidates)
 
 ## Key Design Decisions

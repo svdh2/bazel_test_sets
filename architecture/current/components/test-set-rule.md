@@ -72,7 +72,7 @@ Produces `TestSetInfo` provider with fields:
 
 - **test_set rule** (self-referential): Subsets are themselves test_set targets, enabling arbitrary nesting
 - **Orchestrator**: Consumes the manifest JSON at run time
-- **CI Tool**: The re-judge command loads manifests produced by test_set
+- **Orchestrator Main**: The re-judge subcommand loads manifests produced by test_set
 
 ## Key Design Decisions
 

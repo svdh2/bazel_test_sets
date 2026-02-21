@@ -62,16 +62,16 @@ Set `status_file` and `max_reruns` in `.test_set_config`:
 
 ### 2. Transition tests to burning\_in
 
-Use the CI tool to move tests from `new` to `burning_in`:
+Use the orchestrator to move tests from `new` to `burning_in`:
 
 ```bash
-bazel run //ci_tool:main -- burn-in my_test_wrapped
+bazel run //orchestrator:main -- burn-in my_test_wrapped
 ```
 
 Without test names, it lists all tests currently in `burning_in` state:
 
 ```bash
-bazel run //ci_tool:main -- burn-in
+bazel run //orchestrator:main -- burn-in
 ```
 
 ### 3. Run the orchestrator with effort mode
@@ -139,7 +139,7 @@ After a test is marked `flaky`, transition it back to `burning_in` so the
 next orchestrator run re-evaluates it with SPRT:
 
 ```bash
-bazel run //ci_tool:main -- deflake flaky_test_wrapped
+bazel run //orchestrator:main -- deflake flaky_test_wrapped
 ```
 
 This resets the test's history and moves it to `burning_in`. Run the
