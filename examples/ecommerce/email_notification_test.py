@@ -24,16 +24,21 @@ def main() -> int:
     tst({"type": "measurement", "name": "send_latency_ms", "value": 85, "unit": "ms"})
     tst({"type": "block_end", "block": "stimulation"})
 
-    tst({"type": "block_start", "block": "verdict"})
-    tst({"type": "result", "name": "email_delivered", "passed": True})
-    tst({"type": "block_end", "block": "verdict"})
-
+    verdict = True
     reliability = float(os.environ.get("TST_EMAIL_RELIABILITY", "1.0"))
     if reliability < 1.0:
-        import random
-        if random.random() >= reliability:
-            return 1
-    return 0
+            import random
+            if random.random() >= reliability:
+                verdict = False
+
+    tst({"type": "block_start", "block": "verdict"})
+    tst({"type": "result", "name": "email_delivered", "passed": verdict})
+    tst({"type": "block_end", "block": "verdict"})
+
+    if verdict:
+         return 0
+    else:
+         return 1
 
 
 if __name__ == "__main__":
