@@ -1406,10 +1406,11 @@ _DAG_CSS = """\
     min-width: 0;
 }
 .dag-detail {
-    width: 400px;
+    min-width: 400px;
+    max-width: 60%;
     border-left: 1px solid #ddd;
     position: relative;
-    overflow: hidden;
+    flex-shrink: 0;
 }
 .dag-detail-close {
     position: absolute;
@@ -1427,12 +1428,23 @@ _DAG_CSS = """\
     text-align: center;
 }
 .dag-detail-content {
-    width: 100%;
+    min-width: max-content;
     height: calc(100% - 8px);
     overflow-y: auto;
     padding: 12px;
     background: #f5f5f5;
     box-sizing: border-box;
+}
+.dag-resize-handle {
+    width: 5px;
+    cursor: col-resize;
+    background: #ddd;
+    flex-shrink: 0;
+    transition: background 0.15s;
+}
+.dag-resize-handle:hover,
+.dag-resize-handle.dragging {
+    background: #0d6efd;
 }
 """
 
@@ -1617,6 +1629,50 @@ _DAG_JS = """\
         cy.edges().removeClass('highlighted');
     }
 
+    /* Resize handle for detail pane */
+    var resizeHandle = document.getElementById('dag-resize-handle');
+    var detailPane = document.getElementById('dag-detail');
+    var splitPane = document.querySelector('.dag-split');
+    (function() {
+        var dragging = false;
+        var startX, startWidth;
+        resizeHandle.addEventListener('mousedown', function(e) {
+            dragging = true;
+            startX = e.clientX;
+            startWidth = detailPane.offsetWidth;
+            resizeHandle.classList.add('dragging');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+        document.addEventListener('mousemove', function(e) {
+            if (!dragging) return;
+            var delta = startX - e.clientX;
+            var newWidth = Math.max(200, Math.min(startWidth + delta,
+                splitPane.offsetWidth - 200));
+            detailPane.style.width = newWidth + 'px';
+            cy.resize();
+        });
+        document.addEventListener('mouseup', function() {
+            if (!dragging) return;
+            dragging = false;
+            resizeHandle.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        });
+    })();
+
+    function showDetailPane() {
+        detailPane.style.display = 'block';
+        resizeHandle.style.display = 'block';
+        cy.resize();
+    }
+    function hideDetailPane() {
+        detailPane.style.display = 'none';
+        resizeHandle.style.display = 'none';
+        cy.resize();
+    }
+
     /* Click test node to show detail pane */
     cy.on('tap', 'node.test', function(evt) {
         highlightNode(evt.target);
@@ -1630,9 +1686,8 @@ _DAG_JS = """\
             }
         }
         if (!found) return;
-        var detailPane = document.getElementById('dag-detail');
         var content = document.getElementById('dag-detail-content');
-        detailPane.style.display = 'block';
+        showDetailPane();
         content.innerHTML = found.outerHTML;
     });
 
@@ -1649,9 +1704,8 @@ _DAG_JS = """\
             }
         }
         if (!found) return;
-        var detailPane = document.getElementById('dag-detail');
         var content = document.getElementById('dag-detail-content');
-        detailPane.style.display = 'block';
+        showDetailPane();
         var clone = found.cloneNode(true);
         clone.style.display = '';
         content.innerHTML = clone.outerHTML;
@@ -1666,7 +1720,7 @@ _DAG_JS = """\
 
     document.getElementById('dag-detail-close').addEventListener('click',
         function() {
-            document.getElementById('dag-detail').style.display = 'none';
+            hideDetailPane();
             clearHighlights();
             cy.elements().unselect();
         });
@@ -1889,6 +1943,10 @@ def _render_dag_section(
     # Split pane: canvas + detail
     parts.append('<div class="dag-split">')
     parts.append('<div id="dag-canvas" class="dag-canvas"></div>')
+    parts.append(
+        '<div id="dag-resize-handle" class="dag-resize-handle"'
+        ' style="display:none"></div>'
+    )
     parts.append(
         '<div id="dag-detail" class="dag-detail" style="display:none">'
     )
