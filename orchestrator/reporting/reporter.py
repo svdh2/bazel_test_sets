@@ -1,8 +1,8 @@
 """Report generation for test execution results.
 
-Generates JSON reports from test results, supporting the five-status model:
+Generates JSON reports from test results, supporting the six-status model:
 passed, failed, dependencies_failed, passed+dependencies_failed,
-failed+dependencies_failed.
+failed+dependencies_failed, not_run.
 
 Supports hierarchical reports mirroring the DAG structure, burn-in
 progress, regression selection details, and rolling history for
@@ -19,13 +19,14 @@ from typing import Any
 from orchestrator.execution.executor import TestResult
 
 
-# Valid status values in the five-status model
+# Valid status values in the six-status model
 VALID_STATUSES = frozenset({
     "passed",
     "failed",
     "dependencies_failed",
     "passed+dependencies_failed",
     "failed+dependencies_failed",
+    "not_run",
 })
 
 # Maximum rolling history entries per test
@@ -496,9 +497,7 @@ class Reporter:
                 test_entries[name] = entry
 
         statuses = [
-            results_by_name[n].status
-            for n in test_set_tests
-            if n in results_by_name
+            e["status"] for e in test_entries.values() if "status" in e
         ]
         agg_status = _aggregate_status(statuses)
 
@@ -540,6 +539,8 @@ class Reporter:
             result = results_by_name[name]
             entry.update(self._format_result(result))
             entry.pop("name", None)
+        else:
+            entry["status"] = "not_run"
 
         if name in self.burn_in_data:
             entry["burn_in"] = self.burn_in_data[name]
@@ -642,7 +643,7 @@ class Reporter:
         )
         total_duration = sum(r.duration for r in self.results)
 
-        return {
+        summary: dict[str, Any] = {
             "total": total,
             "passed": passed,
             "failed": failed,
@@ -651,6 +652,17 @@ class Reporter:
             "failed+dependencies_failed": failed_dep_failed,
             "total_duration_seconds": round(total_duration, 3),
         }
+
+        if self.manifest:
+            all_test_names = set(
+                self.manifest.get("test_set_tests", {}).keys()
+            )
+            executed_names = {r.name for r in self.results}
+            not_run = len(all_test_names - executed_names)
+            if not_run:
+                summary["not_run"] = not_run
+
+        return summary
 
     def _format_result(self, result: TestResult) -> dict[str, Any]:
         """Format a single test result for the report.
@@ -686,19 +698,26 @@ class Reporter:
 def _aggregate_status(statuses: list[str]) -> str:
     """Compute aggregated status from child statuses.
 
+    Ignores ``not_run`` entries so that tests absent from the current
+    execution do not influence the aggregated pass/fail verdict.
+
     Args:
         statuses: List of child test statuses.
 
     Returns:
         Aggregated status string.
     """
-    if not statuses:
+    active = [s for s in statuses if s != "not_run"]
+    if not active:
+        # All children are not_run → propagate not_run (vs truly empty)
+        if statuses:
+            return "not_run"
         return "no_tests"
 
-    if all(s == "passed" for s in statuses):
+    if all(s == "passed" for s in active):
         return "passed"
     # Check for actual test failures (not just dependency failures)
     failure_statuses = {"failed", "failed+dependencies_failed"}
-    if any(s in failure_statuses for s in statuses):
+    if any(s in failure_statuses for s in active):
         return "failed"
     return "mixed"

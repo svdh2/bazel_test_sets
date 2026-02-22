@@ -53,6 +53,7 @@ class Reporter:
       "passed": 8,
       "failed": 1,
       "dependencies_failed": 1,
+      "not_run": 2,
       "total_duration_seconds": 12.345
     },
     "test_set": {                    // Hierarchical (when manifest is set)
@@ -115,9 +116,9 @@ class Reporter:
 
 | Child statuses | Aggregated |
 |---------------|------------|
-| All `passed` | `passed` |
+| All `passed` (ignoring `not_run`) | `passed` |
 | Any `failed` or `failed+dependencies_failed` | `failed` |
-| No results | `no_tests` |
+| No results (or all `not_run`) | `no_tests` |
 | Otherwise | `mixed` |
 
 ## Dependencies
@@ -136,7 +137,7 @@ class Reporter:
 
 2. **Rolling history with trimming**: `generate_report_with_history` loads an existing report, appends current results, and trims to `MAX_HISTORY` (500) entries per test. This provides a bounded reverse-chronological record for SPRT demotion evaluation.
 
-3. **Five-status model**: The reporter supports all five statuses including the combined race-condition statuses (`passed+dependencies_failed`, `failed+dependencies_failed`), ensuring no information is lost during reporting.
+3. **Six-status model**: The reporter supports six statuses: the five execution statuses (`passed`, `failed`, `dependencies_failed`, `passed+dependencies_failed`, `failed+dependencies_failed`) plus `not_run` for tests defined in the manifest but absent from execution results. The `not_run` status is excluded from parent status aggregation so it does not turn passing sets into mixed/failed.
 
 4. **Optional enrichment**: Burn-in progress, inferred dependencies, regression selection, E-value verdict data, lifecycle state, and source link base are all optional additions. The reporter works with just TestResult objects for simple use cases. Structured log data in stdout is parsed at HTML render time by the log parser's `parse_stdout_segments()` function, not stored as a separate report field.
 

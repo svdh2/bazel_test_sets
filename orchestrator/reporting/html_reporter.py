@@ -29,6 +29,7 @@ STATUS_COLORS: dict[str, str] = {
     "failed+dependencies_failed": "#FFB6C1",
     "mixed": "#FFFFAD",
     "no_tests": "#D3D3D3",
+    "not_run": "#B0C4DE",
 }
 
 # Lifecycle state color mapping
@@ -58,6 +59,7 @@ STATUS_LABELS: dict[str, str] = {
     "failed+dependencies_failed": "FAILED (deps failed)",
     "mixed": "MIXED",
     "no_tests": "NO TESTS",
+    "not_run": "NOT RUN",
 }
 
 _CSS = """\
@@ -580,6 +582,12 @@ def _render_header(report: dict[str, Any]) -> str:
             parts.append(
                 f'<div class="summary-item" style="background:#D3D3D3">'
                 f"Deps Failed: {dep_failed}</div>"
+            )
+        not_run = summary.get("not_run", 0)
+        if not_run:
+            parts.append(
+                f'<div class="summary-item" style="background:#B0C4DE">'
+                f"Not Run: {not_run}</div>"
             )
         parts.append(
             f'<div class="summary-item" style="background:#e8e8e8">'
@@ -1455,10 +1463,10 @@ _DAG_JS = """\
         dependencies_failed: '#D3D3D3',
         'passed+dependencies_failed': '#FFFFAD',
         'failed+dependencies_failed': '#FFB6C1',
-        mixed: '#FFFFAD', no_tests: '#D3D3D3'
+        mixed: '#FFFFAD', no_tests: '#D3D3D3', not_run: '#B0C4DE'
     };
 
-    var DAG_COLORS = {green: '#90EE90', red: '#FFB6C1', grey: '#D3D3D3'};
+    var DAG_COLORS = {green: '#90EE90', red: '#FFB6C1', grey: '#D3D3D3', blue: '#B0C4DE'};
 
     var LIFECYCLE_ICONS = {
         burning_in: '\\uD83D\\uDD25',
@@ -1546,6 +1554,13 @@ _DAG_JS = """\
                 }
             },
             {
+                selector: 'node.test[status = "not_run"]',
+                style: {
+                    'opacity': 0.6,
+                    'border-style': 'dashed'
+                }
+            },
+            {
                 selector: 'node.test:selected',
                 style: {
                     'border-width': 3,
@@ -1618,6 +1633,25 @@ _DAG_JS = """\
     document.getElementById('dag-fit').addEventListener('click', function() {
         cy.fit(undefined, 30);
     });
+
+    /* Toggle not-run tests visibility */
+    var showAllCb = document.getElementById('dag-show-all');
+    if (showAllCb) {
+        showAllCb.addEventListener('change', function() {
+            var show = this.checked;
+            cy.batch(function() {
+                cy.nodes().forEach(function(node) {
+                    if (node.data('status') === 'not_run') {
+                        node.style('display', show ? 'element' : 'none');
+                    }
+                });
+            });
+            cy.layout({
+                name: 'dagre', rankDir: 'TB',
+                spacingFactor: 1.2, nodeSep: 20, rankSep: 40
+            }).run();
+        });
+    }
 
     /* Highlight connected edges for a node */
     function highlightNode(node) {
@@ -1737,6 +1771,7 @@ _STATUS_DAG_COLOR: dict[str, str] = {
     "failed+dependencies_failed": "red",
     "mixed": "red",
     "no_tests": "grey",
+    "not_run": "blue",
 }
 
 
@@ -1803,6 +1838,8 @@ def _compute_dag_color(
                 color = "red"
             elif all(c == "grey" for c in child_colors):
                 color = "grey"
+            elif all(c == "blue" for c in child_colors):
+                color = "blue"
             else:
                 color = "green"
 
@@ -1938,6 +1975,12 @@ def _render_dag_section(
         '<button id="dag-zoom-out" title="Zoom out">&minus;</button>'
     )
     parts.append('<button id="dag-fit" title="Fit to view">Fit</button>')
+    parts.append(
+        '<label style="margin-left:12px;font-size:13px;display:flex;'
+        'align-items:center;gap:4px;cursor:pointer">'
+        '<input type="checkbox" id="dag-show-all" checked>'
+        'Show all workspace tests</label>'
+    )
     parts.append("</div>")
 
     # Split pane: canvas + detail

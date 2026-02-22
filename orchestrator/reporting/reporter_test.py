@@ -101,13 +101,14 @@ class TestAllFiveStatuses:
             assert r.status == s
 
     def test_valid_statuses_constant(self):
-        """VALID_STATUSES contains exactly the five statuses."""
+        """VALID_STATUSES contains exactly the six statuses."""
         expected = {
             "passed",
             "failed",
             "dependencies_failed",
             "passed+dependencies_failed",
             "failed+dependencies_failed",
+            "not_run",
         }
         assert VALID_STATUSES == expected
 
@@ -777,6 +778,12 @@ class TestAggregateStatus:
 
     def test_combined_status_failed(self):
         assert _aggregate_status(["passed", "failed+dependencies_failed"]) == "failed"
+
+    def test_all_not_run(self):
+        assert _aggregate_status(["not_run", "not_run"]) == "not_run"
+
+    def test_not_run_ignored_for_active(self):
+        assert _aggregate_status(["passed", "not_run"]) == "passed"
 
 
 class TestLifecycleDataInReport:
