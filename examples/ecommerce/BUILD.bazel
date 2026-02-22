@@ -309,4 +309,5 @@ test_set(
     ],
     assertion = "E-commerce platform passes all tests",
     requirement_id = "ECOM-ROOT",
+    visibility = ["//visibility:public"],
 )

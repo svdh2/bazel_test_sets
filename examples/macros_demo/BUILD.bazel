@@ -15,6 +15,7 @@ memory_test_set(
     name = "memory_limits_staging",
     tier = "staging",
     max_ram_gb = 1,
+    visibility = ["//visibility:public"],
 )
 
 # --- Payment region test set (matrix) ---
@@ -35,4 +36,5 @@ test_set(
         ":payment_processing_regions",
     ],
     assertion = "Deployment validation passes for production environment",
+    visibility = ["//visibility:public"],
 )

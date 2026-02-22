@@ -1,0 +1,26 @@
+load("@test_sets_bazel_rules//rules:test_set.bzl", "test_set")
+
+test_set(
+    name = "pr",
+    subsets = [
+        "//ecommerce:ecommerce_tests",
+    ],
+    assertion = "Code passes the PR quality gate",
+)
+
+test_set(
+    name = "merge",
+    subsets = [
+        "//ecommerce:ecommerce_tests",
+        "//macros_demo:deployment_validation",
+    ],
+    assertion = "Code passes the quality gate to merge to main",
+)
+
+test_set(
+    name = "staging",
+    subsets = [
+        "//macros_demo:memory_limits_staging",
+    ],
+    assertion = "Code passes the staging quality gate",
+)
