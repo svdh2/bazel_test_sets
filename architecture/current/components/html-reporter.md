@@ -22,12 +22,14 @@ def write_html_report(report_data: dict, output_path: Path)
 |---------|-------------|
 | **Header** | Report title, generation timestamp, commit hash, summary badges |
 | **Summary badges** | Color-coded counts: total (grey), passed (green), failed (pink), deps failed (light grey), not run (steel blue) |
-| **DAG visualization** | Interactive graph of test_set groups and test_set_test nodes with `depends_on` edges. Uses Cytoscape.js with dagre layout. Supports zoom/pan, click-to-inspect detail pane, and "Show all workspace tests" checkbox to toggle visibility of `not_run` test nodes. Clicking a test node shows its full entry; clicking a group (set) node shows name, status badge, assertion, lifecycle summary, and threshold. Test nodes with `parameters` display multi-line labels: the test name on the first line followed by indented `key: value` pairs on subsequent lines. |
+| **DAG visualization** | Interactive graph of test_set groups and test_set_test nodes with `depends_on` edges. Uses Cytoscape.js with dagre layout. Supports zoom/pan, click-to-inspect detail pane, search box, and "Show all workspace tests" checkbox to toggle visibility of `not_run` test nodes. Clicking a test node shows its full entry; clicking a group (set) node shows name, status badge, assertion, lifecycle summary, and threshold. Test nodes with `parameters` display multi-line labels: the test name on the first line followed by indented `key: value` pairs on subsequent lines. |
+| **Search box** | Toolbar search input with keyword-based filtering across test/set fields: name, assertion, parameter, metric, check, feature, log. Supports field-scoped queries (e.g. `name:(email) check:(SMTP)`). CamelCase and snake_case identifiers are decomposed into words for matching. Results appear in a dropdown with keyboard navigation (arrows, Enter, Escape). Selecting a result focuses the Cytoscape node and opens the detail pane. Search index is pre-built in Python and embedded as `SEARCH_INDEX` JSON. |
 | **Test set section** | Hierarchical: set name, aggregated status badge, nested test entries |
 | **Test entry** | Name, status badge, assertion, duration, exit code, color-coded border. When `parameters` are present, a two-column table (Parameter / Value) appears at the top of the entry before the history timeline. |
 | **Logs** | Expandable `<details>` with stdout (dark theme pre) and stderr (pink border) |
 | **Structured log** | Expandable section with block sequence, measurement table, results, errors |
-| **Step segments** | Nested collapsible `<details>` within blocks showing step hierarchy with status badges, measurements, assertions, errors, and raw logs. Passed steps collapsed; failed/warning steps and their ancestors expanded. |
+| **Step segments** | Nested collapsible `<details>` within blocks showing step hierarchy with status badges, measurements, assertions, errors, and raw logs. Passed steps collapsed; failed/warning steps and their ancestors expanded. Steps with sub-steps show a count indicator. |
+| **Block summaries** | Block-level measurements and assertions are split into direct items (shown inline) and step-qualified items (collapsed by default in `<details>` sections). Rigging block features are rendered as individual list items rather than comma-separated. |
 | **History timeline** | Compact horizontal bar of colored boxes showing pass/fail history; hover reveals commit hash |
 | **Burn-in info** | Blue info box with runs, passes, SPRT status |
 | **Lifecycle badge** | Per-test badge showing lifecycle state (stable/burning_in/flaky/new/disabled) with reliability rate |
@@ -66,7 +68,7 @@ def write_html_report(report_data: dict, output_path: Path)
 
 ## Dependencies
 
-- Standard library: `json` (loading reports, embedding graph data), `html` (escaping)
+- Standard library: `json` (loading reports, embedding graph data), `html` (escaping), `re` (identifier decomposition)
 - **Log Parser** (`orchestrator.analysis.log_parser`): `BlockSegment`, `StepSegment`, `TextSegment`, `parse_stdout_segments` for structured log parsing
 - **Source Links** (`orchestrator.reporting.source_links`): `render_source_link()` for building HTML source code links
 - **CDN (runtime)**: Cytoscape.js 3.30.4, dagre 0.8.5, cytoscape-dagre 2.5.0 from unpkg.com (loaded by the browser when viewing the report; requires internet access)
@@ -79,7 +81,7 @@ def write_html_report(report_data: dict, output_path: Path)
 
 1. **Self-contained HTML with CDN exception**: All CSS is embedded inline in `<style>` tags. The DAG visualization loads Cytoscape.js from CDN (~300KB) since inlining a full graph library would be impractical. All other elements (history timeline, badges, etc.) remain pure CSS/HTML with no external dependencies.
 
-2. **DAG graph data embedding**: The test_set hierarchy and `depends_on` edges are serialized as `GRAPH_DATA` and `TEST_DATA` JSON variables in `<script>` tags. Cytoscape.js reads these on page load. Test set nodes become compound (parent) nodes; test nodes are children with directed edges for dependencies. Each test node's graph data includes a `parameters` dict (empty when no parameters are set) so the client-side label function can render multi-line labels.
+2. **DAG graph data embedding**: The test_set hierarchy and `depends_on` edges are serialized as `GRAPH_DATA` and `TEST_DATA` JSON variables in `<script>` tags. Cytoscape.js reads these on page load. Test set nodes become compound (parent) nodes; test nodes are children with directed edges for dependencies. Each test node's graph data includes a `parameters` dict (empty when no parameters are set) so the client-side label function can render multi-line labels. A `SEARCH_INDEX` JSON variable provides per-node field-level searchable text with decomposed identifiers.
 
 3. **DOM-cloning detail pane**: Clicking a test node clones its rendered `data-test-name` entry into the detail pane. Clicking a group (set) node clones a hidden `data-set-name` summary card containing the set's header, assertion, lifecycle summary, and config threshold. Both use `outerHTML` cloning so the detail pane mirrors the lower-panel styling.
 
