@@ -59,3 +59,5 @@ For a variant named `production` in a parameterized_test_set named `resource_lim
 2. **Per-variant dependencies**: Each variant can declare its own `depends_on` in addition to the shared `depends_on` at the macro level, enabling variant-specific DAG edges.
 
 3. **Auto-generated assertion**: If no top-level assertion is provided, the macro generates "All {name} variants pass" as a default.
+
+4. **Automatic parameter extraction**: The macro parses `--key=value` arguments from each variant's `args` list into a `parameters` dict and passes it to `test_set_test`. This makes CLI arguments visible as structured metadata in the manifest and reports without requiring the user to declare parameters separately. Arguments that do not match the `--key=value` pattern are ignored.

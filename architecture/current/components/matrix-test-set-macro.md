@@ -40,7 +40,7 @@ For a variant named `us` in a matrix_test_set named `payment_region`:
 
 ## Key Design Decisions
 
-1. **Build-time parameterization**: All parameter resolution happens in Starlark during the loading phase. The orchestrator and rules are completely unaware of parameters.
+1. **Build-time parameterization**: All parameter resolution happens in Starlark during the loading phase. The macro automatically passes `parameters = {k: str(v) for k, v in params.items()}` to each `test_set_test`, making the matrix key-value pairs available as structured metadata in the manifest and reports.
 
 2. **Assertion templating**: The `assertion_template` uses Python format string syntax, filled with matrix values (`{region}`, `{currency}`), producing human-readable assertions per variant.
 

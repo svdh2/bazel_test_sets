@@ -629,6 +629,18 @@ def _render_test_entry(
         f"{lifecycle_html}</div>"
     )
 
+    # Parameters table
+    parameters = data.get("parameters")
+    if parameters:
+        parts.append('<table class="measurements-table" style="margin-top:6px">')
+        parts.append("<tr><th>Parameter</th><th>Value</th></tr>")
+        for key, value in parameters.items():
+            parts.append(
+                f"<tr><td>{html.escape(str(key))}</td>"
+                f"<td>{html.escape(str(value))}</td></tr>"
+            )
+        parts.append("</table>")
+
     # History timeline
     if history_entries:
         parts.append(_render_history_timeline(history_entries))
@@ -1489,7 +1501,8 @@ _DAG_JS = """\
             data: {
                 id: d.id, label: d.label, type: d.type,
                 status: d.status, lifecycle: d.lifecycle || '',
-                dagColor: d.dag_color || 'grey'
+                dagColor: d.dag_color || 'grey',
+                parameters: d.parameters || {}
             },
             classes: d.type
         });
@@ -1537,13 +1550,27 @@ _DAG_JS = """\
                     'label': function(ele) {
                         var icon = LIFECYCLE_ICONS[ele.data('lifecycle')];
                         var lbl = ele.data('label');
-                        return icon ? icon + ' ' + lbl : lbl;
+                        var prefix = icon ? icon + ' ' : '';
+                        var params = ele.data('parameters');
+                        if (params && typeof params === 'object') {
+                            var keys = Object.keys(params);
+                            if (keys.length > 0) {
+                                var lines = [prefix + lbl];
+                                for (var k = 0; k < keys.length; k++) {
+                                    lines.push('  ' + keys[k] + ': ' + params[keys[k]]);
+                                }
+                                return lines.join('\\n');
+                            }
+                        }
+                        return prefix + lbl;
                     },
                     'text-valign': 'center',
                     'text-halign': 'center',
+                    'text-wrap': 'wrap',
+                    'text-max-width': '200px',
                     'font-size': '11px',
                     'width': 'label',
-                    'height': '30px',
+                    'height': 'label',
                     'padding': '8px',
                     'border-width': function(ele) {
                         return LIFECYCLE_BORDER[ele.data('lifecycle')] ? 3 : 1;
@@ -1888,12 +1915,14 @@ def _walk_dag_for_graph(
                 test_name.rsplit(":", 1)[-1] if ":" in test_name else test_name
             )
             lifecycle = test_data.get("lifecycle") or {}
+            parameters = test_data.get("parameters") or {}
             seen_nodes[test_name] = {"data": {
                 "id": test_name,
                 "label": short_label,
                 "type": "test",
                 "status": test_data.get("status", "no_tests"),
                 "lifecycle": lifecycle.get("state", ""),
+                "parameters": parameters,
             }}
         edges.append({"data": {
             "source": node_id, "target": test_name, "type": "member",

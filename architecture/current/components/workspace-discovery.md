@@ -23,7 +23,7 @@ def merge_discovered_tests(manifest: dict, discovery: dict) -> dict
 
 ### `discover_workspace_tests()`
 
-Runs `bazel query --output=xml 'kind("test_set_test", //...) + kind("_test_set_rule_test", //...)'` from the workspace directory. Returns a dict with `tests` (list of test dicts) and `test_sets` (list of test_set dicts), or `None` if discovery is unavailable.
+Runs `bazel query --output=xml 'kind("test_set_test", //...) + kind("_test_set_rule_test", //...)'` from the workspace directory. Returns a dict with `tests` (list of test dicts) and `test_sets` (list of test_set dicts), or `None` if discovery is unavailable. Each test dict includes a `parameters` string_dict (present when non-empty) extracted from the XML `<dict name="parameters">` element.
 
 ### `parse_test_sets_xml()`
 
@@ -35,7 +35,7 @@ Identifies root test_sets (not referenced as a subset by any other), filters out
 
 ### `merge_discovered_tests()`
 
-Deep-copies the manifest, adds discovered tests not already present (matched by normalized label), and wraps everything under a synthetic *Workspace* root. The manifest root and all other discovered root test_sets become peer subsets of this workspace root. This ensures every report shows the same DAG shape regardless of which test_set is executed — only test statuses differ. Any new tests not placed in a discovered tree are grouped under an "Other workspace tests" catch-all subset. Returns the modified copy; the original manifest is unchanged.
+Deep-copies the manifest, adds discovered tests not already present (matched by normalized label) -- including their `parameters` when present -- and wraps everything under a synthetic *Workspace* root. The manifest root and all other discovered root test_sets become peer subsets of this workspace root. This ensures every report shows the same DAG shape regardless of which test_set is executed — only test statuses differ. Any new tests not placed in a discovered tree are grouped under an "Other workspace tests" catch-all subset. Returns the modified copy; the original manifest is unchanged.
 
 ### Label Normalization
 

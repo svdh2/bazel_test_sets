@@ -19,6 +19,7 @@ Wraps an existing Bazel test target (py_test, cc_test, etc.) with DAG metadata. 
 | `assertion` | `string` | Yes | Free-form description of what this test verifies |
 | `requirement_id` | `string` | No | Optional traceability ID |
 | `judgement` | `label` | No | Optional separate judgement executable for re-evaluation |
+| `parameters` | `string_dict` | No | Structured key-value parameters for display in reports (default `{}`) |
 
 ### Providers
 
@@ -29,6 +30,7 @@ Produces `TestSetTestInfo` provider with fields:
 - `depends_on`: List of dependency labels
 - `judgement_label`: Optional judgement target label
 - `executable`: The generated runner shell script
+- `parameters`: Dict of string key-value pairs describing test parameters
 
 ### Generated Artifacts
 

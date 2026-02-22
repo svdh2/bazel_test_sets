@@ -43,6 +43,8 @@ def _test_info_to_dict(info):
         entry["judgement_executable"] = str(info.judgement_label)
     if info.disabled:
         entry["disabled"] = True
+    if info.parameters:
+        entry["parameters"] = dict(info.parameters)
     return entry
 
 def _test_set_rule_test_impl(ctx):
