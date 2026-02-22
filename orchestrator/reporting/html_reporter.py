@@ -1511,6 +1511,7 @@ _DAG_JS = """\
                 selector: 'node.group',
                 style: {
                     'shape': 'round-rectangle',
+                    'corner-radius': 30,
                     'background-color': function(ele) {
                         return DAG_COLORS[ele.data('dagColor')] || '#e8e8e8';
                     },
@@ -1522,15 +1523,14 @@ _DAG_JS = """\
                     'width': 'label',
                     'height': '35px',
                     'padding': '12px',
-                    'border-width': 4,
-                    'border-style': 'double',
-                    'border-color': '#333'
+                    'border-width': 2,
+                    'border-color': '#888'
                 }
             },
             {
                 selector: 'node.test',
                 style: {
-                    'shape': 'round-rectangle',
+                    'shape': 'rectangle',
                     'background-color': function(ele) {
                         return STATUS_COLORS[ele.data('status')] || '#e8e8e8';
                     },
@@ -1570,8 +1570,7 @@ _DAG_JS = """\
             {
                 selector: 'node.group:selected',
                 style: {
-                    'border-width': 4,
-                    'border-style': 'double',
+                    'border-width': 3,
                     'border-color': '#0d6efd'
                 }
             },
@@ -1795,6 +1794,15 @@ def _build_graph_data(test_set: dict[str, Any]) -> dict[str, Any]:
     edges: list[dict[str, Any]] = []
     _walk_dag_for_graph(test_set, parent_id=None,
                         seen_nodes=seen_nodes, edges=edges)
+
+    # Remove synthetic "Workspace" root node — its children become
+    # top-level roots in the DAG (which may be disconnected).
+    ws_name = "Workspace"
+    if ws_name in seen_nodes:
+        del seen_nodes[ws_name]
+        edges = [e for e in edges
+                 if e["data"]["source"] != ws_name
+                 and e["data"]["target"] != ws_name]
 
     # Build children map from membership edges.
     children_map: dict[str, list[str]] = {}

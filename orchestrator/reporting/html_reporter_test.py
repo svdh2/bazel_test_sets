@@ -1196,12 +1196,12 @@ class TestDagVisualization:
         result = generate_html_report(report)
         assert '"lifecycle":""' in result
 
-    def test_group_node_double_border_style(self):
-        """Group nodes use double border style with black color."""
+    def test_group_node_rounded_border_style(self):
+        """Group nodes use rounded shape with soft border."""
         report = _make_dag_report()
         result = generate_html_report(report)
-        assert "'border-style': 'double'" in result
-        assert "'border-color': '#333'" in result
+        assert "'corner-radius': 30" in result
+        assert "'border-color': '#888'" in result
 
     def test_lifecycle_icons_in_js(self):
         """Lifecycle icon mapping is present in the JS."""
