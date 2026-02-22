@@ -61,6 +61,13 @@ def parameterized_test_set(
         # Determine depends_on for this variant
         variant_deps = list(depends_on) + config.get("depends_on", [])
 
+        # Extract structured parameters from --key=value args
+        variant_params = {}
+        for arg in config.get("args", []):
+            if arg.startswith("--") and "=" in arg:
+                key, _, value = arg[2:].partition("=")
+                variant_params[key] = value
+
         # Create the test_set_test wrapper
         test_set_test(
             name = wrapped_name,
@@ -68,6 +75,7 @@ def parameterized_test_set(
             assertion = config["assertion"],
             depends_on = variant_deps,
             args = config.get("args", []),
+            parameters = variant_params,
         )
         tests.append(":" + wrapped_name)
 

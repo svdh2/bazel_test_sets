@@ -223,6 +223,29 @@ class TestParseQueryXml:
             "//pkg:a_wrapped", "//pkg:b_wrapped",
         ]
 
+    def test_parameters_parsed(self):
+        """Parameters string_dict is extracted from XML."""
+        xml = """\
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<query version="2">
+    <rule class="test_set_test" name="//pkg:mem_wrapped">
+        <label name="test" value="//pkg:mem_test"/>
+        <string name="assertion" value="Memory under limit"/>
+        <dict name="parameters">
+            <entry key="service" value="worker"/>
+            <entry key="limit-gb" value="1.0"/>
+        </dict>
+    </rule>
+</query>"""
+        results = parse_query_xml(xml)
+        assert len(results) == 1
+        assert results[0]["parameters"] == {"service": "worker", "limit-gb": "1.0"}
+
+    def test_parameters_absent_when_not_in_xml(self):
+        """No parameters key when XML has no dict element."""
+        results = parse_query_xml(SAMPLE_XML)
+        assert "parameters" not in results[0]
+
     def test_ignores_test_set_rule_test(self):
         """parse_query_xml only returns test_set_test, not _test_set_rule_test."""
         results = parse_query_xml(COMBINED_XML)
@@ -1036,3 +1059,25 @@ class TestMergeDiscoveredTests:
         assert ws_names.count("my_tests") == 1
         # new_suite_test should appear as peer
         assert "new_suite_test" in ws_names
+
+    def test_parameters_included_in_merged_tests(self):
+        """Parameters from discovery flow into merged test_set_tests."""
+        manifest = self._make_manifest()
+        discovery = {
+            "tests": [
+                {
+                    "test_set_test_label": "//other:param_wrapped",
+                    "test_label": "//other:param_test",
+                    "assertion": "Parameterized test",
+                    "requirement_id": "",
+                    "disabled": False,
+                    "depends_on_raw": [],
+                    "depends_on": [],
+                    "parameters": {"service": "api", "limit-gb": "0.5"},
+                },
+            ],
+            "test_sets": [],
+        }
+        merged = merge_discovered_tests(manifest, discovery)
+        entry = merged["test_set_tests"]["//other:param_test"]
+        assert entry["parameters"] == {"service": "api", "limit-gb": "0.5"}

@@ -39,6 +39,7 @@ def matrix_test_set(name, test_src, assertion_template, matrix, **kwargs):
             test = ":%s_%s_test" % (name, variant_name),
             assertion = assertion_template.format(**params),
             args = args,
+            parameters = {k: str(v) for k, v in params.items()},
         )
         tests.append(":%s_%s_wrapped" % (name, variant_name))
 

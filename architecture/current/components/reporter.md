@@ -64,6 +64,7 @@ class Reporter:
         "//test:a": {
           "assertion": "...",
           "depends_on": ["//test:b"],
+          "parameters": {"region": "us"},
           "status": "passed",
           "duration_seconds": 1.234,
           "burn_in": {},
@@ -139,7 +140,7 @@ class Reporter:
 
 3. **Six-status model**: The reporter supports six statuses: the five execution statuses (`passed`, `failed`, `dependencies_failed`, `passed+dependencies_failed`, `failed+dependencies_failed`) plus `not_run` for tests defined in the manifest but absent from execution results. The `not_run` status is excluded from parent status aggregation so it does not turn passing sets into mixed/failed.
 
-4. **Optional enrichment**: Burn-in progress, inferred dependencies, regression selection, E-value verdict data, lifecycle state, and source link base are all optional additions. The reporter works with just TestResult objects for simple use cases. Structured log data in stdout is parsed at HTML render time by the log parser's `parse_stdout_segments()` function, not stored as a separate report field.
+4. **Optional enrichment**: Burn-in progress, inferred dependencies, regression selection, E-value verdict data, lifecycle state, parameters, and source link base are all optional additions. The reporter works with just TestResult objects for simple use cases. Structured log data in stdout is parsed at HTML render time by the log parser's `parse_stdout_segments()` function, not stored as a separate report field. When a manifest test entry contains a non-empty `parameters` dict, it is copied verbatim into the report entry by `_build_test_entry()`.
 
 5. **Lifecycle aggregation**: When `set_lifecycle_data()` is called, each test set node includes a `lifecycle_summary` with state counts and aggregate reliability computed bottom-up through the tree. The `lifecycle_config` thresholds are included at the report top level so readers understand what "stable" and "flaky" mean quantitatively.
 

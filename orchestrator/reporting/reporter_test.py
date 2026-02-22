@@ -1266,3 +1266,51 @@ class TestReliabilityDemotion:
             assert child_subset["status"] == "failed"
             assert root["status"] == "failed"
             assert "child_test" in reporter.reliability_demoted_tests
+
+
+class TestParametersInReport:
+    """Tests for parameters in hierarchical report entries."""
+
+    def test_parameters_included_in_test_entry(self):
+        """Parameters from manifest appear in hierarchical test entries."""
+        manifest = {
+            "test_set": {
+                "name": "param_tests",
+                "assertion": "Parameterized tests",
+                "tests": ["memory_test"],
+                "subsets": [],
+            },
+            "test_set_tests": {
+                "memory_test": {
+                    "assertion": "Memory under limit",
+                    "executable": "/bin/mem",
+                    "depends_on": [],
+                    "parameters": {"service": "worker", "limit-gb": "1.0"},
+                },
+            },
+        }
+        reporter = Reporter()
+        reporter.set_manifest(manifest)
+        reporter.add_results([
+            TestResult(
+                name="memory_test", assertion="Memory under limit",
+                status="passed", duration=1.0,
+            ),
+        ])
+        report = reporter.generate_report()
+        entry = report["report"]["test_set"]["tests"]["memory_test"]
+        assert entry["parameters"] == {"service": "worker", "limit-gb": "1.0"}
+
+    def test_parameters_omitted_when_absent(self):
+        """No parameters key when manifest test has no parameters."""
+        reporter = Reporter()
+        reporter.set_manifest(SAMPLE_MANIFEST)
+        reporter.add_results([
+            TestResult(
+                name="auth_test", assertion="Auth works",
+                status="passed", duration=1.0,
+            ),
+        ])
+        report = reporter.generate_report()
+        entry = report["report"]["test_set"]["tests"]["auth_test"]
+        assert "parameters" not in entry

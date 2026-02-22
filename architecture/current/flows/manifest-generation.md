@@ -59,6 +59,7 @@ The `_test_set_rule_test_impl` rule implementation:
        "depends_on": [str(d) for d in info.depends_on],
        "requirement_id": info.requirement_id,     # if present
        "judgement_executable": str(info.judgement_label),  # if present
+       "parameters": dict(info.parameters),        # if non-empty
    }
    ```
 3. Writes the complete manifest as `{name}_manifest.json`
@@ -150,6 +151,12 @@ For the e-commerce demo with nested subsets:
       "executable": "ecommerce/credit_card_wrapped_runner.sh",
       "depends_on": [],
       "requirement_id": "PAY-001"
+    },
+    "//ecommerce:payment_region_us_wrapped": {
+      "assertion": "Payment processing works in US region with USD",
+      "executable": "ecommerce/payment_region_us_wrapped_runner.sh",
+      "depends_on": [],
+      "parameters": {"region": "us", "currency": "USD"}
     },
     "//ecommerce:order_placement_wrapped": {
       "assertion": "Full order placement completes with payment and inventory update",

@@ -44,6 +44,7 @@ def memory_test_set(name, tier, max_ram_gb):
             test = ":%s_%s_test" % (name, svc),
             assertion = "%s memory stays under %sGB on %s" % (svc, limit_gb, tier),
             args = ["--service=%s" % svc, "--limit-gb=%s" % limit_gb],
+            parameters = {"service": svc, "limit-gb": str(limit_gb)},
         )
         tests.append(":%s_%s_wrapped" % (name, svc))
 

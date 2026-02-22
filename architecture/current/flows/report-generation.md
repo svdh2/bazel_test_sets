@@ -46,7 +46,8 @@ The Reporter:
 1. Computes summary statistics (total, passed, failed, dependencies_failed, duration)
 2. If a manifest is set, builds a hierarchical report mirroring the DAG structure; otherwise, builds a flat report
 3. Formats each test result with status, duration, exit code, stdout/stderr
-4. Adds optional enrichment data (burn-in progress, inferred dependencies)
+4. Copies `parameters` from the manifest into each test entry (when non-empty)
+5. Adds optional enrichment data (burn-in progress, inferred dependencies)
 5. Serializes to JSON and writes to disk
 
 **Components**: Reporter
@@ -130,6 +131,7 @@ report_data = {"report": {..., "source_link_base": ...}}
       "tests": {
         "//ecommerce:credit_card_wrapped": {
           "assertion": "Credit card payments authorized",
+          "parameters": {"region": "us"},
           "status": "passed",
           "duration_seconds": 0.420,
           "exit_code": 0,
@@ -148,7 +150,7 @@ report_data = {"report": {..., "source_link_base": ...}}
 | Header | Title, timestamp, commit hash |
 | Summary bar | Color-coded count badges + duration |
 | Test set block | Hierarchical with aggregated status badge |
-| Per-test entry | Status badge, assertion, duration, expandable logs |
+| Per-test entry | Status badge, assertion, duration, expandable logs. Parameters table (when present) shown at top of entry. |
 | Block segments | Structured blocks parsed from stdout: type badge, features, measurements table, assertions, errors, step tree |
 | Burn-in info | Runs, passes, SPRT status (blue info box) |
 | Regression info | Changed files, test scores table |

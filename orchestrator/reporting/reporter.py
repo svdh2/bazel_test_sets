@@ -535,6 +535,10 @@ class Reporter:
             "depends_on": list(data.get("depends_on", [])),
         }
 
+        parameters = data.get("parameters")
+        if parameters:
+            entry["parameters"] = parameters
+
         if name in results_by_name:
             result = results_by_name[name]
             entry.update(self._format_result(result))

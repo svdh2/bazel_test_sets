@@ -10,6 +10,7 @@ TestSetTestInfo = provider(
         "judgement_label": "Optional label of the separate judgement target",
         "executable": "The executable file for the wrapped test",
         "disabled": "Boolean indicating whether this test is disabled",
+        "parameters": "Dict of string key-value pairs describing test parameters",
     },
 )
 
@@ -65,6 +66,7 @@ def _test_set_test_impl(ctx):
             judgement_label = judgement_label,
             executable = runner,
             disabled = ctx.attr.disabled,
+            parameters = ctx.attr.parameters,
         ),
     ]
 
@@ -99,6 +101,10 @@ test_set_test = rule(
         "disabled": attr.bool(
             doc = "If True, this test is disabled and will be skipped during execution",
             default = False,
+        ),
+        "parameters": attr.string_dict(
+            doc = "Structured key-value parameters for display in reports",
+            default = {},
         ),
     },
     test = True,

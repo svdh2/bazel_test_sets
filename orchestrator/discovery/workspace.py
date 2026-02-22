@@ -76,14 +76,27 @@ def parse_query_xml(xml_content: str) -> list[dict[str, Any]]:
                 if dep_val:
                     depends_on_raw.append(dep_val)
 
-        results.append({
+        # Extract parameters string_dict
+        parameters: dict[str, str] = {}
+        params_dict = rule.find("dict[@name='parameters']")
+        if params_dict is not None:
+            for entry_elem in params_dict.findall("entry"):
+                key = entry_elem.get("key", "")
+                value = entry_elem.get("value", "")
+                if key:
+                    parameters[key] = value
+
+        entry: dict[str, Any] = {
             "test_set_test_label": test_set_test_label,
             "test_label": test_label,
             "assertion": assertion,
             "requirement_id": requirement_id,
             "disabled": disabled,
             "depends_on_raw": depends_on_raw,
-        })
+        }
+        if parameters:
+            entry["parameters"] = parameters
+        results.append(entry)
 
     return results
 
@@ -426,6 +439,8 @@ def merge_discovered_tests(
         }
         if entry.get("disabled"):
             test_set_tests[label]["disabled"] = True
+        if entry.get("parameters"):
+            test_set_tests[label]["parameters"] = entry["parameters"]
 
     if not new_labels:
         return merged

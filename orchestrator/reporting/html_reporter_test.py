@@ -1196,12 +1196,12 @@ class TestDagVisualization:
         result = generate_html_report(report)
         assert '"lifecycle":""' in result
 
-    def test_group_node_double_border_style(self):
-        """Group nodes use double border style with black color."""
+    def test_group_node_rounded_border_style(self):
+        """Group nodes use rounded shape with soft border."""
         report = _make_dag_report()
         result = generate_html_report(report)
-        assert "'border-style': 'double'" in result
-        assert "'border-color': '#333'" in result
+        assert "'corner-radius': 30" in result
+        assert "'border-color': '#888'" in result
 
     def test_lifecycle_icons_in_js(self):
         """Lifecycle icon mapping is present in the JS."""
@@ -1447,3 +1447,59 @@ class TestDagVisualization:
         # Run 1: all passed → green; Run 2: test_b failed → red
         assert "#2da44e" in card_snippet
         assert "#cf222e" in card_snippet
+
+
+class TestParametersRendering:
+    """Tests for parameter display in HTML reports."""
+
+    def test_parameters_table_rendered_in_detail(self):
+        """Parameters table appears in test entry with key-value rows."""
+        report = _make_hierarchical_report(tests={
+            "mem_test": {
+                "assertion": "Memory under limit",
+                "status": "passed",
+                "duration_seconds": 1.0,
+                "parameters": {"service": "worker", "limit-gb": "1.0"},
+            },
+        })
+        result = generate_html_report(report)
+        assert "Parameter" in result
+        assert "Value" in result
+        assert "service" in result
+        assert "worker" in result
+        assert "limit-gb" in result
+
+    def test_no_parameters_table_without_data(self):
+        """No parameters table when test has no parameters."""
+        report = _make_hierarchical_report()
+        result = generate_html_report(report)
+        assert "Parameter</th>" not in result
+
+    def test_parameters_in_graph_data(self):
+        """Graph data includes parameters for test nodes."""
+        report = _make_hierarchical_report(tests={
+            "mem_test": {
+                "assertion": "Memory",
+                "status": "passed",
+                "duration_seconds": 1.0,
+                "depends_on": [],
+                "parameters": {"service": "api", "limit-gb": "0.5"},
+            },
+        })
+        result = generate_html_report(report)
+        assert '"parameters"' in result
+        assert '"service"' in result
+
+    def test_multiline_label_in_js(self):
+        """JS label function builds multi-line text for parameterized tests."""
+        report = _make_hierarchical_report(tests={
+            "mem_test": {
+                "assertion": "Memory",
+                "status": "passed",
+                "duration_seconds": 1.0,
+                "parameters": {"service": "api"},
+            },
+        })
+        result = generate_html_report(report)
+        assert "lines.join" in result
+        assert "'text-wrap': 'wrap'" in result
