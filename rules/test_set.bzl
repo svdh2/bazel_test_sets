@@ -110,6 +110,7 @@ exec "$R/{workspace}/{orchestrator}" \\
   --manifest "$R/{workspace}/{manifest}" \\
   --output "$OUT_DIR/{name}.json" \\
   --config-file "$CONFIG" \\
+  --discover-workspace-tests \\
   "$@"
 """.format(
             name = ctx.label.name,

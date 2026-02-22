@@ -98,6 +98,7 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 | [Measurements](components/measurements.md) | `orchestrator/analysis/` | Stores and retrieves structured measurement data per test label |
 | [Inference](components/inference.md) | `orchestrator/analysis/` | Infers DAG dependencies from rigging feature events in structured logs |
 | [Judgement](components/judgement.md) | `orchestrator/analysis/` | Executes judgement targets with stored measurements for verdict re-evaluation |
+| [Workspace Discovery](components/workspace-discovery.md) | `orchestrator/discovery/` | Discovers all test_set_test targets in a Bazel workspace via bazel query for cross-test-set reporting |
 
 ### Development Infrastructure
 
@@ -120,5 +121,5 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 
 ## Git Sync
 
-- **Commit**: `6974d81f19da85d8470a0853ecb7f884b7edc7cc`
-- **Last updated**: 2026-02-19
+- **Commit**: `feb7e78296063fdf9b440aae705d706a798027a9`
+- **Last updated**: 2026-02-22

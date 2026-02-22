@@ -20,6 +20,7 @@ CLI entry point for the test set orchestrator and lifecycle management. Parses c
 | `--output` | Path | None | Path for JSON report output |
 | `--config-file` | Path | None | Path to `.test_set_config` JSON file |
 | `--allow-dirty` | flag | false | Allow running with uncommitted changes |
+| `--discover-workspace-tests` | flag | false | Discover all `test_set_test` targets in the workspace via `bazel query` and include them in the report as `not_run` |
 | `--diff-base` | string | None | Git ref for regression diff (e.g., `main`) |
 | `--changed-files` | string | None | Comma-separated changed files (alternative to `--diff-base`) |
 | `--co-occurrence-graph` | Path | `.tests/co_occurrence_graph.json` | Co-occurrence graph path |
@@ -57,6 +58,7 @@ Returns exit code 0 if all tests pass, 1 if any test fails.
 - **Status File** (`orchestrator.lifecycle.status.StatusFile`): Used by lifecycle subcommands (burn-in, deflake, test-status)
 - **Judgement** (`orchestrator.analysis.judgement`): Used by re-judge subcommand (lazy import)
 - **Co-occurrence (build-graph)** (`orchestrator.regression.co_occurrence`): Used by build-graph subcommand (lazy import)
+- **Workspace Discovery** (`orchestrator.discovery.workspace`): Discovers workspace tests and test_sets via `bazel query` (lazy import when `--discover-workspace-tests` is passed)
 
 ## Dependents
 
@@ -75,3 +77,5 @@ Returns exit code 0 if all tests pass, 1 if any test fails.
 5. **Verdict mode derived from effort**: The verdict mode is determined by the `--effort` flag rather than a separate CLI argument. No effort = no verdict, regression = quick verdict, converge/max = hifi verdict. Uses default alpha_set=0.05, beta_set=0.05.
 
 6. **Effort mode dispatch**: `--effort converge` reruns only failed tests via SPRT; `--effort max` reruns all tests. Both require `status_file` in `.test_set_config` and git context. The EffortRunner classifies each test as true_pass, true_fail, flake, or undecided. Flakes cause exit code 1 (block CI).
+
+7. **Workspace discovery is reporting-only**: When `--discover-workspace-tests` is passed, `bazel query` discovers both `test_set_test` and `_test_set_rule_test` targets after test execution completes. Discovered tests and their hierarchical test_set structure are merged into a copy of the manifest for report generation, preserving the full DAG layout as defined in BUILD files. The execution DAG (built earlier from the original manifest) is never affected. Discovery gracefully degrades: if `BUILD_WORKSPACE_DIRECTORY` is not set, `bazel` is not found, or the query fails, the report is generated without workspace tests.

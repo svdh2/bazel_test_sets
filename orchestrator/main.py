@@ -68,6 +68,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
         help="Allow running with uncommitted changes (commit SHA will still be recorded)",
     )
+    parser.add_argument(
+        "--discover-workspace-tests",
+        action="store_true",
+        default=False,
+        help="Discover all test_set_test targets in the workspace via bazel query "
+             "and include them in the report (requires BUILD_WORKSPACE_DIRECTORY)",
+    )
 
     # Regression option flags
     parser.add_argument(
@@ -811,7 +818,7 @@ def _run_regression(
     _update_status_file(results, config, commit_sha)
     verdict_data = _compute_verdict(args, config, filtered_dag, commit_sha)
     demoted = _print_results(
-        results, args, config, commit_sha, filtered_manifest, verdict_data,
+        results, args, config, commit_sha, manifest, verdict_data,
     )
     has_failure = any(r.status == "failed" for r in results)
     return 1 if (has_failure or demoted) else 0
@@ -1035,6 +1042,32 @@ def _update_status_file(
             print(f"  {name}: {old_state} \u2192 {new_state} ({etype})")
 
 
+def _discover_and_merge(manifest: dict) -> dict:
+    """Run workspace discovery and merge results into manifest for reporting.
+
+    Returns the original manifest if discovery fails or finds nothing new.
+    """
+    from orchestrator.discovery.workspace import (
+        discover_workspace_tests,
+        merge_discovered_tests,
+    )
+
+    discovered = discover_workspace_tests()
+    if discovered is None:
+        return manifest
+
+    merged = merge_discovered_tests(manifest, discovered)
+
+    original_count = len(manifest.get("test_set_tests", {}))
+    merged_count = len(merged.get("test_set_tests", {}))
+    new_count = merged_count - original_count
+
+    if new_count > 0:
+        print(f"Workspace discovery: {new_count} additional test(s) found")
+
+    return merged
+
+
 def _print_results(
     results: list, args: argparse.Namespace,
     config: TestSetConfig,
@@ -1078,8 +1111,11 @@ def _print_results(
         from orchestrator.reporting.source_links import resolve_source_link_base
 
         reporter = Reporter()
-        if manifest is not None:
-            reporter.set_manifest(manifest)
+        reporting_manifest = manifest
+        if manifest is not None and args.discover_workspace_tests:
+            reporting_manifest = _discover_and_merge(manifest)
+        if reporting_manifest is not None:
+            reporter.set_manifest(reporting_manifest)
         reporter.add_results(results)
         if commit_sha:
             reporter.set_commit_hash(commit_sha)
@@ -1207,8 +1243,11 @@ def _print_effort_results(
         from orchestrator.reporting.source_links import resolve_source_link_base
 
         reporter = Reporter()
-        if manifest is not None:
-            reporter.set_manifest(manifest)
+        reporting_manifest = manifest
+        if manifest is not None and args.discover_workspace_tests:
+            reporting_manifest = _discover_and_merge(manifest)
+        if reporting_manifest is not None:
+            reporter.set_manifest(reporting_manifest)
         reporter.add_results(initial_results)
         if commit_sha:
             reporter.set_commit_hash(commit_sha)
