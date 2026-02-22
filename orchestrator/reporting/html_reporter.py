@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -429,6 +430,22 @@ pre {
     color: #888;
     font-family: monospace;
 }
+.step-substep-count {
+    font-size: 10px;
+    color: #888;
+    font-weight: normal;
+    margin-left: 4px;
+}
+.block-features-list {
+    list-style: none;
+    padding: 0 0 0 8px;
+    margin: 2px 0;
+    font-size: 12px;
+    color: #555;
+}
+.block-features-list li {
+    padding: 1px 0;
+}
 .source-link {
     font-size: 11px;
     color: #888;
@@ -746,6 +763,13 @@ def _render_step_segment(
     parts.append(
         f'<details class="step-segment step-{html.escape(status)}"{open_attr}>'
     )
+    substep_indicator = ""
+    if step.steps:
+        n = len(step.steps)
+        substep_indicator = (
+            f' <span class="step-substep-count">'
+            f'({n} sub-step{"s" if n != 1 else ""})</span>'
+        )
     parts.append(
         f'<summary class="step-header">'
         f'<span class="step-status-badge" '
@@ -753,6 +777,7 @@ def _render_step_segment(
         f'{html.escape(status_label)}</span> '
         f'{html.escape(step.description)} '
         f'<span class="step-name">{html.escape(step.step)}</span>'
+        f'{substep_indicator}'
         f'</summary>'
     )
 
@@ -849,44 +874,128 @@ def _render_block_segment(
         )
     parts.append("</div>")
 
+    # Compute step prefixes for partitioning direct vs step-qualified items
+    step_prefixes = {s.step + "." for s in block.steps}
+
     # Features
     if block.features:
-        feat_parts: list[str] = []
-        for f in block.features:
-            name_html = html.escape(f.get("name", ""))
-            link = render_source_link(f, source_link_base)
-            feat_parts.append(f"{name_html}{link}")
-        parts.append(
-            f'<div class="block-features">Features: {", ".join(feat_parts)}</div>'
-        )
-
-    # Measurements table
-    if block.measurements:
-        parts.append('<table class="measurements-table">')
-        parts.append(
-            "<tr><th>Name</th><th>Value</th><th>Unit</th><th>Source</th></tr>"
-        )
-        for m in block.measurements:
-            mname = html.escape(str(m.get("name", "")))
-            mval = html.escape(str(m.get("value", "")))
-            munit = html.escape(str(m.get("unit", "")))
-            mlink = render_source_link(m, source_link_base)
+        if btype == "rigging":
+            parts.append('<div class="block-features">Features:</div>')
+            parts.append('<ul class="block-features-list">')
+            for f in block.features:
+                name_html = html.escape(f.get("name", ""))
+                link = render_source_link(f, source_link_base)
+                parts.append(f"<li>{name_html}{link}</li>")
+            parts.append("</ul>")
+        else:
+            feat_parts: list[str] = []
+            for f in block.features:
+                name_html = html.escape(f.get("name", ""))
+                link = render_source_link(f, source_link_base)
+                feat_parts.append(f"{name_html}{link}")
             parts.append(
-                f"<tr><td>{mname}</td><td>{mval}</td>"
-                f"<td>{munit}</td><td>{mlink}</td></tr>"
+                f'<div class="block-features">Features: '
+                f'{", ".join(feat_parts)}</div>'
             )
-        parts.append("</table>")
 
-    # Assertions
+    # Measurements table (split direct vs step-qualified)
+    if block.measurements:
+        direct_m = [
+            m for m in block.measurements
+            if not any(
+                m.get("name", "").startswith(p) for p in step_prefixes
+            )
+        ]
+        step_m = [
+            m for m in block.measurements
+            if any(
+                m.get("name", "").startswith(p) for p in step_prefixes
+            )
+        ]
+        if direct_m:
+            parts.append('<table class="measurements-table">')
+            parts.append(
+                "<tr><th>Name</th><th>Value</th><th>Unit</th>"
+                "<th>Source</th></tr>"
+            )
+            for m in direct_m:
+                mname = html.escape(str(m.get("name", "")))
+                mval = html.escape(str(m.get("value", "")))
+                munit = html.escape(str(m.get("unit", "")))
+                mlink = render_source_link(m, source_link_base)
+                parts.append(
+                    f"<tr><td>{mname}</td><td>{mval}</td>"
+                    f"<td>{munit}</td><td>{mlink}</td></tr>"
+                )
+            parts.append("</table>")
+        if step_m:
+            parts.append('<details class="log-details">')
+            parts.append(
+                f"<summary>Sub-step measurements ({len(step_m)})"
+                f"</summary>"
+            )
+            parts.append('<table class="measurements-table">')
+            parts.append(
+                "<tr><th>Name</th><th>Value</th><th>Unit</th>"
+                "<th>Source</th></tr>"
+            )
+            for m in step_m:
+                mname = html.escape(str(m.get("name", "")))
+                mval = html.escape(str(m.get("value", "")))
+                munit = html.escape(str(m.get("unit", "")))
+                mlink = render_source_link(m, source_link_base)
+                parts.append(
+                    f"<tr><td>{mname}</td><td>{mval}</td>"
+                    f"<td>{munit}</td><td>{mlink}</td></tr>"
+                )
+            parts.append("</table>")
+            parts.append("</details>")
+
+    # Assertions (split direct vs step-qualified)
     if block.assertions:
-        parts.append('<ul class="assertion-list">')
-        for a in block.assertions:
-            desc = html.escape(str(a.get("description", "")))
-            status = a.get("status", "unknown")
-            css_class = "assertion-pass" if status == "passed" else "assertion-fail"
-            link = render_source_link(a, source_link_base)
-            parts.append(f'<li class="{css_class}">{desc}{link}</li>')
-        parts.append("</ul>")
+        direct_a = [
+            a for a in block.assertions
+            if not any(
+                a.get("description", "").startswith(p)
+                for p in step_prefixes
+            )
+        ]
+        step_a = [
+            a for a in block.assertions
+            if any(
+                a.get("description", "").startswith(p)
+                for p in step_prefixes
+            )
+        ]
+        if direct_a:
+            parts.append('<ul class="assertion-list">')
+            for a in direct_a:
+                desc = html.escape(str(a.get("description", "")))
+                status = a.get("status", "unknown")
+                css_class = (
+                    "assertion-pass" if status == "passed"
+                    else "assertion-fail"
+                )
+                link = render_source_link(a, source_link_base)
+                parts.append(f'<li class="{css_class}">{desc}{link}</li>')
+            parts.append("</ul>")
+        if step_a:
+            parts.append('<details class="log-details">')
+            parts.append(
+                f"<summary>Sub-step checks ({len(step_a)})</summary>"
+            )
+            parts.append('<ul class="assertion-list">')
+            for a in step_a:
+                desc = html.escape(str(a.get("description", "")))
+                status = a.get("status", "unknown")
+                css_class = (
+                    "assertion-pass" if status == "passed"
+                    else "assertion-fail"
+                )
+                link = render_source_link(a, source_link_base)
+                parts.append(f'<li class="{css_class}">{desc}{link}</li>')
+            parts.append("</ul>")
+            parts.append("</details>")
 
     # Steps (rendered as nested collapsible sections)
     for step in block.steps:
@@ -1466,6 +1575,80 @@ _DAG_CSS = """\
 .dag-resize-handle.dragging {
     background: #0d6efd;
 }
+.dag-search-wrapper {
+    position: relative;
+    margin-left: auto;
+}
+.dag-search-input {
+    padding: 4px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 13px;
+    width: 280px;
+    outline: none;
+}
+.dag-search-input:focus {
+    border-color: #0d6efd;
+    box-shadow: 0 0 0 2px rgba(13,110,253,0.15);
+}
+.dag-search-results {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0;
+    width: 360px;
+    max-height: 320px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 100;
+    margin-top: 2px;
+}
+.dag-search-result {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.dag-search-result:last-child {
+    border-bottom: none;
+}
+.dag-search-result:hover,
+.dag-search-result.active {
+    background: #e8f0fe;
+}
+.dag-search-result-type {
+    font-size: 10px;
+    font-weight: bold;
+    text-transform: uppercase;
+    padding: 2px 6px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+.dag-search-result-type.type-test {
+    background: #e8e8e8;
+    color: #555;
+}
+.dag-search-result-type.type-group {
+    background: #d4edda;
+    color: #155724;
+}
+.dag-search-result-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.dag-search-no-results {
+    padding: 12px;
+    color: #999;
+    font-size: 13px;
+    text-align: center;
+}
 """
 
 _DAG_JS = """\
@@ -1784,6 +1967,236 @@ _DAG_JS = """\
             clearHighlights();
             cy.elements().unselect();
         });
+
+    /* ----- Search ----- */
+    var searchInput = document.getElementById('dag-search');
+    var searchResults = document.getElementById('dag-search-results');
+    var searchTimer = null;
+    var activeResultIdx = -1;
+    var VALID_FIELDS = {
+        name:1, assertion:1, parameter:1, metric:1, check:1, feature:1, log:1
+    };
+    var SCOPE_RE = /(\\w+):\\(([^)]*)\\)/g;
+
+    function parseQuery(raw) {
+        var scoped = [];
+        var remainder = raw.replace(SCOPE_RE, function(_, field, value) {
+            var f = field.toLowerCase();
+            if (VALID_FIELDS[f]) {
+                scoped.push({field: f, keyword: value.trim().toLowerCase()});
+            }
+            return '';
+        });
+        var unscoped = [];
+        var parts = remainder.trim().split(/\\s+/);
+        for (var i = 0; i < parts.length; i++) {
+            if (parts[i]) unscoped.push(parts[i].toLowerCase());
+        }
+        return {scoped: scoped, unscoped: unscoped};
+    }
+
+    function performSearch(query) {
+        var parsed = parseQuery(query);
+        searchResults.innerHTML = '';
+        activeResultIdx = -1;
+
+        if (parsed.scoped.length === 0 && parsed.unscoped.length === 0) {
+            searchResults.style.display = 'none';
+            return;
+        }
+        if (parsed.scoped.length === 0 &&
+            parsed.unscoped.length === 1 &&
+            parsed.unscoped[0].length < 2) {
+            searchResults.style.display = 'none';
+            return;
+        }
+
+        var matches = [];
+        var ids = Object.keys(SEARCH_INDEX);
+
+        for (var i = 0; i < ids.length; i++) {
+            var entry = SEARCH_INDEX[ids[i]];
+            var fields = entry.fields;
+            var allMatch = true;
+
+            /* Check scoped terms: each must match its specific field */
+            for (var s = 0; s < parsed.scoped.length; s++) {
+                var sf = parsed.scoped[s].field;
+                var sk = parsed.scoped[s].keyword;
+                var fieldText = fields[sf] || '';
+                if (fieldText.indexOf(sk) === -1) {
+                    allMatch = false;
+                    break;
+                }
+            }
+            if (!allMatch) continue;
+
+            /* Check unscoped terms: each must match in ANY field */
+            if (parsed.unscoped.length > 0) {
+                var allFields = '';
+                var fkeys = Object.keys(fields);
+                for (var fk = 0; fk < fkeys.length; fk++) {
+                    allFields += fields[fkeys[fk]] + ' ';
+                }
+                for (var u = 0; u < parsed.unscoped.length; u++) {
+                    if (allFields.indexOf(parsed.unscoped[u]) === -1) {
+                        allMatch = false;
+                        break;
+                    }
+                }
+            }
+
+            if (allMatch) {
+                matches.push({
+                    id: ids[i], type: entry.type, label: entry.label
+                });
+            }
+            if (matches.length >= 20) break;
+        }
+
+        if (matches.length === 0) {
+            searchResults.innerHTML =
+                '<div class="dag-search-no-results">No results</div>';
+            searchResults.style.display = 'block';
+            return;
+        }
+
+        for (var m = 0; m < matches.length; m++) {
+            var div = document.createElement('div');
+            div.className = 'dag-search-result';
+            div.setAttribute('data-node-id', matches[m].id);
+            div.setAttribute('data-node-type', matches[m].type);
+
+            var typeBadge = document.createElement('span');
+            typeBadge.className =
+                'dag-search-result-type type-' + matches[m].type;
+            typeBadge.textContent =
+                matches[m].type === 'test' ? 'TEST' : 'SET';
+
+            var nameSpan = document.createElement('span');
+            nameSpan.className = 'dag-search-result-name';
+            nameSpan.textContent = matches[m].label;
+
+            div.appendChild(typeBadge);
+            div.appendChild(nameSpan);
+            div.addEventListener('click', (function(nodeId, nodeType) {
+                return function() {
+                    selectSearchResult(nodeId, nodeType);
+                };
+            })(matches[m].id, matches[m].type));
+            searchResults.appendChild(div);
+        }
+
+        searchResults.style.display = 'block';
+    }
+
+    function selectSearchResult(nodeId, nodeType) {
+        searchResults.style.display = 'none';
+
+        var node = cy.getElementById(nodeId);
+        if (node.length === 0) return;
+
+        /* Make node visible if hidden (e.g. not_run with toggle off) */
+        if (node.style('display') === 'none') {
+            node.style('display', 'element');
+        }
+
+        cy.elements().unselect();
+        node.select();
+        highlightNode(node);
+
+        cy.animate({
+            center: {eles: node},
+            zoom: Math.max(cy.zoom(), 1.0)
+        }, {duration: 300});
+
+        /* Open detail pane (mirrors tap handler logic) */
+        var content = document.getElementById('dag-detail-content');
+        var selector, attr;
+        if (nodeType === 'test') {
+            attr = 'data-test-name';
+        } else {
+            attr = 'data-set-name';
+        }
+        var entries = document.querySelectorAll('[' + attr + ']');
+        for (var j = 0; j < entries.length; j++) {
+            if (entries[j].getAttribute(attr) === nodeId) {
+                showDetailPane();
+                var el = entries[j];
+                if (nodeType === 'group') {
+                    var clone = el.cloneNode(true);
+                    clone.style.display = '';
+                    content.innerHTML = clone.outerHTML;
+                } else {
+                    content.innerHTML = el.outerHTML;
+                }
+                break;
+            }
+        }
+    }
+
+    /* Debounced input handler (250ms) */
+    searchInput.addEventListener('input', function() {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(function() {
+            performSearch(searchInput.value);
+        }, 250);
+    });
+
+    /* Keyboard navigation */
+    searchInput.addEventListener('keydown', function(e) {
+        var items = searchResults.querySelectorAll('.dag-search-result');
+        if (e.key === 'Escape') {
+            searchResults.style.display = 'none';
+            searchInput.blur();
+            return;
+        }
+        if (items.length === 0) return;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            activeResultIdx = Math.min(
+                activeResultIdx + 1, items.length - 1
+            );
+            updateActiveResult(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeResultIdx = Math.max(activeResultIdx - 1, 0);
+            updateActiveResult(items);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (activeResultIdx >= 0 && activeResultIdx < items.length) {
+                var item = items[activeResultIdx];
+                selectSearchResult(
+                    item.getAttribute('data-node-id'),
+                    item.getAttribute('data-node-type')
+                );
+            }
+        }
+    });
+
+    function updateActiveResult(items) {
+        for (var i = 0; i < items.length; i++) {
+            items[i].classList.toggle('active', i === activeResultIdx);
+        }
+        if (activeResultIdx >= 0 && items[activeResultIdx]) {
+            items[activeResultIdx].scrollIntoView({block: 'nearest'});
+        }
+    }
+
+    /* Click outside to close dropdown */
+    document.addEventListener('click', function(e) {
+        if (!searchInput.contains(e.target) &&
+            !searchResults.contains(e.target)) {
+            searchResults.style.display = 'none';
+        }
+    });
+
+    /* Re-open on focus if query present */
+    searchInput.addEventListener('focus', function() {
+        if (searchInput.value.trim().length > 0) {
+            performSearch(searchInput.value);
+        }
+    });
 })();
 """
 
@@ -1939,6 +2352,180 @@ def _walk_dag_for_graph(
         )
 
 
+# ---------------------------------------------------------------------------
+# Search Index
+# ---------------------------------------------------------------------------
+
+# Regex to split camelCase identifiers at word boundaries.
+# Splits before an uppercase letter preceded by a lowercase letter,
+# and between consecutive uppercase letters followed by a lowercase letter
+# (e.g. "myHTTPClient" → "my", "HTTP", "Client").
+_CAMEL_SPLIT_RE = re.compile(
+    r"(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
+)
+
+
+def _decompose_identifier(text: str) -> str:
+    """Decompose camelCase and snake_case identifiers into words.
+
+    Returns the original text plus the decomposed words joined by spaces.
+
+    Examples:
+        ``"processPayment"`` → ``"processPayment process payment"``
+        ``"process_payment"`` → ``"process_payment process payment"``
+        ``"myHTTPClient"`` → ``"myHTTPClient my HTTP Client"``
+    """
+    parts = text.split("_")
+    words: list[str] = []
+    for part in parts:
+        split = _CAMEL_SPLIT_RE.split(part)
+        words.extend(w for w in split if w)
+    decomposed = " ".join(words)
+    if decomposed == text:
+        return text
+    return f"{text} {decomposed}"
+
+
+def _collect_step_search_text(
+    step: StepSegment,
+    features: list[str],
+    metrics: list[str],
+    checks: list[str],
+) -> None:
+    """Extract searchable text from a step and its sub-steps."""
+    features.append(_decompose_identifier(step.step))
+    if step.description:
+        features.append(_decompose_identifier(step.description))
+    for f in step.features:
+        name = f.get("name", "")
+        if name:
+            features.append(_decompose_identifier(name))
+    for m in step.measurements:
+        metrics.append(_decompose_identifier(str(m.get("name", ""))))
+        metrics.append(str(m.get("value", "")))
+        unit = m.get("unit")
+        if unit:
+            metrics.append(str(unit))
+    for a in step.assertions:
+        checks.append(_decompose_identifier(str(a.get("description", ""))))
+    for sub in step.steps:
+        _collect_step_search_text(sub, features, metrics, checks)
+
+
+def _collect_block_search_text(
+    block: BlockSegment,
+) -> tuple[str, str, str]:
+    """Extract searchable text from a block and its steps.
+
+    Returns (features_text, metrics_text, checks_text).
+    """
+    features: list[str] = []
+    metrics: list[str] = []
+    checks: list[str] = []
+    if block.description:
+        features.append(_decompose_identifier(block.description))
+    for f in block.features:
+        name = f.get("name", "")
+        if name:
+            features.append(_decompose_identifier(name))
+    for m in block.measurements:
+        metrics.append(_decompose_identifier(str(m.get("name", ""))))
+        metrics.append(str(m.get("value", "")))
+        unit = m.get("unit")
+        if unit:
+            metrics.append(str(unit))
+    for a in block.assertions:
+        checks.append(_decompose_identifier(str(a.get("description", ""))))
+    for step in block.steps:
+        _collect_step_search_text(step, features, metrics, checks)
+    return " ".join(features), " ".join(metrics), " ".join(checks)
+
+
+def _walk_for_search_index(
+    test_set: dict[str, Any],
+    index: dict[str, dict[str, Any]],
+) -> None:
+    """Recursively build search index entries for sets and tests."""
+    name = test_set.get("name", "")
+    if name and name != "Workspace":
+        name_parts = [_decompose_identifier(name)]
+        assertion = test_set.get("assertion", "")
+        index[name] = {
+            "type": "group",
+            "label": name,
+            "fields": {
+                "name": " ".join(name_parts).lower(),
+                "assertion": _decompose_identifier(assertion).lower(),
+            },
+        }
+
+    for test_name, test_data in test_set.get("tests", {}).items():
+        if test_name in index:
+            continue
+
+        name_text = _decompose_identifier(test_name)
+        assertion = test_data.get("assertion", "")
+        assertion_text = _decompose_identifier(assertion) if assertion else ""
+
+        param_parts: list[str] = []
+        for k, v in (test_data.get("parameters") or {}).items():
+            param_parts.append(_decompose_identifier(str(k)))
+            param_parts.append(_decompose_identifier(str(v)))
+
+        feature_parts: list[str] = []
+        metric_parts: list[str] = []
+        check_parts: list[str] = []
+        stdout = test_data.get("stdout", "")
+        if stdout:
+            segments = parse_stdout_segments(stdout)
+            for seg in segments:
+                if isinstance(seg, BlockSegment):
+                    ft, mt, ct = _collect_block_search_text(seg)
+                    if ft:
+                        feature_parts.append(ft)
+                    if mt:
+                        metric_parts.append(mt)
+                    if ct:
+                        check_parts.append(ct)
+
+        log_text = stdout[:5000] if stdout else ""
+
+        short_label = (
+            test_name.rsplit(":", 1)[-1] if ":" in test_name
+            else test_name
+        )
+        index[test_name] = {
+            "type": "test",
+            "label": short_label,
+            "fields": {
+                "name": name_text.lower(),
+                "assertion": assertion_text.lower(),
+                "parameter": " ".join(param_parts).lower(),
+                "metric": " ".join(metric_parts).lower(),
+                "check": " ".join(check_parts).lower(),
+                "feature": " ".join(feature_parts).lower(),
+                "log": log_text.lower(),
+            },
+        }
+
+    for subset in test_set.get("subsets", []):
+        _walk_for_search_index(subset, index)
+
+
+def _build_search_index(
+    test_set: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Build a search index mapping node IDs to searchable text fields.
+
+    Returns a dict keyed by node ID with values containing ``type``
+    (``"test"`` or ``"group"``), ``label`` (display name), and
+    ``fields`` (dict of field name → lowercased searchable text).
+    """
+    index: dict[str, dict[str, Any]] = {}
+    _walk_for_search_index(test_set, index)
+    return index
+
+
 def _render_dag_data_elements(
     test_set: dict[str, Any],
     history: dict[str, list[dict[str, Any]]],
@@ -1998,6 +2585,7 @@ def _render_dag_section(
     """Render the interactive DAG visualization section."""
     test_set = report.get("test_set", {})
     graph_data = _build_graph_data(test_set)
+    search_index = _build_search_index(test_set)
 
     parts: list[str] = []
     parts.append(f"<style>{_DAG_CSS}</style>")
@@ -2017,6 +2605,14 @@ def _render_dag_section(
         'align-items:center;gap:4px;cursor:pointer">'
         '<input type="checkbox" id="dag-show-all" checked>'
         'Show all workspace tests</label>'
+    )
+    parts.append(
+        '<div class="dag-search-wrapper">'
+        '<input type="text" id="dag-search" class="dag-search-input"'
+        ' placeholder="Search tests...'
+        ' e.g. name:(email) check:(SMTP)" autocomplete="off">'
+        '<div id="dag-search-results" class="dag-search-results"></div>'
+        '</div>'
     )
     parts.append("</div>")
 
@@ -2052,6 +2648,8 @@ def _render_dag_section(
     # Embedded data
     graph_json = json.dumps(graph_data, separators=(",", ":"))
     parts.append(f"<script>var GRAPH_DATA={graph_json};</script>")
+    search_json = json.dumps(search_index, separators=(",", ":"))
+    parts.append(f"<script>var SEARCH_INDEX={search_json};</script>")
 
     # CDN libraries
     parts.append(
