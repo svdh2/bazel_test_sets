@@ -75,6 +75,7 @@ py_test(
     name = "order_steps_raw_test",
     srcs = ["order_steps_test.py"],
     main = "order_steps_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
 )
 
 py_test(
