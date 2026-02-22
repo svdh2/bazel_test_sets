@@ -1827,8 +1827,25 @@ _DAG_JS = """\
         },
         userZoomingEnabled: true,
         userPanningEnabled: true,
-        boxSelectionEnabled: false
+        boxSelectionEnabled: false,
+        wheelSensitivity: 0.15,
+        minZoom: 0.05
     });
+
+    /* Compute the minimum zoom level so the user cannot zoom out
+       beyond the level where the whole graph is visible. */
+    var fitZoom = 0.05;
+    function updateMinZoom() {
+        var prev = cy.zoom();
+        var prevPan = {x: cy.pan().x, y: cy.pan().y};
+        cy.fit(undefined, 30);
+        fitZoom = cy.zoom();
+        cy.zoom(prev);
+        cy.pan(prevPan);
+        cy.minZoom(fitZoom);
+    }
+    cy.on('layoutstop', updateMinZoom);
+    cy.ready(function() { updateMinZoom(); });
 
     /* Toolbar handlers */
     document.getElementById('dag-zoom-in').addEventListener('click', function() {
@@ -1836,7 +1853,8 @@ _DAG_JS = """\
             renderedPosition: {x: cy.width()/2, y: cy.height()/2}});
     });
     document.getElementById('dag-zoom-out').addEventListener('click', function() {
-        cy.zoom({level: cy.zoom() / 1.2,
+        var newLevel = Math.max(cy.zoom() / 1.2, fitZoom);
+        cy.zoom({level: newLevel,
             renderedPosition: {x: cy.width()/2, y: cy.height()/2}});
     });
     document.getElementById('dag-fit').addEventListener('click', function() {
