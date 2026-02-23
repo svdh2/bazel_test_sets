@@ -9,7 +9,7 @@ load("@rules_python//python:defs.bzl", "py_test")
 load("//rules:test_set_test.bzl", "test_set_test")
 load("//rules:test_set.bzl", "test_set")
 
-def matrix_test_set(name, test_src, assertion_template, matrix, **kwargs):
+def matrix_test_set(name, test_src, assertion_template, matrix, deps = [], **kwargs):
     """Generate a test set from a matrix of parameter combinations.
 
     Each entry in the matrix dict produces a concrete test target.
@@ -21,6 +21,7 @@ def matrix_test_set(name, test_src, assertion_template, matrix, **kwargs):
             Use {param_name} placeholders matching the keys in matrix entries.
         matrix: Dict of {variant_name: {param_name: param_value, ...}}.
             Each variant produces one py_test + test_set_test.
+        deps: List of py_library dependencies for the generated py_test targets.
         **kwargs: Additional attributes passed to test_set (e.g., requirement_id).
     """
     tests = []
@@ -32,6 +33,7 @@ def matrix_test_set(name, test_src, assertion_template, matrix, **kwargs):
             srcs = [test_src],
             main = test_src,
             args = args,
+            deps = deps,
         )
 
         test_set_test(

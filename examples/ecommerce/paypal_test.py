@@ -1,40 +1,38 @@
-"""Simulated PayPal payment test with structured logging."""
+"""Simulated PayPal payment test.
 
-import json
+This example shows a PayPal authorization and charge flow
+using the tst_sdk structured logging.
+"""
+
 import sys
 import time
 
-
-def tst(event: dict) -> None:
-    """Emit a structured test log event with source location."""
-    import os
-    frame = sys._getframe(1)
-    rel = os.path.relpath(frame.f_code.co_filename)
-    event = {**event, "_file": rel, "_line": frame.f_lineno}
-    print(f"[TST] {json.dumps(event)}")
+from tst_sdk import test_run
 
 
 def main() -> int:
-    tst({"type": "block_start", "block": "rigging"})
-    time.sleep(0.01)
-    tst({"type": "feature", "name": "paypal_api", "action": "authenticate"})
-    tst({"type": "block_end", "block": "rigging"})
+    with test_run() as t:
+        # --- Rigging ---
+        with t.block("rigging") as b:
+            b.feature("paypal_api", "authenticate")
 
-    tst({"type": "block_start", "block": "stimulation"})
-    time.sleep(0.01)
-    tst({"type": "measurement", "name": "redirect_latency_ms", "value": 120, "unit": "ms"})
-    tst({"type": "measurement", "name": "charge_amount", "value": 49.99, "unit": "USD"})
-    tst({"type": "block_end", "block": "stimulation"})
+        # --- Stimulation ---
+        with t.block("stimulation", description="Process PayPal payment") as b:
+            with b.step("redirect_and_charge", description="PayPal redirect and charge") as s:
+                time.sleep(0.01)
+                s.measure("redirect_latency_ms", 120, "ms")
+                s.measure("charge_amount", 49.99, "USD")
+                s.assert_that("paypal_authorized", True, critical=True)
 
-    tst({"type": "block_start", "block": "checkpoint"})
-    tst({"type": "result", "name": "paypal_authorized", "passed": True})
-    tst({"type": "block_end", "block": "checkpoint"})
+        # --- Checkpoint ---
+        with t.block("checkpoint") as b:
+            b.assert_that("paypal_authorized", True)
 
-    tst({"type": "block_start", "block": "verdict"})
-    tst({"type": "result", "name": "paypal_payment", "passed": True})
-    tst({"type": "block_end", "block": "verdict"})
+        # --- Verdict ---
+        with t.block("verdict") as b:
+            b.assert_that("paypal_payment", True)
 
-    return 0
+        return t.exit_code()
 
 
 if __name__ == "__main__":

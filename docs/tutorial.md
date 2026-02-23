@@ -156,48 +156,63 @@ Any extra flags after `--` are forwarded to the orchestrator.
 
 ## Step 7: Add Structured Logging
 
-Enhance your test to emit structured log events:
+Enhance your test with the `tst_sdk` library to emit structured log events.
+First, add the dependency to your `BUILD.bazel`:
+
+```starlark
+py_test(
+    name = "api_endpoint_raw_test",
+    srcs = ["api_endpoint_test.py"],
+    main = "api_endpoint_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
+)
+```
+
+Then rewrite your test to use the SDK's context managers:
 
 ```python
 """API endpoint test with structured logging."""
-import json
 import sys
+import time
 
-def tst(event: dict) -> None:
-    print(f"[TST] {json.dumps(event)}")
+from tst_sdk import test_run
+
 
 def main() -> int:
-    tst({"type": "block_start", "block": "rigging"})
-    tst({"type": "feature", "name": "api_server", "action": "connect"})
-    tst({"type": "block_end", "block": "rigging"})
+    with test_run() as t:
+        # --- Rigging ---
+        with t.block("rigging") as b:
+            b.feature("api_server", "connect")
 
-    tst({"type": "block_start", "block": "stimulation"})
+        # --- Stimulation ---
+        with t.block("stimulation", description="Test API endpoint") as b:
+            # Steps break down the block into named sub-operations
+            with b.step("send_request", description="Send GET /api/v1/users") as s:
+                time.sleep(0.01)
+                s.measure("response_time_ms", 42, "ms")
 
-    # Steps break down the block into named sub-operations
-    tst({"type": "step_start", "step": "send_request", "description": "Send GET /api/v1/users"})
-    tst({"type": "measurement", "name": "response_time_ms", "value": 42, "unit": "ms"})
-    tst({"type": "step_end", "step": "send_request"})
+            with b.step("check_response", description="Validate response body") as s:
+                s.assert_that("status_code_200", True)
+                s.assert_that("body_has_users", True)
 
-    tst({"type": "step_start", "step": "check_response", "description": "Validate response body"})
-    tst({"type": "result", "name": "status_code_200", "passed": True})
-    tst({"type": "result", "name": "body_has_users", "passed": True})
-    tst({"type": "step_end", "step": "check_response"})
+        # --- Verdict ---
+        with t.block("verdict") as b:
+            b.assert_that("api_response_ok", True)
 
-    tst({"type": "block_end", "block": "stimulation"})
+        return t.exit_code()
 
-    tst({"type": "block_start", "block": "verdict"})
-    tst({"type": "result", "name": "api_response_ok", "passed": True})
-    tst({"type": "block_end", "block": "verdict"})
-
-    return 0
 
 if __name__ == "__main__":
     sys.exit(main())
 ```
 
-The orchestrator parses these events and includes them in the JSON report.
-Steps appear as collapsible sections in the HTML report -- failed steps
-are expanded automatically so readers can quickly find what went wrong.
+The `tst_sdk` handles all event emission, error handling, and exit code
+management automatically. The orchestrator parses these events and includes
+them in the JSON report. Steps appear as collapsible sections in the HTML
+report -- failed steps are expanded automatically so readers can quickly
+find what went wrong.
+
+See [Structured Logging](structured-logging.md) for the full SDK reference.
 
 ## Step 8: View the HTML Report
 

@@ -36,6 +36,7 @@ def memory_test_set(name, tier, max_ram_gb, **kwargs):
             main = "memory_test.py",
             args = ["--service=%s" % svc, "--limit-gb=%s" % limit_gb],
             env = {"DEPLOYMENT_TIER": tier},
+            deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
         )
 
         # Wrap with test_set_test

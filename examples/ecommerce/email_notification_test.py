@@ -1,44 +1,41 @@
-"""Simulated email notification test with structured logging."""
+"""Simulated email notification test.
 
-import json
+This example shows sending an email notification with configurable
+reliability (via TST_EMAIL_RELIABILITY env var) using the tst_sdk
+structured logging.
+"""
+
 import os
 import sys
 import time
 
-
-def tst(event: dict) -> None:
-    """Emit a structured test log event with source location."""
-    frame = sys._getframe(1)
-    rel = os.path.relpath(frame.f_code.co_filename)
-    event = {**event, "_file": rel, "_line": frame.f_lineno}
-    print(f"[TST] {json.dumps(event)}")
+from tst_sdk import test_run
 
 
 def main() -> int:
-    tst({"type": "block_start", "block": "rigging"})
-    tst({"type": "feature", "name": "smtp_service", "action": "connect"})
-    tst({"type": "block_end", "block": "rigging"})
+    with test_run() as t:
+        # --- Rigging ---
+        with t.block("rigging") as b:
+            b.feature("smtp_service", "connect")
 
-    tst({"type": "block_start", "block": "stimulation"})
-    time.sleep(0.01)
-    tst({"type": "measurement", "name": "send_latency_ms", "value": 85, "unit": "ms"})
-    tst({"type": "block_end", "block": "stimulation"})
+        # --- Stimulation ---
+        with t.block("stimulation", description="Send email notification") as b:
+            with b.step("send_email", description="Send notification email") as s:
+                time.sleep(0.01)
+                s.measure("send_latency_ms", 85, "ms")
 
-    verdict = True
-    reliability = float(os.environ.get("TST_EMAIL_RELIABILITY", "1.0"))
-    if reliability < 1.0:
+        # --- Verdict ---
+        verdict = True
+        reliability = float(os.environ.get("TST_EMAIL_RELIABILITY", "1.0"))
+        if reliability < 1.0:
             import random
             if random.random() >= reliability:
                 verdict = False
 
-    tst({"type": "block_start", "block": "verdict"})
-    tst({"type": "result", "name": "email_delivered", "passed": verdict})
-    tst({"type": "block_end", "block": "verdict"})
+        with t.block("verdict") as b:
+            b.assert_that("email_delivered", verdict)
 
-    if verdict:
-         return 0
-    else:
-         return 1
+        return t.exit_code()
 
 
 if __name__ == "__main__":

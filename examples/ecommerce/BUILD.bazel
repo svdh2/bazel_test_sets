@@ -21,54 +21,63 @@ py_test(
     name = "credit_card_raw_test",
     srcs = ["credit_card_test.py"],
     main = "credit_card_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
 )
 
 py_test(
     name = "paypal_raw_test",
     srcs = ["paypal_test.py"],
     main = "paypal_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
 )
 
 py_test(
     name = "cart_raw_test",
     srcs = ["cart_test.py"],
     main = "cart_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
 )
 
 py_test(
     name = "discount_raw_test",
     srcs = ["discount_test.py"],
     main = "discount_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
 )
 
 py_test(
     name = "user_registration_raw_test",
     srcs = ["user_registration_test.py"],
     main = "user_registration_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
 )
 
 py_test(
     name = "user_login_raw_test",
     srcs = ["user_login_test.py"],
     main = "user_login_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
 )
 
 py_test(
     name = "user_profile_raw_test",
     srcs = ["user_profile_test.py"],
     main = "user_profile_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
 )
 
 py_test(
     name = "inventory_raw_test",
     srcs = ["inventory_test.py"],
     main = "inventory_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
 )
 
 py_test(
     name = "order_placement_raw_test",
     srcs = ["order_placement_test.py"],
     main = "order_placement_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
 )
 
 py_test(
@@ -82,12 +91,14 @@ py_test(
     name = "shipping_raw_test",
     srcs = ["shipping_test.py"],
     main = "shipping_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
 )
 
 py_test(
     name = "email_notification_raw_test",
     srcs = ["email_notification_test.py"],
     main = "email_notification_test.py",
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
 )
 
 # ========================================================================
@@ -269,6 +280,7 @@ matrix_test_set(
         "eu": {"region": "EU", "currency": "EUR"},
         "uk": {"region": "UK", "currency": "GBP"},
     },
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
     assertion = "Payment processing works across all regions",
     requirement_id = "PAY-REGION",
 )
@@ -292,6 +304,7 @@ parameterized_test_set(
             "env": {"DEPLOY_TIER": "development", "MAX_CONNECTIONS": "10"},
         },
     },
+    deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
     assertion = "Resource limits are correct for all deployment tiers",
     requirement_id = "DEPLOY-RES",
 )

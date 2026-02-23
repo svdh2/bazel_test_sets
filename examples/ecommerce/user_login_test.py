@@ -1,34 +1,33 @@
-"""Simulated user login test with structured logging."""
+"""Simulated user login test.
 
-import json
+This example shows a user authentication flow with latency measurement
+using the tst_sdk structured logging.
+"""
+
 import sys
 import time
 
-
-def tst(event: dict) -> None:
-    """Emit a structured test log event with source location."""
-    import os
-    frame = sys._getframe(1)
-    rel = os.path.relpath(frame.f_code.co_filename)
-    event = {**event, "_file": rel, "_line": frame.f_lineno}
-    print(f"[TST] {json.dumps(event)}")
+from tst_sdk import test_run
 
 
 def main() -> int:
-    tst({"type": "block_start", "block": "rigging"})
-    tst({"type": "feature", "name": "auth_service", "action": "initialize"})
-    tst({"type": "block_end", "block": "rigging"})
+    with test_run() as t:
+        # --- Rigging ---
+        with t.block("rigging") as b:
+            b.feature("auth_service", "initialize")
 
-    tst({"type": "block_start", "block": "stimulation"})
-    time.sleep(0.01)
-    tst({"type": "measurement", "name": "login_latency_ms", "value": 32, "unit": "ms"})
-    tst({"type": "block_end", "block": "stimulation"})
+        # --- Stimulation ---
+        with t.block("stimulation", description="Authenticate user") as b:
+            with b.step("login", description="Perform user login") as s:
+                time.sleep(0.01)
+                s.measure("login_latency_ms", 32, "ms")
+                s.assert_that("credentials_valid", True)
 
-    tst({"type": "block_start", "block": "verdict"})
-    tst({"type": "result", "name": "user_authenticated", "passed": True})
-    tst({"type": "block_end", "block": "verdict"})
+        # --- Verdict ---
+        with t.block("verdict") as b:
+            b.assert_that("user_authenticated", True)
 
-    return 0
+        return t.exit_code()
 
 
 if __name__ == "__main__":

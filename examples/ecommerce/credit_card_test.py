@@ -1,41 +1,43 @@
-"""Simulated credit card payment test with structured logging."""
+"""Simulated credit card payment test.
 
-import json
+This example shows a credit card authorization and charge flow
+using the tst_sdk structured logging.
+"""
+
 import sys
 import time
 
-
-def tst(event: dict) -> None:
-    """Emit a structured test log event with source location."""
-    import os
-    frame = sys._getframe(1)
-    rel = os.path.relpath(frame.f_code.co_filename)
-    event = {**event, "_file": rel, "_line": frame.f_lineno}
-    print(f"[TST] {json.dumps(event)}")
+from tst_sdk import test_run
 
 
 def main() -> int:
-    tst({"type": "block_start", "block": "rigging"})
-    time.sleep(0.01)
-    tst({"type": "feature", "name": "payment_gateway", "action": "connect"})
-    tst({"type": "block_end", "block": "rigging"})
+    with test_run() as t:
+        # --- Rigging ---
+        with t.block("rigging") as b:
+            b.feature("payment_gateway", "connect")
 
-    tst({"type": "block_start", "block": "stimulation"})
-    time.sleep(0.01)
-    tst({"type": "measurement", "name": "auth_latency_ms", "value": 45, "unit": "ms"})
-    tst({"type": "measurement", "name": "charge_amount", "value": 99.99, "unit": "USD"})
-    tst({"type": "block_end", "block": "stimulation"})
+        # --- Stimulation ---
+        with t.block("stimulation", description="Process credit card payment") as b:
+            with b.step("authorize_charge", description="Authorize credit card") as s:
+                time.sleep(0.01)
+                s.measure("auth_latency_ms", 45, "ms")
+                s.measure("charge_amount", 99.99, "USD")
+                s.assert_that("charge_authorized", True, critical=True)
 
-    tst({"type": "block_start", "block": "checkpoint"})
-    tst({"type": "result", "name": "charge_authorized", "passed": True})
-    tst({"type": "result", "name": "receipt_generated", "passed": True})
-    tst({"type": "block_end", "block": "checkpoint"})
+            with b.step("generate_receipt", description="Generate payment receipt") as s:
+                time.sleep(0.005)
+                s.assert_that("receipt_generated", True)
 
-    tst({"type": "block_start", "block": "verdict"})
-    tst({"type": "result", "name": "credit_card_payment", "passed": True})
-    tst({"type": "block_end", "block": "verdict"})
+        # --- Checkpoint ---
+        with t.block("checkpoint") as b:
+            b.assert_that("charge_authorized", True)
+            b.assert_that("receipt_generated", True)
 
-    return 0
+        # --- Verdict ---
+        with t.block("verdict") as b:
+            b.assert_that("credit_card_payment", True)
+
+        return t.exit_code()
 
 
 if __name__ == "__main__":
