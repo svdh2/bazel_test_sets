@@ -1,43 +1,41 @@
-"""Simulated order placement test with structured logging."""
+"""Simulated order placement test.
 
-import json
+This example shows an order placement flow with payment processing
+and inventory management using the tst_sdk structured logging.
+"""
+
 import sys
 import time
 
-
-def tst(event: dict) -> None:
-    """Emit a structured test log event with source location."""
-    import os
-    frame = sys._getframe(1)
-    rel = os.path.relpath(frame.f_code.co_filename)
-    event = {**event, "_file": rel, "_line": frame.f_lineno}
-    print(f"[TST] {json.dumps(event)}")
+from tst_sdk import test_run
 
 
 def main() -> int:
-    tst({"type": "block_start", "block": "rigging"})
-    tst({"type": "feature", "name": "order_service", "action": "initialize"})
-    tst({"type": "feature", "name": "payment_gateway", "action": "connect"})
-    tst({"type": "block_end", "block": "rigging"})
+    with test_run() as t:
+        # --- Rigging ---
+        with t.block("rigging") as b:
+            b.feature("order_service", "initialize")
+            b.feature("payment_gateway", "connect")
 
-    tst({"type": "block_start", "block": "stimulation"})
-    time.sleep(0.02)
-    tst({"type": "measurement", "name": "order_total", "value": 129.97, "unit": "USD"})
-    tst({"type": "measurement", "name": "items_count", "value": 3, "unit": "items"})
-    tst({"type": "measurement", "name": "order_placement_ms", "value": 250, "unit": "ms"})
-    tst({"type": "block_end", "block": "stimulation"})
+        # --- Stimulation ---
+        with t.block("stimulation", description="Place order") as b:
+            with b.step("place_order", description="Submit order for processing") as s:
+                time.sleep(0.02)
+                s.measure("order_total", 129.97, "USD")
+                s.measure("items_count", 3, "items")
+                s.measure("order_placement_ms", 250, "ms")
 
-    tst({"type": "block_start", "block": "checkpoint"})
-    tst({"type": "result", "name": "order_created", "passed": True})
-    tst({"type": "result", "name": "payment_processed", "passed": True})
-    tst({"type": "result", "name": "inventory_decremented", "passed": True})
-    tst({"type": "block_end", "block": "checkpoint"})
+        # --- Checkpoint ---
+        with t.block("checkpoint") as b:
+            b.assert_that("order_created", True)
+            b.assert_that("payment_processed", True)
+            b.assert_that("inventory_decremented", True)
 
-    tst({"type": "block_start", "block": "verdict"})
-    tst({"type": "result", "name": "order_placement", "passed": True})
-    tst({"type": "block_end", "block": "verdict"})
+        # --- Verdict ---
+        with t.block("verdict") as b:
+            b.assert_that("order_placement", True)
 
-    return 0
+        return t.exit_code()
 
 
 if __name__ == "__main__":

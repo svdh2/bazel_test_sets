@@ -1,31 +1,29 @@
-"""Simulated inventory check test with structured logging."""
+"""Simulated inventory check test.
 
-import json
+This example shows an inventory availability check with query timing
+using the tst_sdk structured logging.
+"""
+
 import sys
 import time
 
-
-def tst(event: dict) -> None:
-    """Emit a structured test log event with source location."""
-    import os
-    frame = sys._getframe(1)
-    rel = os.path.relpath(frame.f_code.co_filename)
-    event = {**event, "_file": rel, "_line": frame.f_lineno}
-    print(f"[TST] {json.dumps(event)}")
+from tst_sdk import test_run
 
 
 def main() -> int:
-    tst({"type": "block_start", "block": "stimulation"})
-    time.sleep(0.01)
-    tst({"type": "measurement", "name": "sku_count", "value": 150, "unit": "items"})
-    tst({"type": "measurement", "name": "query_time_ms", "value": 8, "unit": "ms"})
-    tst({"type": "block_end", "block": "stimulation"})
+    with test_run() as t:
+        # --- Stimulation ---
+        with t.block("stimulation", description="Check inventory levels") as b:
+            with b.step("query_inventory", description="Query SKU availability") as s:
+                time.sleep(0.01)
+                s.measure("sku_count", 150, "items")
+                s.measure("query_time_ms", 8, "ms")
 
-    tst({"type": "block_start", "block": "verdict"})
-    tst({"type": "result", "name": "inventory_available", "passed": True})
-    tst({"type": "block_end", "block": "verdict"})
+        # --- Verdict ---
+        with t.block("verdict") as b:
+            b.assert_that("inventory_available", True)
 
-    return 0
+        return t.exit_code()
 
 
 if __name__ == "__main__":

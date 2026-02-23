@@ -1827,8 +1827,25 @@ _DAG_JS = """\
         },
         userZoomingEnabled: true,
         userPanningEnabled: true,
-        boxSelectionEnabled: false
+        boxSelectionEnabled: false,
+        wheelSensitivity: 0.15,
+        minZoom: 0.05
     });
+
+    /* Compute the minimum zoom level so the user cannot zoom out
+       beyond the level where the whole graph is visible. */
+    var fitZoom = 0.05;
+    function updateMinZoom() {
+        var prev = cy.zoom();
+        var prevPan = {x: cy.pan().x, y: cy.pan().y};
+        cy.fit(undefined, 30);
+        fitZoom = cy.zoom();
+        cy.zoom(prev);
+        cy.pan(prevPan);
+        cy.minZoom(fitZoom);
+    }
+    cy.on('layoutstop', updateMinZoom);
+    cy.ready(function() { updateMinZoom(); });
 
     /* Toolbar handlers */
     document.getElementById('dag-zoom-in').addEventListener('click', function() {
@@ -1836,7 +1853,8 @@ _DAG_JS = """\
             renderedPosition: {x: cy.width()/2, y: cy.height()/2}});
     });
     document.getElementById('dag-zoom-out').addEventListener('click', function() {
-        cy.zoom({level: cy.zoom() / 1.2,
+        var newLevel = Math.max(cy.zoom() / 1.2, fitZoom);
+        cy.zoom({level: newLevel,
             renderedPosition: {x: cy.width()/2, y: cy.height()/2}});
     });
     document.getElementById('dag-fit').addEventListener('click', function() {
@@ -2309,7 +2327,8 @@ def _walk_dag_for_graph(
     from the parent test-set node to its children.
     """
     node_id = node.get("name", "")
-    if node_id not in seen_nodes:
+    first_visit = node_id not in seen_nodes
+    if first_visit:
         seen_nodes[node_id] = {"data": {
             "id": node_id,
             "label": node_id,
@@ -2321,6 +2340,11 @@ def _walk_dag_for_graph(
         edges.append({"data": {
             "source": parent_id, "target": node_id, "type": "member",
         }})
+
+    # If this node was already walked, its children (tests & subsets)
+    # have already been emitted — skip to avoid duplicate edges.
+    if not first_visit:
+        return
 
     for test_name, test_data in node.get("tests", {}).items():
         if test_name not in seen_nodes:

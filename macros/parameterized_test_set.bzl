@@ -19,6 +19,7 @@ def parameterized_test_set(
         requirement_id = "",
         depends_on = [],
         env = {},
+        deps = [],
         **kwargs):
     """Generate a test set from a list of parameterized variants.
 
@@ -37,6 +38,7 @@ def parameterized_test_set(
         requirement_id: Optional requirement ID for the test_set.
         depends_on: List of test_set_test labels that all variants depend on.
         env: Default environment variables applied to all variants.
+        deps: List of py_library dependencies for the generated py_test targets.
         **kwargs: Additional attributes passed to test_set.
     """
     tests = []
@@ -56,6 +58,7 @@ def parameterized_test_set(
             main = test_src,
             args = config.get("args", []),
             env = variant_env if variant_env else None,
+            deps = deps,
         )
 
         # Determine depends_on for this variant

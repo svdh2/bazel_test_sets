@@ -202,7 +202,7 @@ def test_set(name, tests = [], subsets = [], assertion = "", requirement_id = ""
 
     # Create an alias if the name doesn't match the rule name
     if rule_name != name:
-        native.alias(
-            name = name,
-            actual = ":" + rule_name,
-        )
+        alias_kwargs = {"name": name, "actual": ":" + rule_name}
+        if "visibility" in kwargs:
+            alias_kwargs["visibility"] = kwargs["visibility"]
+        native.alias(**alias_kwargs)

@@ -1,38 +1,34 @@
 """Parameterized resource limits test.
 
-Accepts --tier and --max-connections via environment variables.
-Simulates resource allocation verification for deployment tiers.
+Accepts DEPLOY_TIER and MAX_CONNECTIONS via environment variables.
+Simulates resource allocation verification for deployment tiers
+using the tst_sdk structured logging.
 """
 
-import json
 import os
 import sys
 import time
 
-
-def tst(event: dict) -> None:
-    """Emit a structured test log event with source location."""
-    frame = sys._getframe(1)
-    rel = os.path.relpath(frame.f_code.co_filename)
-    event = {**event, "_file": rel, "_line": frame.f_lineno}
-    print(f"[TST] {json.dumps(event)}")
+from tst_sdk import test_run
 
 
 def main() -> int:
     tier = os.environ.get("DEPLOY_TIER", "development")
     max_conn = int(os.environ.get("MAX_CONNECTIONS", "10"))
 
-    tst({"type": "block_start", "block": "stimulation"})
-    time.sleep(0.01)
-    tst({"type": "measurement", "name": "tier", "value": tier, "unit": ""})
-    tst({"type": "measurement", "name": "max_connections", "value": max_conn, "unit": "conn"})
-    tst({"type": "block_end", "block": "stimulation"})
+    with test_run() as t:
+        # --- Stimulation ---
+        with t.block("stimulation", description="Verify resource limits") as b:
+            with b.step("check_limits", description=f"Check limits for {tier} tier") as s:
+                time.sleep(0.01)
+                s.measure("tier", tier, "")
+                s.measure("max_connections", max_conn, "conn")
 
-    tst({"type": "block_start", "block": "verdict"})
-    tst({"type": "result", "name": f"resource_limits_{tier}", "passed": True})
-    tst({"type": "block_end", "block": "verdict"})
+        # --- Verdict ---
+        with t.block("verdict") as b:
+            b.assert_that(f"resource_limits_{tier}", True)
 
-    return 0
+        return t.exit_code()
 
 
 if __name__ == "__main__":

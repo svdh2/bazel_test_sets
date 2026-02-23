@@ -27,5 +27,6 @@ def payment_region_test_set(name, **kwargs):
             "uk_gbp": {"region": "uk", "currency": "GBP"},
             "jp_jpy": {"region": "jp", "currency": "JPY"},
         },
+        deps = ["@test_sets_bazel_rules//tst_sdk:tst"],
         **kwargs
     )
