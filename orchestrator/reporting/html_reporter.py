@@ -2327,7 +2327,8 @@ def _walk_dag_for_graph(
     from the parent test-set node to its children.
     """
     node_id = node.get("name", "")
-    if node_id not in seen_nodes:
+    first_visit = node_id not in seen_nodes
+    if first_visit:
         seen_nodes[node_id] = {"data": {
             "id": node_id,
             "label": node_id,
@@ -2339,6 +2340,11 @@ def _walk_dag_for_graph(
         edges.append({"data": {
             "source": parent_id, "target": node_id, "type": "member",
         }})
+
+    # If this node was already walked, its children (tests & subsets)
+    # have already been emitted — skip to avoid duplicate edges.
+    if not first_visit:
+        return
 
     for test_name, test_data in node.get("tests", {}).items():
         if test_name not in seen_nodes:
