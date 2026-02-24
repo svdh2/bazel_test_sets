@@ -78,17 +78,17 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 |-----------|-----------|-------------|
 | [test_set_test rule](components/test-set-test-rule.md) | `rules/` | Wraps an existing test target with DAG metadata (depends_on, assertion, judgement) |
 | [test_set rule](components/test-set-rule.md) | `rules/` | Groups test_set_test targets and subsets into hierarchical sets; generates JSON manifest |
+| [ci_gate rule](components/ci-gate-rule.md) | `rules/` | Bundles a test_set with execution policy and lifecycle parameters into a runnable CI stage target |
 | [matrix_test_set macro](components/matrix-test-set-macro.md) | `macros/` | Generates parameterized tests from a matrix of parameter combinations |
 | [parameterized_test_set macro](components/parameterized-test-set-macro.md) | `macros/` | Generates variant-specific tests with environment variables and args |
 | [Orchestrator Main](components/orchestrator-main.md) | `orchestrator/` | CLI entry point; parses args, loads manifest, dispatches to executor or effort mode; lifecycle subcommands (burn-in, deflake, test-status, re-judge, build-graph) |
 | [DAG](components/dag.md) | `orchestrator/execution/` | TestNode/TestDAG data structures with topological sort and BFS ordering |
 | [Executor](components/executor.md) | `orchestrator/execution/` | Sequential and async parallel test execution with dependency gating |
-| [Effort Runner](components/effort.md) | `orchestrator/execution/` | SPRT-based rerun engine for converge/max effort modes with per-test classification |
-| [Burn-in](components/burnin.md) | `orchestrator/lifecycle/` | Sweep loop for burning_in tests and stable demotion logic |
+| [Effort Runner](components/effort.md) | `orchestrator/execution/` | SPRT-based rerun engine for converge/max effort modes with cross-session evidence pooling |
+| [Burn-in](components/burnin.md) | `orchestrator/lifecycle/` | Sweep loop for burning_in tests, stable demotion logic, and flaky deadline auto-disable |
 | [SPRT](components/sprt.md) | `orchestrator/lifecycle/` | Sequential Probability Ratio Test for burn-in accept/reject and demotion decisions |
 | [E-values](components/e-values.md) | `orchestrator/lifecycle/` | E-value based test set verdicts with aggregate Type II error control |
-| [Test Set Config](components/test-set-config.md) | `orchestrator/lifecycle/` | JSON config file manager for reliability thresholds at workspace root |
-| [Status File](components/status-file.md) | `orchestrator/lifecycle/` | JSON state file manager for test maturity lifecycle (new/burning_in/stable/flaky) |
+| [Status File](components/status-file.md) | `orchestrator/lifecycle/` | JSON state file manager for test maturity lifecycle and target hash tracking |
 | [Co-occurrence Graph](components/co-occurrence.md) | `orchestrator/regression/` | Git history analysis to build file-commit bidirectional index |
 | [Regression Selector](components/regression-selector.md) | `orchestrator/regression/` | Selects tests by co-occurrence scoring with hop decay and dependency closure |
 | [Log Parser](components/log-parser.md) | `orchestrator/analysis/` | Parses [TST] structured log events from test stdout |
@@ -121,5 +121,5 @@ The `./ci` script is development infrastructure: it launches itself inside a Doc
 
 ## Git Sync
 
-- **Commit**: `feb7e78296063fdf9b440aae705d706a798027a9`
-- **Last updated**: 2026-02-22
+- **Commit**: `683c7de1312b235dffb869f2a231b4cd1b556f6e`
+- **Last updated**: 2026-02-24

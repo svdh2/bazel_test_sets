@@ -80,10 +80,10 @@ Runs all tests once, then reruns only failed tests using SPRT until each is
 classified as true_fail (genuine failure) or flake (intermittent). Passing
 tests are classified as true_pass without reruns.
 
-Requires `status_file` in `.test_set_config`.
+Requires `--status-file`.
 
 ```bash
-bazel run //path/to:my_tests -- --effort converge
+bazel run //path/to:my_tests -- --effort converge --status-file .tests/status
 ```
 
 ### Max
@@ -91,10 +91,10 @@ bazel run //path/to:my_tests -- --effort converge
 Runs all tests once, then reruns ALL tests (both passing and failing) using
 SPRT. Provides the most thorough classification of every test.
 
-Requires `status_file` in `.test_set_config`.
+Requires `--status-file`.
 
 ```bash
-bazel run //path/to:my_tests -- --effort max
+bazel run //path/to:my_tests -- --effort max --status-file .tests/status
 ```
 
 ### SPRT Classification
@@ -109,13 +109,23 @@ status and SPRT outcome:
 
 Flakes cause exit code 1 (block CI).
 
+## CI Stage Integration
+
+For configuring CI pipeline stages with baked-in execution parameters, see
+[CI Stages](ci-stages.md). The `ci_gate` rule bundles a `test_set` with
+execution policy into a single runnable Bazel target per CI stage.
+
 ## Parallel Execution
 
-All modes support parallel execution via the `max_parallel` setting in
-`.test_set_config`:
+All modes support parallel execution via the `--max-parallel` flag or the
+`max_parallel` attribute on the `ci_gate` rule:
 
-```json
-{"max_parallel": 8}
+```python
+ci_gate(
+    name = "pr_gate",
+    test_set = ":my_tests",
+    max_parallel = 8,
+)
 ```
 
 The executor uses a sliding window with `asyncio.Semaphore` to control
