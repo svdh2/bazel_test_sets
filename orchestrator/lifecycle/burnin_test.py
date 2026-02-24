@@ -826,3 +826,283 @@ class TestFilterDisabled:
                 assert result == ["a"]
         finally:
             os.unlink(pass_exe)
+
+
+class TestBurnInSweepSameHashPooling:
+    """Tests for BurnInSweep with same-hash evidence pooling."""
+
+    def test_sweep_with_target_hashes_records_hash(self):
+        """BurnInSweep records target_hash in history entries."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "burning_in", clear_history=True)
+                sf.save()
+
+                sweep = BurnInSweep(
+                    dag, sf, commit_sha="abc123",
+                    target_hashes={"a": "hash_a"},
+                )
+                sweep.run()
+
+                history = sf.get_test_history("a")
+                assert len(history) > 0
+                assert all(h.get("target_hash") == "hash_a" for h in history)
+        finally:
+            os.unlink(pass_exe)
+
+    def test_sweep_without_target_hashes_no_hash(self):
+        """BurnInSweep without target_hashes records no target_hash."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "burning_in", clear_history=True)
+                sf.save()
+
+                sweep = BurnInSweep(dag, sf, commit_sha="abc123")
+                sweep.run()
+
+                history = sf.get_test_history("a")
+                assert len(history) > 0
+                assert all(h.get("target_hash") is None for h in history)
+        finally:
+            os.unlink(pass_exe)
+
+    def test_sweep_uses_same_hash_history_for_sprt(self):
+        """BurnInSweep uses same-hash history for SPRT when hashes provided.
+
+        Prior same-hash passes should speed up acceptance.
+        """
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "burning_in", clear_history=True)
+                # Pre-populate with prior same-hash passing runs
+                for _ in range(25):
+                    sf.record_run("a", True, commit="prior", target_hash="hash_a")
+                sf.save()
+
+                sweep = BurnInSweep(
+                    dag, sf, commit_sha="current",
+                    target_hashes={"a": "hash_a"},
+                    max_iterations=10,
+                )
+                result = sweep.run()
+
+                # With 25 prior passes + a few more from sweep, should accept quickly
+                assert "a" in result.decided
+                assert result.decided["a"] == "stable"
+                # Should need fewer runs than a fresh start
+                assert result.total_runs < 10
+        finally:
+            os.unlink(pass_exe)
+
+    def test_sweep_ignores_different_hash_history(self):
+        """BurnInSweep ignores prior evidence with different hash."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "burning_in", clear_history=True)
+                # Prior evidence under a DIFFERENT hash -- should be ignored
+                for _ in range(50):
+                    sf.record_run("a", True, commit="prior", target_hash="old_hash")
+                sf.save()
+
+                sweep = BurnInSweep(
+                    dag, sf, commit_sha="current",
+                    target_hashes={"a": "new_hash"},
+                    max_iterations=200,
+                )
+                result = sweep.run()
+
+                # Should still decide, but needs more runs since old history
+                # is under a different hash and won't be pooled
+                assert "a" in result.decided
+                assert result.decided["a"] == "stable"
+                # Should need more runs than test_sweep_uses_same_hash_history
+                assert result.total_runs > 5
+        finally:
+            os.unlink(pass_exe)
+
+    def test_sweep_test_not_in_target_hashes(self):
+        """Test not in target_hashes uses all history (backward compat)."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "burning_in", clear_history=True)
+                sf.save()
+
+                # target_hashes is provided but doesn't contain "a"
+                sweep = BurnInSweep(
+                    dag, sf, commit_sha="current",
+                    target_hashes={"b": "hash_b"},  # "a" not present
+                )
+                result = sweep.run()
+
+                # Should still work -- uses all history for "a"
+                assert "a" in result.decided
+                assert result.decided["a"] == "stable"
+                # No target_hash on history entries
+                history = sf.get_test_history("a")
+                assert all(h.get("target_hash") is None for h in history)
+        finally:
+            os.unlink(pass_exe)
+
+    def test_backward_compat_no_target_hashes(self):
+        """BurnInSweep without target_hashes behaves identically to before."""
+        pass_exe = _make_pass_script()
+        try:
+            manifest = _make_manifest({
+                "a": {"executable": pass_exe, "depends_on": []},
+            })
+            dag = TestDAG.from_manifest(manifest)
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf.set_test_state("a", "burning_in", clear_history=True)
+                # Add prior evidence without hashes
+                for _ in range(25):
+                    sf.record_run("a", True, commit="prior")
+                sf.save()
+
+                sweep = BurnInSweep(dag, sf, commit_sha="current")
+                result = sweep.run()
+
+                # Should use all history and accept quickly
+                assert "a" in result.decided
+                assert result.decided["a"] == "stable"
+                assert result.total_runs < 10
+        finally:
+            os.unlink(pass_exe)
+
+
+class TestProcessResultsTargetHashes:
+    """Tests for process_results with target_hashes parameter."""
+
+    def test_target_hash_passed_to_record_run(self):
+        """process_results passes target_hash to record_run."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            results = [_result("a", "passed")]
+            process_results(
+                results, sf, commit_sha="abc123",
+                target_hashes={"a": "hash_a"},
+            )
+
+            history = sf.get_test_history("a")
+            assert len(history) == 1
+            assert history[0].get("target_hash") == "hash_a"
+
+    def test_no_target_hash_without_hashes_param(self):
+        """Without target_hashes, no target_hash in history."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            results = [_result("a", "passed")]
+            process_results(results, sf, commit_sha="abc123")
+
+            history = sf.get_test_history("a")
+            assert len(history) == 1
+            assert history[0].get("target_hash") is None
+
+    def test_test_not_in_target_hashes(self):
+        """Test not in target_hashes dict records no target_hash."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            results = [_result("a", "passed")]
+            process_results(
+                results, sf, commit_sha="abc123",
+                target_hashes={"b": "hash_b"},  # "a" not present
+            )
+
+            history = sf.get_test_history("a")
+            assert len(history) == 1
+            assert history[0].get("target_hash") is None
+
+    def test_burning_in_uses_same_hash_for_sprt(self):
+        """process_results uses same-hash history for burning_in SPRT."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("a", "burning_in", clear_history=True)
+            # Add 28 prior same-hash passes
+            for _ in range(28):
+                sf.record_run("a", True, commit="prior", target_hash="hash_a")
+            # Add 50 OLD-hash passes (should be ignored)
+            for _ in range(50):
+                sf.record_run("a", True, commit="old", target_hash="old_hash")
+            sf.save()
+
+            # One more same-hash pass should push SPRT to accept
+            results = [_result("a", "passed")]
+            events = process_results(
+                results, sf, commit_sha="current",
+                target_hashes={"a": "hash_a"},
+            )
+
+            # With 28 + 1 = 29 same-hash passes, SPRT should accept
+            assert len(events) == 1
+            assert events[0] == ("accepted", "a", "burning_in", "stable")
+
+    def test_backward_compat_burning_in_no_hashes(self):
+        """Without target_hashes, burning_in uses all history (backward compat)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("a", "burning_in", clear_history=True)
+            # Add 29 prior passes (no hash)
+            for _ in range(29):
+                sf.record_run("a", True, commit="prior")
+            sf.save()
+
+            results = [_result("a", "passed")]
+            events = process_results(results, sf, commit_sha="current")
+
+            # 29 + 1 = 30 all passes, should accept
+            assert len(events) == 1
+            assert events[0] == ("accepted", "a", "burning_in", "stable")
+
+    def test_multiple_tests_different_hashes(self):
+        """Multiple tests with different hashes are tracked correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            results = [
+                _result("a", "passed"),
+                _result("b", "passed"),
+            ]
+            process_results(
+                results, sf, commit_sha="abc123",
+                target_hashes={"a": "hash_a", "b": "hash_b"},
+            )
+
+            history_a = sf.get_test_history("a")
+            history_b = sf.get_test_history("b")
+            assert history_a[0].get("target_hash") == "hash_a"
+            assert history_b[0].get("target_hash") == "hash_b"

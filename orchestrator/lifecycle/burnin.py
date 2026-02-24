@@ -43,6 +43,10 @@ class BurnInSweep:
     Runs each burning_in test, evaluates SPRT after each run, and
     transitions tests to stable or flaky. Repeats until all tests
     are decided or max_iterations is reached.
+
+    When ``target_hashes`` is provided, SPRT evaluation uses only
+    same-hash history entries (cross-session evidence pooling).
+    Without target hashes, all history is used (existing behavior).
     """
 
     def __init__(
@@ -52,12 +56,14 @@ class BurnInSweep:
         commit_sha: str | None = None,
         max_iterations: int = 200,
         timeout: float = 300.0,
+        target_hashes: dict[str, str] | None = None,
     ) -> None:
         self.dag = dag
         self.status_file = status_file
         self.commit_sha = commit_sha
         self.max_iterations = max_iterations
         self.timeout = timeout
+        self.target_hashes = target_hashes
 
     def run(self, test_names: list[str] | None = None) -> SweepResult:
         """Execute the burn-in sweep loop.
@@ -97,13 +103,24 @@ class BurnInSweep:
 
                 # Record the run
                 passed = result.status == "passed"
+                target_hash = (
+                    self.target_hashes.get(test_name)
+                    if self.target_hashes is not None
+                    else None
+                )
                 self.status_file.record_run(
-                    test_name, passed, commit=self.commit_sha
+                    test_name, passed, commit=self.commit_sha,
+                    target_hash=target_hash,
                 )
                 self.status_file.save()  # Incremental save for crash recovery
 
-                # Evaluate SPRT
-                history = self.status_file.get_test_history(test_name)
+                # Evaluate SPRT -- use same-hash history when available
+                if target_hash is not None:
+                    history = self.status_file.get_same_hash_history(
+                        test_name, target_hash,
+                    )
+                else:
+                    history = self.status_file.get_test_history(test_name)
                 runs, passes = runs_and_passes_from_history(history)
 
                 decision = sprt_evaluate(
@@ -316,21 +333,24 @@ def process_results(
     results: list[TestResult],
     status_file: StatusFile,
     commit_sha: str | None = None,
+    target_hashes: dict[str, str] | None = None,
 ) -> list[tuple[str, str, str, str]]:
     """Record orchestrator test results and evaluate lifecycle transitions.
 
-    For each result (skipping dependencies_failed — test didn't run):
+    For each result (skipping dependencies_failed -- test didn't run):
     - Records the run via status_file.record_run()
     - burning_in: evaluates SPRT on aggregate counters
-        - accept → stable, reject → flaky
+        - accept -> stable, reject -> flaky
     - stable + failed: evaluates demotion via SPRT on full history
-        - demote → flaky, inconclusive → burning_in, retain → no change
+        - demote -> flaky, inconclusive -> burning_in, retain -> no change
     - flaky / new: just records, no evaluation
 
     Args:
         results: Test results from the orchestrator executor.
         status_file: StatusFile for state management and persistence.
         commit_sha: Git commit SHA to record with each run, or None.
+        target_hashes: Optional mapping of test name to target hash for
+            same-hash evidence tracking.
 
     Returns:
         List of (event_type, test_name, old_state, new_state) tuples
@@ -350,11 +370,25 @@ def process_results(
 
         # Record the run
         passed = result.status == "passed"
-        status_file.record_run(result.name, passed, commit=commit_sha)
+        target_hash = (
+            target_hashes.get(result.name)
+            if target_hashes is not None
+            else None
+        )
+        status_file.record_run(
+            result.name, passed, commit=commit_sha,
+            target_hash=target_hash,
+        )
         status_file.save()
 
         if state == "burning_in":
-            history = status_file.get_test_history(result.name)
+            # Use same-hash history when available for SPRT evaluation
+            if target_hash is not None:
+                history = status_file.get_same_hash_history(
+                    result.name, target_hash,
+                )
+            else:
+                history = status_file.get_test_history(result.name)
             runs, passes = runs_and_passes_from_history(history)
             decision = sprt_evaluate(
                 runs,
