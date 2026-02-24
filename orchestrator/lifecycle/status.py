@@ -170,21 +170,111 @@ class StatusFile:
             "history": [] if clear_history else existing.get("history", []),
             "last_updated": now,
         }
+        # Preserve target_hash if it was previously set
+        if "target_hash" in existing:
+            entry["target_hash"] = existing["target_hash"]
         self._data["tests"][test_name] = entry
 
+    def get_target_hash(self, test_name: str) -> str | None:
+        """Get the stored target hash for a test.
+
+        Args:
+            test_name: Test identifier (e.g., "//test:a").
+
+        Returns:
+            Hash string, or None if test not found or no hash stored.
+        """
+        entry = self._data["tests"].get(test_name)
+        if entry is None:
+            return None
+        return entry.get("target_hash")
+
+    def set_target_hash(self, test_name: str, hash_value: str) -> None:
+        """Set the target hash for a test.
+
+        If the test does not exist in the status file, creates it with
+        state "new".
+
+        Args:
+            test_name: Test identifier.
+            hash_value: Hash string to store.
+        """
+        now = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
+
+        if test_name not in self._data["tests"]:
+            self._data["tests"][test_name] = {
+                "state": "new",
+                "history": [],
+                "last_updated": now,
+            }
+
+        self._data["tests"][test_name]["target_hash"] = hash_value
+
+    def invalidate_evidence(self, test_name: str) -> None:
+        """Invalidate SPRT evidence for a test due to hash change.
+
+        Clears history, transitions state to ``burning_in``, and updates
+        ``last_updated``.  The test entry is preserved (including its new
+        target_hash if one was set separately).
+
+        If the test does not exist in the status file this is a no-op.
+
+        Args:
+            test_name: Test identifier.
+        """
+        entry = self._data["tests"].get(test_name)
+        if entry is None:
+            return
+
+        now = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
+        entry["state"] = "burning_in"
+        entry["history"] = []
+        entry["last_updated"] = now
+
+    def get_same_hash_history(
+        self, test_name: str, target_hash: str
+    ) -> list[dict[str, Any]]:
+        """Get history entries recorded with a matching target hash.
+
+        Filters the test's history to only entries whose ``target_hash``
+        field equals *target_hash*.  Entries without a ``target_hash``
+        field are excluded.
+
+        Args:
+            test_name: Test identifier.
+            target_hash: The hash to match against.
+
+        Returns:
+            Filtered list of history entries (newest-first order preserved).
+        """
+        entry = self._data["tests"].get(test_name)
+        if entry is None:
+            return []
+        return [
+            h
+            for h in entry.get("history", [])
+            if h.get("target_hash") == target_hash
+        ]
+
     def record_run(
-        self, test_name: str, passed: bool, commit: str | None = None
+        self,
+        test_name: str,
+        passed: bool,
+        commit: str | None = None,
+        *,
+        target_hash: str | None = None,
     ) -> None:
         """Record a test run result.
 
-        Prepends a history entry with the pass/fail result and commit SHA.
-        Updates last_updated. If test doesn't exist in state file, creates
-        it with state "new".
+        Prepends a history entry with the pass/fail result, commit SHA,
+        and optional target hash.  Updates last_updated. If test doesn't
+        exist in state file, creates it with state "new".
 
         Args:
             test_name: Test identifier.
             passed: Whether the test passed.
             commit: Git commit SHA the run belongs to, or None.
+            target_hash: Target content hash for this run, or None.
         """
         now = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
 
@@ -200,7 +290,10 @@ class StatusFile:
 
         # Prepend to history (newest-first) and cap
         history = entry.get("history", [])
-        history.insert(0, {"passed": passed, "commit": commit})
+        history_entry: dict[str, Any] = {"passed": passed, "commit": commit}
+        if target_hash is not None:
+            history_entry["target_hash"] = target_hash
+        history.insert(0, history_entry)
         entry["history"] = history[:HISTORY_CAP]
 
     def get_test_history(self, test_name: str) -> list[dict[str, Any]]:
