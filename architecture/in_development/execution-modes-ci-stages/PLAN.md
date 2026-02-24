@@ -6,8 +6,8 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 ## Status Overview
 - **Overall Status**: In Progress
 - **Current Phase**: Phase 6: Flaky Lifecycle & Deadline
-- **Current Step**: Step 6.1: Flaky Deadline and Auto-Disable
-- **Completed Steps**: 12 / 16
+- **Current Step**: Step 6.2: Flaky-to-burning_in Re-promotion
+- **Completed Steps**: 13 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -1384,17 +1384,17 @@ Expected: Exit code 0
 ---
 
 ### Phase 6: Flaky Lifecycle & Deadline
-**Phase Status**: Not Started
+**Phase Status**: In Progress
 
 This phase implements the flaky deadline mechanism (auto-disable after N days) and the re-promotion workflow for fixed flaky tests.
 
 ---
 
 #### Step 6.1: Flaky Deadline and Auto-Disable
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: bed4bb5
 
 **Objective**: Implement the flaky deadline mechanism: tests in `flaky` state longer than `flaky_deadline_days` auto-transition to `disabled` state with a warning in the report.
 
@@ -1490,6 +1490,16 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 3.1 (lifecycle-aware exit codes, so disabled tests are handled)
 
 **Implementation Notes**:
+- Added `check_flaky_deadlines(status_file, deadline_days)` function to `orchestrator/lifecycle/burnin.py`
+- For each test in `flaky` state, compares `last_updated` against current UTC time; if elapsed days > deadline_days, transitions to `disabled`
+- Negative `deadline_days` skips the check entirely (no deadline)
+- Zero `deadline_days` disables immediately (any elapsed time exceeds 0)
+- Missing or malformed `last_updated` entries are skipped gracefully (no crash)
+- Prints warning for each auto-disabled test: "Warning: {name} auto-disabled after N days in flaky state (since YYYY-MM-DD)"
+- Integrated into `_run_orchestrator` after `sync_disabled_state`, before `dag.remove_disabled()`, so auto-disabled tests are excluded from execution
+- 10 unit tests in `TestFlakyDeadlineAutoDisable`: exceeded, within deadline, non-flaky unaffected, missing last_updated, malformed last_updated, multiple mixed, zero days, negative days, persistence, empty status file
+- 3 integration tests in `TestFlakyDeadlineInOrchestrator`: auto-disable before execution, within deadline not disabled, no status file no crash
+- All 1109 pytest tests pass, 9/9 Bazel tests pass, mypy clean
 
 ---
 
@@ -1782,6 +1792,7 @@ All tests run via `./ci test` inside the Docker container. Type checks run via `
 Track major milestones and decisions during implementation:
 
 ### 2026-02-24
+- Step 6.1 completed: Flaky deadline auto-disable -- check_flaky_deadlines transitions expired flaky tests to disabled before execution (commit bed4bb5)
 - Step 5.2 completed: Burn-in sweep integration in _run_effort -- Phase 3 sweep after SPRT rerun loop for burning_in lifecycle progression (commit b0f1c64)
 - Step 5.1 completed: BurnInSweep same-hash evidence pooling -- cross-session SPRT evidence via target hash matching in sweep and process_results (commit b930275)
 - Phase 5 (Burn-in Sweep in Effort Modes) completed
