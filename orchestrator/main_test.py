@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import stat
@@ -2340,6 +2341,193 @@ class TestBurnInSweepInEffort:
             assert len(burnin_history) >= 1, (
                 "burnin_test should have been executed despite unchanged hash"
             )
+
+
+class TestFlakyDeadlineInOrchestrator:
+    """Tests for flaky deadline auto-disable in _run_orchestrator."""
+
+    def test_flaky_deadline_disables_before_execution(self):
+        """Flaky tests exceeding deadline are disabled before execution."""
+        from orchestrator.main import _run_orchestrator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a passing test script
+            script_path = Path(tmpdir) / "test.sh"
+            script_path.write_text("#!/bin/bash\nexit 0\n")
+            script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "good_test": {
+                        "assertion": "Good check",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                    },
+                    "flaky_old": {
+                        "assertion": "Old flaky check",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            # Set up status file with an old flaky test
+            status_path = Path(tmpdir) / "status.json"
+            old_date = (
+                datetime.datetime.now(tz=datetime.timezone.utc)
+                - datetime.timedelta(days=20)
+            ).isoformat()
+            with open(status_path, "w") as f:
+                json.dump(
+                    {
+                        "tests": {
+                            "flaky_old": {
+                                "state": "flaky",
+                                "history": [],
+                                "last_updated": old_date,
+                            },
+                        }
+                    },
+                    f,
+                )
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort=None,
+                max_parallel=1,
+                max_failures=None,
+                status_file=status_path,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+                skip_unchanged=False,
+            )
+
+            with patch("orchestrator.main._resolve_git_context") as mock_git:
+                mock_git.return_value = "abc123"
+                exit_code = _run_orchestrator(args)
+
+            # Should succeed (good_test passes, flaky_old is auto-disabled)
+            assert exit_code == 0
+
+            # Verify flaky_old is now disabled in status file
+            sf = StatusFile(status_path)
+            assert sf.get_test_state("flaky_old") == "disabled"
+
+    def test_flaky_deadline_within_deadline_not_disabled(self):
+        """Flaky tests within deadline remain flaky and execute normally."""
+        from orchestrator.main import _run_orchestrator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a passing test script
+            script_path = Path(tmpdir) / "test.sh"
+            script_path.write_text("#!/bin/bash\nexit 0\n")
+            script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "recent_flaky": {
+                        "assertion": "Recent flaky check",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            # Set up status file with a recently-flaky test
+            status_path = Path(tmpdir) / "status.json"
+            recent_date = (
+                datetime.datetime.now(tz=datetime.timezone.utc)
+                - datetime.timedelta(days=3)
+            ).isoformat()
+            with open(status_path, "w") as f:
+                json.dump(
+                    {
+                        "tests": {
+                            "recent_flaky": {
+                                "state": "flaky",
+                                "history": [],
+                                "last_updated": recent_date,
+                            },
+                        }
+                    },
+                    f,
+                )
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort=None,
+                max_parallel=1,
+                max_failures=None,
+                status_file=status_path,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+                skip_unchanged=False,
+            )
+
+            with patch("orchestrator.main._resolve_git_context") as mock_git:
+                mock_git.return_value = "abc123"
+                _run_orchestrator(args)
+
+            # Verify recent_flaky is still flaky (not auto-disabled)
+            sf = StatusFile(status_path)
+            assert sf.get_test_state("recent_flaky") == "flaky"
+
+    def test_flaky_deadline_no_status_file_no_crash(self):
+        """Without status_file, deadline check is skipped (no crash)."""
+        from orchestrator.main import _run_orchestrator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script_path = Path(tmpdir) / "test.sh"
+            script_path.write_text("#!/bin/bash\nexit 0\n")
+            script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "a": {
+                        "assertion": "check",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort=None,
+                max_parallel=1,
+                max_failures=None,
+                status_file=None,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+                skip_unchanged=False,
+            )
+
+            exit_code = _run_orchestrator(args)
+            assert exit_code == 0
 
 
 class TestEffortConvergeRequiresStatusFile:

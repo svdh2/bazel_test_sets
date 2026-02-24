@@ -805,7 +805,10 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
 
     # Sync disabled state from manifest and remove disabled tests from DAG
     if args.status_file:
-        from orchestrator.lifecycle.burnin import sync_disabled_state
+        from orchestrator.lifecycle.burnin import (
+            check_flaky_deadlines,
+            sync_disabled_state,
+        )
 
         sf = StatusFile(
             args.status_file,
@@ -817,6 +820,12 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
             print("Disabled state sync:")
             for etype, name, old_state, new_state in sync_events:
                 print(f"  {name}: {old_state} \u2192 {new_state} ({etype})")
+            print()
+
+        # Check flaky deadlines and auto-disable expired tests
+        deadline_events = check_flaky_deadlines(sf, args.flaky_deadline_days)
+        if deadline_events:
+            print(f"Flaky deadline auto-disabled: {len(deadline_events)} test(s)")
             print()
 
     removed = dag.remove_disabled()

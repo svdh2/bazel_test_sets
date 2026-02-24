@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime
+import json
 import os
 import stat
 import tempfile
@@ -11,6 +13,7 @@ import pytest
 
 from orchestrator.lifecycle.burnin import (
     BurnInSweep,
+    check_flaky_deadlines,
     filter_tests_by_state,
     handle_stable_failure,
     process_results,
@@ -1106,3 +1109,283 @@ class TestProcessResultsTargetHashes:
             history_b = sf.get_test_history("b")
             assert history_a[0].get("target_hash") == "hash_a"
             assert history_b[0].get("target_hash") == "hash_b"
+
+
+class TestFlakyDeadlineAutoDisable:
+    """Tests for check_flaky_deadlines function."""
+
+    def test_flaky_deadline_exceeded_auto_disables(self):
+        """Flaky test exceeding deadline transitions to disabled."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            old_date = (
+                datetime.datetime.now(tz=datetime.timezone.utc)
+                - datetime.timedelta(days=20)
+            ).isoformat()
+            with open(status_path, "w") as f:
+                json.dump(
+                    {
+                        "tests": {
+                            "//test:a": {
+                                "state": "flaky",
+                                "history": [],
+                                "last_updated": old_date,
+                            }
+                        }
+                    },
+                    f,
+                )
+            sf = StatusFile(status_path)
+            events = check_flaky_deadlines(sf, 14)
+
+            assert len(events) == 1
+            assert events[0] == ("auto-disabled", "//test:a", "flaky", "disabled")
+            assert sf.get_test_state("//test:a") == "disabled"
+
+    def test_flaky_deadline_within_deadline_remains_flaky(self):
+        """Flaky test within deadline remains in flaky state."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            recent_date = (
+                datetime.datetime.now(tz=datetime.timezone.utc)
+                - datetime.timedelta(days=5)
+            ).isoformat()
+            with open(status_path, "w") as f:
+                json.dump(
+                    {
+                        "tests": {
+                            "//test:a": {
+                                "state": "flaky",
+                                "history": [],
+                                "last_updated": recent_date,
+                            }
+                        }
+                    },
+                    f,
+                )
+            sf = StatusFile(status_path)
+            events = check_flaky_deadlines(sf, 14)
+
+            assert len(events) == 0
+            assert sf.get_test_state("//test:a") == "flaky"
+
+    def test_flaky_deadline_non_flaky_unaffected(self):
+        """Non-flaky tests (stable, burning_in, new) are not affected."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            old_date = (
+                datetime.datetime.now(tz=datetime.timezone.utc)
+                - datetime.timedelta(days=100)
+            ).isoformat()
+            with open(status_path, "w") as f:
+                json.dump(
+                    {
+                        "tests": {
+                            "//test:stable": {
+                                "state": "stable",
+                                "history": [],
+                                "last_updated": old_date,
+                            },
+                            "//test:burning": {
+                                "state": "burning_in",
+                                "history": [],
+                                "last_updated": old_date,
+                            },
+                            "//test:new": {
+                                "state": "new",
+                                "history": [],
+                                "last_updated": old_date,
+                            },
+                        }
+                    },
+                    f,
+                )
+            sf = StatusFile(status_path)
+            events = check_flaky_deadlines(sf, 14)
+
+            assert len(events) == 0
+            assert sf.get_test_state("//test:stable") == "stable"
+            assert sf.get_test_state("//test:burning") == "burning_in"
+            assert sf.get_test_state("//test:new") == "new"
+
+    def test_flaky_deadline_missing_last_updated_skipped(self):
+        """Flaky test with missing last_updated is skipped gracefully."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            with open(status_path, "w") as f:
+                json.dump(
+                    {
+                        "tests": {
+                            "//test:no_date": {
+                                "state": "flaky",
+                                "history": [],
+                            }
+                        }
+                    },
+                    f,
+                )
+            sf = StatusFile(status_path)
+            events = check_flaky_deadlines(sf, 14)
+
+            assert len(events) == 0
+            assert sf.get_test_state("//test:no_date") == "flaky"
+
+    def test_flaky_deadline_malformed_last_updated_skipped(self):
+        """Flaky test with malformed last_updated is skipped gracefully."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            with open(status_path, "w") as f:
+                json.dump(
+                    {
+                        "tests": {
+                            "//test:bad_date": {
+                                "state": "flaky",
+                                "history": [],
+                                "last_updated": "not-a-valid-date",
+                            }
+                        }
+                    },
+                    f,
+                )
+            sf = StatusFile(status_path)
+            events = check_flaky_deadlines(sf, 14)
+
+            assert len(events) == 0
+            assert sf.get_test_state("//test:bad_date") == "flaky"
+
+    def test_flaky_deadline_multiple_tests_mixed(self):
+        """Multiple flaky tests: some exceed deadline, some don't."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            old_date = (
+                datetime.datetime.now(tz=datetime.timezone.utc)
+                - datetime.timedelta(days=30)
+            ).isoformat()
+            recent_date = (
+                datetime.datetime.now(tz=datetime.timezone.utc)
+                - datetime.timedelta(days=3)
+            ).isoformat()
+            with open(status_path, "w") as f:
+                json.dump(
+                    {
+                        "tests": {
+                            "//test:old_flaky": {
+                                "state": "flaky",
+                                "history": [],
+                                "last_updated": old_date,
+                            },
+                            "//test:recent_flaky": {
+                                "state": "flaky",
+                                "history": [],
+                                "last_updated": recent_date,
+                            },
+                            "//test:stable": {
+                                "state": "stable",
+                                "history": [],
+                                "last_updated": old_date,
+                            },
+                        }
+                    },
+                    f,
+                )
+            sf = StatusFile(status_path)
+            events = check_flaky_deadlines(sf, 14)
+
+            assert len(events) == 1
+            assert events[0] == (
+                "auto-disabled", "//test:old_flaky", "flaky", "disabled",
+            )
+            assert sf.get_test_state("//test:old_flaky") == "disabled"
+            assert sf.get_test_state("//test:recent_flaky") == "flaky"
+            assert sf.get_test_state("//test:stable") == "stable"
+
+    def test_flaky_deadline_zero_days_disables_immediately(self):
+        """deadline_days=0 disables any flaky test immediately."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            # Set last_updated to just 1 second ago
+            just_now = (
+                datetime.datetime.now(tz=datetime.timezone.utc)
+                - datetime.timedelta(seconds=1)
+            ).isoformat()
+            with open(status_path, "w") as f:
+                json.dump(
+                    {
+                        "tests": {
+                            "//test:a": {
+                                "state": "flaky",
+                                "history": [],
+                                "last_updated": just_now,
+                            }
+                        }
+                    },
+                    f,
+                )
+            sf = StatusFile(status_path)
+            events = check_flaky_deadlines(sf, 0)
+
+            assert len(events) == 1
+            assert sf.get_test_state("//test:a") == "disabled"
+
+    def test_flaky_deadline_negative_days_no_disable(self):
+        """deadline_days=-1 effectively means no deadline -- no tests disabled."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            old_date = (
+                datetime.datetime.now(tz=datetime.timezone.utc)
+                - datetime.timedelta(days=1000)
+            ).isoformat()
+            with open(status_path, "w") as f:
+                json.dump(
+                    {
+                        "tests": {
+                            "//test:a": {
+                                "state": "flaky",
+                                "history": [],
+                                "last_updated": old_date,
+                            }
+                        }
+                    },
+                    f,
+                )
+            sf = StatusFile(status_path)
+            events = check_flaky_deadlines(sf, -1)
+
+            assert len(events) == 0
+            assert sf.get_test_state("//test:a") == "flaky"
+
+    def test_flaky_deadline_saves_status_file(self):
+        """Auto-disable persists to disk after check."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            old_date = (
+                datetime.datetime.now(tz=datetime.timezone.utc)
+                - datetime.timedelta(days=20)
+            ).isoformat()
+            with open(status_path, "w") as f:
+                json.dump(
+                    {
+                        "tests": {
+                            "//test:a": {
+                                "state": "flaky",
+                                "history": [],
+                                "last_updated": old_date,
+                            }
+                        }
+                    },
+                    f,
+                )
+            sf = StatusFile(status_path)
+            check_flaky_deadlines(sf, 14)
+
+            # Re-read from disk to verify persistence
+            sf2 = StatusFile(status_path)
+            assert sf2.get_test_state("//test:a") == "disabled"
+
+    def test_flaky_deadline_empty_status_file(self):
+        """Empty status file produces no events."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            events = check_flaky_deadlines(sf, 14)
+            assert len(events) == 0

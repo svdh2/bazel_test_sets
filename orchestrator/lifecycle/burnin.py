@@ -4,6 +4,7 @@ Implements the burn-in lifecycle:
 - Sweep loop: runs burning_in tests until SPRT decides each one
 - Stable demotion: re-runs failed stable tests to evaluate demotion
 - Result processing: records orchestrator results and drives state transitions
+- Flaky deadline: auto-disables tests stuck in flaky state too long
 
 State transitions:
 - new -> burning_in (via CI tool)
@@ -12,10 +13,12 @@ State transitions:
 - stable -> flaky (demotion after repeated failure)
 - stable -> burning_in (suspicious: SPRT inconclusive after failure)
 - flaky -> burning_in (via CI tool deflake)
+- flaky -> disabled (auto-disable after deadline)
 """
 
 from __future__ import annotations
 
+import datetime
 import os
 import subprocess
 import time
@@ -289,6 +292,74 @@ def sync_disabled_state(
         elif not node.disabled and current_state == "disabled":
             status_file.set_test_state(name, "new", clear_history=True)
             events.append(("re-enabled", name, "disabled", "new"))
+
+    if events:
+        status_file.save()
+
+    return events
+
+
+def check_flaky_deadlines(
+    status_file: StatusFile,
+    deadline_days: int,
+) -> list[tuple[str, str, str, str]]:
+    """Auto-disable flaky tests that have exceeded the deadline.
+
+    For each test in ``flaky`` state, compares ``last_updated`` against
+    the current time.  If the elapsed days exceed *deadline_days*, the
+    test transitions to ``disabled``.
+
+    Edge cases:
+    - ``last_updated`` missing or malformed: the test is skipped.
+    - ``deadline_days <= 0``: disables immediately (0 days tolerance).
+    - ``deadline_days`` very large or negative: effectively no deadline
+      (negative deadline_days means no test will exceed it).
+
+    Args:
+        status_file: StatusFile for state management.
+        deadline_days: Maximum days a test may remain in ``flaky`` state.
+
+    Returns:
+        List of (event_type, test_name, old_state, new_state) tuples
+        for each auto-disabled test.
+    """
+    events: list[tuple[str, str, str, str]] = []
+
+    # Negative deadline means "no deadline" -- skip the check entirely
+    if deadline_days < 0:
+        return events
+
+    now = datetime.datetime.now(tz=datetime.timezone.utc)
+
+    flaky_tests = status_file.get_tests_by_state("flaky")
+    for test_name in flaky_tests:
+        entry = status_file.get_test_entry(test_name)
+        if entry is None:
+            continue
+
+        last_updated_str = entry.get("last_updated")
+        if not last_updated_str:
+            continue
+
+        try:
+            last_updated = datetime.datetime.fromisoformat(last_updated_str)
+        except (ValueError, TypeError):
+            # Malformed timestamp -- skip gracefully
+            continue
+
+        elapsed = now - last_updated
+        if elapsed.total_seconds() / 86400 > deadline_days:
+            # Format the flaky-since date for the warning message
+            flaky_since = last_updated.strftime("%Y-%m-%d")
+            elapsed_days = int(elapsed.total_seconds() / 86400)
+            status_file.set_test_state(test_name, "disabled")
+            events.append(("auto-disabled", test_name, "flaky", "disabled"))
+            # Print warning for each auto-disabled test
+            print(
+                f"  Warning: {test_name} auto-disabled after "
+                f"{elapsed_days} days in flaky state "
+                f"(since {flaky_since})"
+            )
 
     if events:
         status_file.save()
