@@ -5,9 +5,9 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 
 ## Status Overview
 - **Overall Status**: In Progress
-- **Current Phase**: Phase 6: Flaky Lifecycle & Deadline
-- **Current Step**: Step 6.2: Flaky-to-burning_in Re-promotion
-- **Completed Steps**: 13 / 16
+- **Current Phase**: Phase 7: Reporting & Documentation
+- **Current Step**: Step 7.1: Report Enhancements
+- **Completed Steps**: 14 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -1384,7 +1384,7 @@ Expected: Exit code 0
 ---
 
 ### Phase 6: Flaky Lifecycle & Deadline
-**Phase Status**: In Progress
+**Phase Status**: Completed
 
 This phase implements the flaky deadline mechanism (auto-disable after N days) and the re-promotion workflow for fixed flaky tests.
 
@@ -1504,10 +1504,10 @@ Expected: Exit code 0
 ---
 
 #### Step 6.2: Flaky-to-burning_in Re-promotion
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: 8c3ac7b
 
 **Objective**: Ensure the `deflake` subcommand and the flaky-to-burning_in workflow function correctly with the new hash-based evidence system, enabling test owners to re-promote fixed flaky tests.
 
@@ -1572,6 +1572,11 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 6.1 (flaky deadline, which validates the flaky lifecycle)
 
 **Implementation Notes**:
+- Updated `cmd_deflake` to clear `target_hash` from the status entry after transitioning to `burning_in` with cleared history
+- This ensures the test gets fresh hash-based evidence tracking on the next CI run (no stale hash baseline)
+- Verified the disabled -> new re-promotion path works correctly via `sync_disabled_state` (no code changes needed, just test verification)
+- 4 new tests: deflake clears target_hash, deflake without target_hash (backward compat), full deflake -> burn-in -> stable workflow, disabled -> new re-promotion via sync
+- All 1113 pytest tests pass, 9/9 Bazel tests pass, mypy clean
 
 ---
 
@@ -1792,6 +1797,8 @@ All tests run via `./ci test` inside the Docker container. Type checks run via `
 Track major milestones and decisions during implementation:
 
 ### 2026-02-24
+- Step 6.2 completed: Flaky-to-burning_in re-promotion -- deflake clears target_hash for fresh hash tracking, verified full lifecycle workflow (commit 8c3ac7b)
+- Phase 6 (Flaky Lifecycle & Deadline) completed
 - Step 6.1 completed: Flaky deadline auto-disable -- check_flaky_deadlines transitions expired flaky tests to disabled before execution (commit bed4bb5)
 - Step 5.2 completed: Burn-in sweep integration in _run_effort -- Phase 3 sweep after SPRT rerun loop for burning_in lifecycle progression (commit b0f1c64)
 - Step 5.1 completed: BurnInSweep same-hash evidence pooling -- cross-session SPRT evidence via target hash matching in sweep and process_results (commit b930275)
