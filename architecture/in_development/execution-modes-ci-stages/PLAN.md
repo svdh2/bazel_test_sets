@@ -5,9 +5,9 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 
 ## Status Overview
 - **Overall Status**: In Progress
-- **Current Phase**: Phase 3: Lifecycle-Aware Exit Codes
-- **Current Step**: Step 4.1 Completed -- Ready for Step 4.2
-- **Completed Steps**: 8 / 16
+- **Current Phase**: Phase 4: Integration and Mode Wiring
+- **Current Step**: Step 4.3: Burn-in Test Inclusion in Regression Selection
+- **Completed Steps**: 9 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -1026,10 +1026,10 @@ Expected: Exit code 0
 ---
 
 #### Step 4.2: Mini-Converge in Regression Mode
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: 5288e23
 
 **Objective**: Modify `_run_regression` to add mini-converge (budget-capped SPRT on failures) when `status_file` is configured, using the lifecycle-aware exit code logic. This is the highest-value behavioral change: PR CI can now distinguish flakes from real failures.
 
@@ -1103,6 +1103,13 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 4.1 (EffortRunner evidence pooling) and Step 3.1 (exit code function)
 
 **Implementation Notes**:
+- Modified `_run_regression` in `main.py` to add mini-converge logic: when `status_file` is configured, failures exist, and `commit_sha` is available, creates EffortRunner with `effort_mode="converge"` to rerun failed tests via SPRT
+- Records initial results in status file before mini-converge so EffortRunner's `_load_prior_evidence` includes the initial run in its evidence pool
+- Uses `compute_exit_code()` from `exit_code.py` for lifecycle-aware exit codes after mini-converge completes
+- Added `_print_mini_converge_results()` function for classification summary output (per-test SPRT results, warnings, blocking/non-blocking summary)
+- Backward compatible: without status_file or commit_sha, falls through to raw pass/fail exit code (no mini-converge)
+- 7 new tests in `TestMiniConvergeRegression` class: true_fail blocking (exit 1), flaky-state non-blocking (exit 0), burning_in non-blocking (exit 0), no-status-file backward compat, all-pass exit zero, status file recording, no-commit-sha fallback
+- All 1073 pytest tests pass, 9/9 Bazel tests pass, mypy clean
 
 ---
 
