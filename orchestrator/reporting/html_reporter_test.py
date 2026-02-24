@@ -1503,3 +1503,101 @@ class TestParametersRendering:
         result = generate_html_report(report)
         assert "lines.join" in result
         assert "'text-wrap': 'wrap'" in result
+
+
+class TestHashFilterSection:
+    """Tests for hash filter section in HTML reports."""
+
+    def test_hash_filter_renders(self):
+        """Hash filter section renders when data is present."""
+        report = {
+            "report": {
+                "generated_at": "2026-01-01T00:00:00",
+                "summary": {"total": 10, "passed": 10, "failed": 0,
+                             "dependencies_failed": 0,
+                             "passed+dependencies_failed": 0,
+                             "failed+dependencies_failed": 0,
+                             "total_duration_seconds": 5.0},
+                "hash_filter": {
+                    "changed": 3,
+                    "unchanged": 7,
+                    "skipped": 5,
+                },
+            }
+        }
+        result = generate_html_report(report)
+        assert "Hash-Based Filtering" in result
+        assert "Changed" in result
+        assert "Unchanged" in result
+        assert "Skipped" in result
+
+    def test_hash_filter_not_rendered_when_absent(self):
+        """Hash filter section not rendered when data is absent."""
+        report = {
+            "report": {
+                "generated_at": "2026-01-01T00:00:00",
+                "summary": {"total": 1, "passed": 1, "failed": 0,
+                             "dependencies_failed": 0,
+                             "passed+dependencies_failed": 0,
+                             "failed+dependencies_failed": 0,
+                             "total_duration_seconds": 1.0},
+            }
+        }
+        result = generate_html_report(report)
+        assert "Hash-Based Filtering" not in result
+
+
+class TestBurnInSweepSection:
+    """Tests for burn-in sweep data in effort section of HTML reports."""
+
+    def test_burn_in_sweep_renders_in_effort(self):
+        """Burn-in sweep data renders within effort section."""
+        report = {
+            "report": {
+                "generated_at": "2026-01-01T00:00:00",
+                "summary": {"total": 2, "passed": 2, "failed": 0,
+                             "dependencies_failed": 0,
+                             "passed+dependencies_failed": 0,
+                             "failed+dependencies_failed": 0,
+                             "total_duration_seconds": 3.0},
+                "effort": {
+                    "mode": "converge",
+                    "total_reruns": 10,
+                    "max_reruns_per_test": 5,
+                    "classifications": {},
+                    "burn_in_sweep": {
+                        "total_runs": 8,
+                        "decided": {"//test:a": "stable"},
+                        "undecided": ["//test:b"],
+                    },
+                },
+            }
+        }
+        result = generate_html_report(report)
+        assert "Burn-in Sweep" in result
+        assert "Sweep runs" in result
+        assert "Decided" in result
+        assert "STABLE" in result
+        assert "Still burning in" in result
+
+    def test_effort_without_sweep(self):
+        """Effort section renders correctly without sweep data."""
+        report = {
+            "report": {
+                "generated_at": "2026-01-01T00:00:00",
+                "summary": {"total": 1, "passed": 1, "failed": 0,
+                             "dependencies_failed": 0,
+                             "passed+dependencies_failed": 0,
+                             "failed+dependencies_failed": 0,
+                             "total_duration_seconds": 1.0},
+                "effort": {
+                    "mode": "converge",
+                    "total_reruns": 5,
+                    "max_reruns_per_test": 3,
+                    "classifications": {},
+                },
+            }
+        }
+        result = generate_html_report(report)
+        assert "Effort: converge" in result
+        assert "Burn-in Sweep" not in result

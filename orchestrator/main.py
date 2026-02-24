@@ -929,15 +929,26 @@ def _run_regression(
     # Compute target hashes (if status_file is configured)
     target_hashes: dict[str, str] = {}
     hash_changed_tests: set[str] = set()
+    hash_filter_data: dict[str, Any] | None = None
     if args.status_file:
         sf = StatusFile(
             args.status_file,
             min_reliability=args.min_reliability,
             statistical_significance=args.statistical_significance,
         )
-        hash_changed_tests, _, target_hashes = _compute_and_filter_hashes(
-            dag, sf, skip_unchanged=args.skip_unchanged,
+        hash_changed_tests, hash_skippable, target_hashes = (
+            _compute_and_filter_hashes(
+                dag, sf, skip_unchanged=args.skip_unchanged,
+            )
         )
+        if target_hashes:
+            n_total = len(dag.nodes)
+            n_changed = len(hash_changed_tests)
+            hash_filter_data = {
+                "changed": n_changed,
+                "unchanged": n_total - n_changed,
+                "skipped": len(hash_skippable),
+            }
 
     # Configure and run regression selection
     regression_config = RegressionConfig(
@@ -1081,6 +1092,7 @@ def _run_regression(
         # Print mini-converge results
         _print_mini_converge_results(
             results, effort_result, args, commit_sha, manifest,
+            hash_filter_data=hash_filter_data,
         )
 
         # Apply lifecycle-aware exit code
@@ -1113,6 +1125,7 @@ def _run_regression(
     verdict_data = _compute_verdict(args, filtered_dag, commit_sha)
     demoted = _print_results(
         results, args, commit_sha, manifest, verdict_data,
+        hash_filter_data=hash_filter_data,
     )
     return 1 if (has_failure or demoted) else 0
 
@@ -1160,10 +1173,19 @@ def _run_effort(
 
     # Hash-based filtering
     target_hashes: dict[str, str] = {}
+    hash_filter_data: dict[str, Any] | None = None
     if args.skip_unchanged:
         hash_changed, hash_skippable, target_hashes = (
             _compute_and_filter_hashes(dag, sf, skip_unchanged=True)
         )
+        if target_hashes:
+            n_total = len(dag.nodes) + len(hash_skippable)
+            n_changed = len(hash_changed)
+            hash_filter_data = {
+                "changed": n_changed,
+                "unchanged": n_total - n_changed,
+                "skipped": len(hash_skippable),
+            }
         if hash_skippable:
             # Remove skippable tests from the DAG
             for label in hash_skippable:
@@ -1176,9 +1198,17 @@ def _run_effort(
             print()
     else:
         # Even without skip_unchanged, compute hashes for evidence pooling
-        _, _, target_hashes = _compute_and_filter_hashes(
+        hash_changed_effort, _, target_hashes = _compute_and_filter_hashes(
             dag, sf, skip_unchanged=False,
         )
+        if target_hashes:
+            n_total = len(dag.nodes)
+            n_changed = len(hash_changed_effort)
+            hash_filter_data = {
+                "changed": n_changed,
+                "unchanged": n_total - n_changed,
+                "skipped": 0,
+            }
 
     # Phase 1: Execute all tests once
     executor: SequentialExecutor | AsyncExecutor
@@ -1255,6 +1285,7 @@ def _run_effort(
     _print_effort_results(
         initial_results, effort_result, args, commit_sha, manifest,
         verdict_data, sweep_result=sweep_result,
+        hash_filter_data=hash_filter_data,
     )
 
     # Exit code: 1 if any true_fail or flake
@@ -1430,6 +1461,7 @@ def _print_results(
     commit_sha: str | None = None,
     manifest: dict | None = None,
     verdict_data: dict[str, Any] | None = None,
+    hash_filter_data: dict[str, Any] | None = None,
 ) -> list[str]:
     """Print test execution results summary.
 
@@ -1480,6 +1512,9 @@ def _print_results(
         if verdict_data:
             reporter.set_e_value_verdict(verdict_data)
 
+        if hash_filter_data:
+            reporter.set_hash_filter_data(hash_filter_data)
+
         # Feed lifecycle data from status file to reporter
         if args.status_file and args.status_file.exists():
             sf = StatusFile(
@@ -1527,6 +1562,7 @@ def _print_mini_converge_results(
     args: argparse.Namespace,
     commit_sha: str | None = None,
     manifest: dict | None = None,
+    hash_filter_data: dict[str, Any] | None = None,
 ) -> None:
     """Print mini-converge results for regression mode.
 
@@ -1634,6 +1670,9 @@ def _print_mini_converge_results(
         }
         reporter.set_effort_data(effort_data)
 
+        if hash_filter_data:
+            reporter.set_hash_filter_data(hash_filter_data)
+
         if args.status_file and args.status_file.exists():
             sf = StatusFile(
                 args.status_file,
@@ -1672,6 +1711,7 @@ def _print_effort_results(
     manifest: dict | None = None,
     verdict_data: dict[str, Any] | None = None,
     sweep_result: Any | None = None,
+    hash_filter_data: dict[str, Any] | None = None,
 ) -> None:
     """Print effort mode results with per-test SPRT classifications."""
     mode_label = f"{args.mode} + effort:{args.effort}"
@@ -1763,7 +1803,7 @@ def _print_effort_results(
             reporter.set_e_value_verdict(verdict_data)
 
         # Add effort classifications to report
-        effort_data = {
+        effort_data: dict[str, Any] = {
             "mode": args.effort,
             "total_reruns": effort_result.total_reruns,
             "max_reruns_per_test": args.max_reruns,
@@ -1778,7 +1818,16 @@ def _print_effort_results(
                 for name, c in effort_result.classifications.items()
             },
         }
+        if sweep_result is not None:
+            effort_data["burn_in_sweep"] = {
+                "total_runs": sweep_result.total_runs,
+                "decided": sweep_result.decided,
+                "undecided": sweep_result.undecided,
+            }
         reporter.set_effort_data(effort_data)
+
+        if hash_filter_data:
+            reporter.set_hash_filter_data(hash_filter_data)
 
         if args.status_file and args.status_file.exists():
             sf = StatusFile(

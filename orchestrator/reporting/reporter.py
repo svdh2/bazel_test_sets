@@ -51,6 +51,7 @@ class Reporter:
         self.inferred_deps: dict[str, list[dict[str, Any]]] = {}
         self.e_value_verdict: dict[str, Any] | None = None
         self.effort_data: dict[str, Any] | None = None
+        self.hash_filter_data: dict[str, Any] | None = None
         self.lifecycle_data: dict[str, dict[str, Any]] = {}
         self.lifecycle_config: dict[str, Any] | None = None
         self.reliability_demoted_tests: list[str] = []
@@ -123,6 +124,15 @@ class Reporter:
                 and classifications.
         """
         self.effort_data = data
+
+    def set_hash_filter_data(self, data: dict[str, Any]) -> None:
+        """Set hash-based filtering summary data for the report.
+
+        Args:
+            data: Dict with changed, unchanged, and skipped counts,
+                e.g. ``{"changed": 5, "unchanged": 95, "skipped": 90}``.
+        """
+        self.hash_filter_data = data
 
     def set_lifecycle_data(
         self, data: dict[str, dict[str, Any]]
@@ -208,6 +218,9 @@ class Reporter:
 
         if self.effort_data:
             report["effort"] = self.effort_data
+
+        if self.hash_filter_data:
+            report["hash_filter"] = self.hash_filter_data
 
         if self.lifecycle_config:
             report["lifecycle_config"] = self.lifecycle_config

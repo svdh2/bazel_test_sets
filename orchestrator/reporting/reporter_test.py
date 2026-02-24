@@ -1314,3 +1314,60 @@ class TestParametersInReport:
         report = reporter.generate_report()
         entry = report["report"]["test_set"]["tests"]["auth_test"]
         assert "parameters" not in entry
+
+
+class TestHashFilterData:
+    """Tests for hash filter data in reports."""
+
+    def test_hash_filter_data_in_report(self):
+        """Hash filter data appears in report when set."""
+        reporter = Reporter()
+        reporter.set_hash_filter_data({
+            "changed": 5,
+            "unchanged": 95,
+            "skipped": 90,
+        })
+        report = reporter.generate_report()
+        assert "hash_filter" in report["report"]
+        hf = report["report"]["hash_filter"]
+        assert hf["changed"] == 5
+        assert hf["unchanged"] == 95
+        assert hf["skipped"] == 90
+
+    def test_hash_filter_data_omitted_when_not_set(self):
+        """No hash_filter key when data is not set."""
+        reporter = Reporter()
+        report = reporter.generate_report()
+        assert "hash_filter" not in report["report"]
+
+    def test_hash_filter_data_with_effort(self):
+        """Hash filter data coexists with effort data."""
+        reporter = Reporter()
+        reporter.set_hash_filter_data({
+            "changed": 3,
+            "unchanged": 7,
+            "skipped": 5,
+        })
+        reporter.set_effort_data({
+            "mode": "converge",
+            "total_reruns": 10,
+            "max_reruns_per_test": 5,
+            "classifications": {},
+        })
+        report = reporter.generate_report()
+        assert "hash_filter" in report["report"]
+        assert "effort" in report["report"]
+
+    def test_hash_filter_data_backward_compat(self):
+        """Reports without hash filter data generate correctly."""
+        reporter = Reporter()
+        reporter.set_manifest(SAMPLE_MANIFEST)
+        reporter.add_results([
+            TestResult(
+                name="auth_test", assertion="Auth works",
+                status="passed", duration=1.0,
+            ),
+        ])
+        report = reporter.generate_report()
+        assert "hash_filter" not in report["report"]
+        assert report["report"]["summary"]["passed"] == 1

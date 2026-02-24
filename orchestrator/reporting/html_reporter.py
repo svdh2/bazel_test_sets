@@ -511,6 +511,10 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
     if "e_value_verdict" in report:
         parts.append(_render_e_value_verdict(report["e_value_verdict"]))
 
+    # Hash filter summary section
+    if "hash_filter" in report:
+        parts.append(_render_hash_filter_section(report["hash_filter"]))
+
     # Effort classification section
     if "effort" in report:
         parts.append(_render_effort_section(report["effort"]))
@@ -1390,6 +1394,36 @@ _CLASSIFICATION_COLORS: dict[str, str] = {
 }
 
 
+def _render_hash_filter_section(hash_data: dict[str, Any]) -> str:
+    """Render hash-based filtering summary section."""
+    parts: list[str] = []
+    parts.append('<div class="e-value-verdict">')
+    parts.append("<h2>Hash-Based Filtering</h2>")
+
+    changed = hash_data.get("changed", 0)
+    unchanged = hash_data.get("unchanged", 0)
+    skipped = hash_data.get("skipped", 0)
+    total = changed + unchanged
+
+    parts.append(f"<strong>Total tests:</strong> {total}<br>")
+    parts.append(
+        f"<strong>Changed:</strong> {changed} "
+        f"(target hash differs from last run)<br>"
+    )
+    parts.append(
+        f"<strong>Unchanged:</strong> {unchanged} "
+        f"(target hash matches last run)<br>"
+    )
+    if skipped > 0:
+        parts.append(
+            f"<strong>Skipped:</strong> {skipped} "
+            f"(unchanged + conclusive SPRT, excluded from execution)<br>"
+        )
+
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
 def _render_effort_section(effort_data: dict[str, Any]) -> str:
     """Render effort mode SPRT classification section."""
     parts: list[str] = []
@@ -1437,6 +1471,41 @@ def _render_effort_section(effort_data: dict[str, Any]) -> str:
                 f"<td>{html.escape(sprt)}</td></tr>"
             )
         parts.append("</table>")
+
+    # Burn-in sweep results (if present)
+    burn_in_sweep = effort_data.get("burn_in_sweep")
+    if burn_in_sweep:
+        sweep_total = burn_in_sweep.get("total_runs", 0)
+        decided = burn_in_sweep.get("decided", {})
+        undecided = burn_in_sweep.get("undecided", [])
+
+        parts.append("<br><h3>Burn-in Sweep</h3>")
+        parts.append(
+            f"<strong>Sweep runs:</strong> {sweep_total}<br>"
+        )
+        if decided:
+            parts.append(
+                f"<strong>Decided:</strong> {len(decided)} test(s)<br>"
+            )
+            parts.append('<table class="measurements-table">')
+            parts.append(
+                "<tr><th>Test</th><th>Result</th></tr>"
+            )
+            for test_name, final_state in sorted(decided.items()):
+                tname = html.escape(str(test_name))
+                color = LIFECYCLE_COLORS.get(final_state, "#FFFFFF")
+                label = LIFECYCLE_LABELS.get(final_state, final_state)
+                parts.append(
+                    f"<tr><td>{tname}</td>"
+                    f'<td><span class="lifecycle-badge" '
+                    f'style="background:{color}">{label}</span></td></tr>'
+                )
+            parts.append("</table>")
+        if undecided:
+            parts.append(
+                f"<strong>Still burning in:</strong> "
+                f"{len(undecided)} test(s)<br>"
+            )
 
     parts.append("</div>")
     return "\n".join(parts)
