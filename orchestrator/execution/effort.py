@@ -1,10 +1,16 @@
 """SPRT-based effort rerun engine for converge and max modes.
 
 Provides EffortRunner that reruns tests using the Sequential Probability
-Ratio Test to classify each test as true_pass, true_fail, or flake within
-a single session.  Only session-local run data is used for SPRT evaluation
-(no historic data from previous code states).  All reruns are recorded to
-the status file for persistence.
+Ratio Test to classify each test as true_pass, true_fail, or flake.
+
+When ``target_hashes`` are provided, SPRT evaluation pools evidence from
+prior sessions that share the same target hash.  This enables cross-session
+evidence accumulation: a test that ran 5 times in a previous session and
+10 times now can reach a decision based on all 15 data points, as long as
+the target hash hasn't changed.  When ``target_hashes`` is None, only
+session-local run data is used (backward compatible).
+
+All reruns are recorded to the status file for persistence.
 """
 
 from __future__ import annotations
@@ -91,9 +97,9 @@ class EffortRunner:
     tests, record results, evaluate SPRT, and stop when all target tests
     are classified or the per-test budget is exhausted.
 
-    Only session-local run data is used for SPRT evaluation (no historic
-    data from previous code states).  All reruns are persisted to the
-    status file.
+    When *target_hashes* is provided, SPRT evaluation pools evidence from
+    prior sessions with matching hashes.  When *target_hashes* is ``None``,
+    only session-local run data is used (backward compatible).
     """
 
     def __init__(
@@ -105,6 +111,7 @@ class EffortRunner:
         effort_mode: str = "converge",
         initial_results: list[TestResult] | None = None,
         timeout: float = 300.0,
+        target_hashes: dict[str, str] | None = None,
     ) -> None:
         self.dag = dag
         self.status_file = status_file
@@ -113,6 +120,38 @@ class EffortRunner:
         self.effort_mode = effort_mode
         self.initial_results = initial_results or []
         self.timeout = timeout
+        self.target_hashes = target_hashes
+
+    def _get_target_hash(self, name: str) -> str | None:
+        """Return the target hash for *name*, or ``None`` if not available."""
+        if self.target_hashes is None:
+            return None
+        return self.target_hashes.get(name)
+
+    def _load_prior_evidence(
+        self, name: str,
+    ) -> tuple[int, int]:
+        """Load prior same-hash evidence from the status file.
+
+        When ``target_hashes`` is provided and a hash exists for *name*,
+        queries the status file for history entries recorded with the same
+        hash.  Returns a (runs, passes) tuple representing the prior
+        evidence to seed the SPRT counters.
+
+        Returns:
+            ``(0, 0)`` when ``target_hashes`` is ``None``, the test has no
+            hash, or no prior history exists.
+        """
+        target_hash = self._get_target_hash(name)
+        if target_hash is None:
+            return 0, 0
+
+        from orchestrator.lifecycle.status import runs_and_passes_from_history
+
+        same_hash_history = self.status_file.get_same_hash_history(
+            name, target_hash,
+        )
+        return runs_and_passes_from_history(same_hash_history)
 
     def run(self) -> EffortResult:
         """Execute the SPRT rerun loop.
@@ -120,15 +159,26 @@ class EffortRunner:
         The initial run (phase 1) is already done by the caller.  This
         method handles phase 2: rerunning tests until SPRT classifies them.
 
+        When ``target_hashes`` is provided, SPRT evaluation uses the
+        combined evidence from prior sessions (same-hash history in the
+        status file) plus the current session.  This enables cross-session
+        convergence.
+
         Returns:
             EffortResult with per-test classifications and total reruns.
         """
         min_reliability = self.status_file.min_reliability
         significance = self.status_file.statistical_significance
 
-        # Build session state from initial results
+        # Build session state from initial results.
+        # ``total_runs`` / ``total_passes`` include prior same-hash evidence
+        # (when target_hashes is set) plus the current session data.
+        # ``session_runs`` / ``session_passes`` track only the current
+        # session for reporting purposes.
         session_runs: dict[str, int] = {}
         session_passes: dict[str, int] = {}
+        total_runs: dict[str, int] = {}
+        total_passes: dict[str, int] = {}
         initial_status: dict[str, str] = {}
 
         for r in self.initial_results:
@@ -138,6 +188,11 @@ class EffortRunner:
             session_runs[r.name] = 1
             session_passes[r.name] = 1 if passed else 0
             initial_status[r.name] = r.status
+
+            # Load prior same-hash evidence
+            prior_runs, prior_passes = self._load_prior_evidence(r.name)
+            total_runs[r.name] = prior_runs + 1
+            total_passes[r.name] = prior_passes + (1 if passed else 0)
 
         # Determine targets for SPRT reruns
         if self.effort_mode == "converge":
@@ -152,15 +207,15 @@ class EffortRunner:
         decided: dict[str, EffortClassification] = {}
         for name in list(targets):
             decision = sprt_evaluate(
-                session_runs[name],
-                session_passes[name],
+                total_runs[name],
+                total_passes[name],
                 min_reliability,
                 significance,
             )
             if decision != "continue":
                 decided[name] = _classify(
                     name, initial_status[name], decision,
-                    session_runs[name], session_passes[name],
+                    total_runs[name], total_passes[name],
                 )
                 targets.discard(name)
 
@@ -173,7 +228,7 @@ class EffortRunner:
                 if per_test_reruns[name] >= self.max_reruns:
                     decided[name] = _classify(
                         name, initial_status[name], "continue",
-                        session_runs[name], session_passes[name],
+                        total_runs[name], total_passes[name],
                     )
                     targets.discard(name)
                     continue
@@ -185,21 +240,24 @@ class EffortRunner:
                 passed = result.status == "passed"
                 session_runs[name] += 1
                 session_passes[name] += 1 if passed else 0
+                total_runs[name] += 1
+                total_passes[name] += 1 if passed else 0
 
                 self.status_file.record_run(
-                    name, passed, commit=self.commit_sha
+                    name, passed, commit=self.commit_sha,
+                    target_hash=self._get_target_hash(name),
                 )
 
                 decision = sprt_evaluate(
-                    session_runs[name],
-                    session_passes[name],
+                    total_runs[name],
+                    total_passes[name],
                     min_reliability,
                     significance,
                 )
                 if decision != "continue":
                     decided[name] = _classify(
                         name, initial_status[name], decision,
-                        session_runs[name], session_passes[name],
+                        total_runs[name], total_passes[name],
                     )
                     targets.discard(name)
 
@@ -213,8 +271,8 @@ class EffortRunner:
                     test_name=name,
                     classification="true_pass" if status == "passed" else "true_fail",
                     initial_status=status,
-                    runs=session_runs[name],
-                    passes=session_passes[name],
+                    runs=total_runs[name],
+                    passes=total_passes[name],
                     sprt_decision="not_evaluated",
                 )
 

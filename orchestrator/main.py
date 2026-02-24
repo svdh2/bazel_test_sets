@@ -1112,6 +1112,7 @@ def _run_effort(
         max_reruns=args.max_reruns,
         effort_mode=args.effort,
         initial_results=initial_results,
+        target_hashes=target_hashes or None,
     )
     effort_result = runner.run()
 
