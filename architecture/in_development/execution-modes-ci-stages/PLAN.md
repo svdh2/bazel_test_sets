@@ -6,8 +6,8 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 ## Status Overview
 - **Overall Status**: In Progress
 - **Current Phase**: Phase 3: Lifecycle-Aware Exit Codes
-- **Current Step**: Step 3.1: Lifecycle-Aware Exit Code Function
-- **Completed Steps**: 6 / 16
+- **Current Step**: Step 3.1 Completed -- Ready for Phase 4
+- **Completed Steps**: 7 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -823,17 +823,17 @@ Expected: Exit code 0
 ---
 
 ### Phase 3: Lifecycle-Aware Exit Codes
-**Phase Status**: Not Started
+**Phase Status**: Completed
 
 This phase implements the exit code logic that accounts for test lifecycle state (flaky/new/burning_in are non-blocking) and session classification. This is a prerequisite for both mini-converge and the flaky resolution workflow.
 
 ---
 
 #### Step 3.1: Lifecycle-Aware Exit Code Function
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: 592745d
 
 **Objective**: Implement a function that determines the exit code based on the combination of test lifecycle state (from status file) and session classification (from SPRT/mini-converge). This function encodes the full lifecycle x classification matrix from the design document.
 
@@ -920,6 +920,18 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 1.2 (StatusFile refactored)
 
 **Implementation Notes**:
+- Created `orchestrator/execution/exit_code.py` with two public functions and one dataclass
+- `classify_test_blocking(classification, lifecycle_state, stage_mode)` determines if a single test should block (exit 1)
+- `compute_exit_code(classifications, status_file, mode)` aggregates blocking decisions across all classified tests, returns `ExitCodeSummary` with exit code, blocking/non-blocking test lists, and warnings
+- Regression mode: lifecycle-aware -- only stable + true_fail/undecided blocks; flaky/burning_in/new/disabled are non-blocking regardless of classification
+- Converge/max modes: no lifecycle awareness -- true_fail/flake/undecided all block regardless of state
+- Stable + flake in regression mode emits a warning (non-blocking but noteworthy)
+- Tests not in the status file default to `stable` lifecycle state
+- Uses frozensets for constant-time lookups: `_NON_BLOCKING_STATES`, `_REGRESSION_BLOCKING_CLASSIFICATIONS`, `_CONVERGE_BLOCKING_CLASSIFICATIONS`, `_LIFECYCLE_AWARE_MODES`
+- ~116 tests across 14 test classes covering every cell of the lifecycle x classification matrix
+- Exhaustive parametrized matrix tests for regression (20 combos), converge (20 combos), max (20 combos) modes
+- Edge cases: empty classifications, missing status file, mixed blocking/non-blocking
+- All 1053 pytest tests pass, 9/9 Bazel tests pass, mypy clean
 
 ---
 
@@ -1731,6 +1743,8 @@ All tests run via `./ci test` inside the Docker container. Type checks run via `
 Track major milestones and decisions during implementation:
 
 ### 2026-02-24
+- Step 3.1 completed: Lifecycle-aware exit code function -- classify_test_blocking + compute_exit_code with exhaustive matrix tests (commit 592745d)
+- Phase 3 (Lifecycle-Aware Exit Codes) completed
 - Step 2.3 completed: Hash-based filtering in orchestrator -- _compute_and_filter_hashes integrated into regression and effort paths (commit fe063c5)
 - Phase 2 (Hash-Based Filtering) completed
 - Step 2.2 completed: StatusFile target hash storage -- per-test and per-history-entry hash tracking with evidence invalidation and same-hash filtering (commit 6ea001c)
