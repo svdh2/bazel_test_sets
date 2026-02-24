@@ -6,8 +6,8 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 ## Status Overview
 - **Overall Status**: In Progress
 - **Current Phase**: Phase 2: Hash-Based Filtering
-- **Current Step**: Step 2.2: StatusFile Target Hash Storage
-- **Completed Steps**: 4 / 16
+- **Current Step**: Step 2.3: Hash-Based Filtering in Orchestrator
+- **Completed Steps**: 5 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -596,10 +596,10 @@ Expected: Exit code 0
 ---
 
 #### Step 2.2: StatusFile Target Hash Storage
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: 6ea001c
 
 **Objective**: Extend `StatusFile` to store a `target_hash` field per test entry and implement hash-change detection with SPRT evidence invalidation.
 
@@ -725,6 +725,16 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 1.2 (StatusFile no longer depends on TestSetConfig) and Step 2.1 (spike validates approach)
 
 **Implementation Notes**:
+- Added 4 new methods to StatusFile: `get_target_hash()`, `set_target_hash()`, `invalidate_evidence()`, `get_same_hash_history()`
+- `get_target_hash()` / `set_target_hash()`: store/retrieve per-test `target_hash` field alongside `state`, `history`, `last_updated`
+- `invalidate_evidence()`: clears history, transitions state to `burning_in`, updates `last_updated`, preserves `target_hash` field
+- `get_same_hash_history()`: filters history entries to only those with matching `target_hash`; entries without hash are excluded
+- Modified `record_run()` to accept optional keyword-only `target_hash` parameter; when provided, stored in history entry
+- Modified `set_test_state()` to preserve `target_hash` field from existing entry when creating new entry dict
+- Backward compatible: old status files without `target_hash` load without error; `get_target_hash()` returns None
+- History entries without `target_hash` are excluded by `get_same_hash_history()` (conservative -- no false pooling)
+- 31 new tests added across 4 test classes (TestStatusFileTargetHash, TestStatusFileInvalidateEvidence, TestStatusFileSameHashHistory, TestStatusFileRecordRunWithHash)
+- All 925 pytest tests pass, 9/9 Bazel tests pass, mypy clean
 
 ---
 
@@ -1711,6 +1721,7 @@ All tests run via `./ci test` inside the Docker container. Type checks run via `
 Track major milestones and decisions during implementation:
 
 ### 2026-02-24
+- Step 2.2 completed: StatusFile target hash storage -- per-test and per-history-entry hash tracking with evidence invalidation and same-hash filtering (commit 6ea001c)
 - Step 2.1 completed: Target hash computation spike -- standalone module using `bazel aquery --output=jsonproto` with 35 unit tests (commit 3615423)
 
 ### 2026-02-23
