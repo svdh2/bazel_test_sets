@@ -4,10 +4,10 @@
 This implementation plan is based on: [architecture/in_development/execution-modes-ci-stages/DESIGN.md](DESIGN.md)
 
 ## Status Overview
-- **Overall Status**: In Progress
-- **Current Phase**: Phase 7: Reporting & Documentation
-- **Current Step**: Step 7.2: Architecture Documentation and CI Stage Documentation
-- **Completed Steps**: 15 / 16
+- **Overall Status**: Completed
+- **Current Phase**: All phases complete
+- **Current Step**: All steps complete
+- **Completed Steps**: 16 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -1581,7 +1581,7 @@ Expected: Exit code 0
 ---
 
 ### Phase 7: Reporting & Documentation
-**Phase Status**: In Progress
+**Phase Status**: Completed
 
 This phase adds mini-converge and burn-in data to reports, and updates all architecture documentation.
 
@@ -1681,10 +1681,10 @@ Expected: Exit code 0
 ---
 
 #### Step 7.2: Architecture Documentation and CI Stage Documentation
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: 7124baf
 
 **Objective**: Update all architecture documents in `architecture/current/` to reflect the implemented changes and add CI stage guidance documentation.
 
@@ -1768,6 +1768,18 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 7.1 (all implementation complete before final docs)
 
 **Implementation Notes**:
+- Created `architecture/current/components/ci-gate-rule.md` documenting the ci_gate Starlark rule (macro, generated runner script, example usage, design decisions)
+- Updated `orchestrator-main.md`: full CLI argument table with all new flags, hash computation and filtering section, multi-phase execution section for regression and effort modes, lifecycle-aware exit codes section, removed all TestSetConfig/--config-file references, added target hash and burn-in dependencies
+- Updated `effort.md`: documented cross-session evidence pooling via target_hashes, _load_prior_evidence, mini-converge pattern reuse
+- Removed `test-set-config.md` (replaced by ci_gate CLI flags)
+- Updated `status-file.md`: documented target_hash per-entry and per-history fields, get_same_hash_history, set_target_hash, invalidate_evidence, record_run target_hash param, direct constructor parameters
+- Updated `burnin.md`: documented check_flaky_deadlines, target_hashes on BurnInSweep, cross-session evidence pooling, flaky->disabled transition in state diagram
+- Updated `effort-execution.md`: added hash-based filtering phase 0, burn-in sweep phase 3, cross-session evidence pooling section, updated data flow diagram
+- Updated `regression-selection.md`: added hash computation step 1, hash intersection step 6, burn-in inclusion step 7, mini-converge step 10, updated data flow
+- Updated `README.md`: added ci_gate rule to Component Index, removed Test Set Config, updated component descriptions, updated Git Sync hash
+- Created `docs/ci-stages.md`: comprehensive CI stage guidance with PR gate, merge gate, post-merge, release gate configurations, hash-based filtering explanation, flake handling progression table, flaky test resolution workflow, SPRT parameters table, full pipeline example
+- Updated `docs/execution-modes.md`: removed .test_set_config references, added CI stage integration section with link to ci-stages.md
+- All 1121 pytest tests pass, 9/9 Bazel tests pass
 
 ---
 
@@ -1806,6 +1818,9 @@ All tests run via `./ci test` inside the Docker container. Type checks run via `
 Track major milestones and decisions during implementation:
 
 ### 2026-02-24
+- **Implementation plan COMPLETED** -- all 16/16 steps across 7 phases done
+- Step 7.2 completed: Architecture documentation and CI stage guidance -- updated all component docs, flow docs, README; created ci-gate-rule.md and docs/ci-stages.md; removed test-set-config.md (commit 7124baf)
+- Phase 7 (Reporting & Documentation) completed
 - Step 7.1 completed: Report enhancements -- hash filter summary, burn-in sweep data in effort reports, backward compatible (commit 82da4c7)
 - Step 6.2 completed: Flaky-to-burning_in re-promotion -- deflake clears target_hash for fresh hash tracking, verified full lifecycle workflow (commit 8c3ac7b)
 - Phase 6 (Flaky Lifecycle & Deadline) completed
