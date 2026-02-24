@@ -6,8 +6,8 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 ## Status Overview
 - **Overall Status**: In Progress
 - **Current Phase**: Phase 2: Hash-Based Filtering
-- **Current Step**: Step 2.1: Target Hash Computation Spike
-- **Completed Steps**: 3 / 16
+- **Current Step**: Step 2.2: StatusFile Target Hash Storage
+- **Completed Steps**: 4 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -516,17 +516,17 @@ Expected: Exit code 0
 ---
 
 ### Phase 2: Hash-Based Filtering
-**Phase Status**: Not Started
+**Phase Status**: In Progress
 
 This phase implements target hash computation via `bazel aquery`, stores hashes in the status file, and adds hash-based filtering to the orchestrator. This is a risky area due to the external dependency on `bazel aquery` performance and output format.
 
 ---
 
 #### Step 2.1: Target Hash Computation Spike
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: 3615423
 
 **Objective**: Validate that `bazel aquery` can reliably compute target hashes for all tests in a DAG with acceptable performance. This is a risk-validation spike -- if `bazel aquery` is too slow or unreliable, the hash-based filtering approach needs to be reconsidered.
 
@@ -583,6 +583,15 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 1.1 to be completed (CLI flags include `--skip-unchanged`)
 
 **Implementation Notes**:
+- Created `orchestrator/execution/target_hash.py` with three functions: `_run_aquery()`, `_extract_hashes_from_aquery()`, `compute_target_hashes()`
+- Uses `bazel aquery --output=jsonproto` for structured JSON output parsing
+- Batch queries all test labels in a single aquery invocation using union syntax (`label1 + label2 + ...`)
+- Per-target composite hash computed from sorted action digests via SHA-256 truncated to 16 hex chars
+- Comprehensive error handling: FileNotFoundError (bazel not found), TimeoutExpired, non-zero exit codes, invalid JSON, empty output
+- All errors return empty dict (graceful degradation) with stderr warnings
+- 35 unit tests with fully mocked subprocess output covering hash extraction, aquery execution, and end-to-end integration
+- Decision: `bazel aquery --output=jsonproto` is the chosen approach -- provides structured action digests that capture the full transitive closure of inputs
+- Performance: not yet measured against real workspace (standalone module, no integration yet). The timeout parameter (default 60s) provides a safety valve for cold-cache scenarios
 
 ---
 
@@ -1700,6 +1709,9 @@ All tests run via `./ci test` inside the Docker container. Type checks run via `
 
 ## Implementation Log
 Track major milestones and decisions during implementation:
+
+### 2026-02-24
+- Step 2.1 completed: Target hash computation spike -- standalone module using `bazel aquery --output=jsonproto` with 35 unit tests (commit 3615423)
 
 ### 2026-02-23
 - Implementation plan created
