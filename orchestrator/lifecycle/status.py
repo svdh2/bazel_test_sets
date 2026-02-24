@@ -1,7 +1,8 @@
 """State file management for the burn-in lifecycle.
 
 Reads and writes the .tests/status JSON file that tracks test maturity
-states. Configuration is managed separately by TestSetConfig.
+states. Statistical parameters (min_reliability, statistical_significance)
+are passed directly to the StatusFile constructor.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from orchestrator.lifecycle.config import DEFAULT_CONFIG, TestSetConfig
+from orchestrator.lifecycle.config import DEFAULT_CONFIG
 
 
 # Valid burn-in states
@@ -41,15 +42,28 @@ class StatusFile:
     """Manages the .tests/status JSON state file.
 
     The state file tracks per-test state (state, history, last_updated).
-    Configuration is delegated to a TestSetConfig instance.
+    Statistical parameters are stored directly as instance attributes.
     """
 
     def __init__(
-        self, path: str | Path, config_path: Path | None = None
+        self,
+        path: str | Path,
+        *,
+        min_reliability: float | None = None,
+        statistical_significance: float | None = None,
     ) -> None:
         self.path = Path(path)
         self._data: dict[str, Any] = {"tests": {}}
-        self._config = TestSetConfig(config_path)
+        self._min_reliability = (
+            min_reliability
+            if min_reliability is not None
+            else DEFAULT_CONFIG["min_reliability"]
+        )
+        self._statistical_significance = (
+            statistical_significance
+            if statistical_significance is not None
+            else DEFAULT_CONFIG["statistical_significance"]
+        )
         if self.path.exists():
             self._load()
 
@@ -75,60 +89,30 @@ class StatusFile:
             f.write("\n")
 
     @property
-    def config(self) -> dict[str, Any]:
-        """Get the configuration section."""
-        return self._config.config
-
-    @property
     def min_reliability(self) -> float:
         """Get the minimum reliability threshold."""
-        return self._config.min_reliability
+        return self._min_reliability
 
     @property
     def statistical_significance(self) -> float:
         """Get the statistical significance level."""
-        return self._config.statistical_significance
-
-    @property
-    def max_test_percentage(self) -> float:
-        """Get the max fraction of stable tests for regression selection."""
-        return self._config.max_test_percentage
-
-    @property
-    def max_hops(self) -> int:
-        """Get the max BFS hops for co-occurrence expansion."""
-        return self._config.max_hops
-
-    @property
-    def max_reruns(self) -> int:
-        """Get the max SPRT reruns per test."""
-        return self._config.max_reruns
-
-    @property
-    def max_failures(self) -> int | None:
-        """Get the max failures threshold (None = unlimited)."""
-        return self._config.max_failures
-
-    @property
-    def max_parallel(self) -> int | None:
-        """Get the max parallel test executions (None = CPU count)."""
-        return self._config.max_parallel
+        return self._statistical_significance
 
     def set_config(
         self,
         min_reliability: float | None = None,
         statistical_significance: float | None = None,
     ) -> None:
-        """Update configuration values.
+        """Update statistical parameters in memory.
 
         Args:
             min_reliability: New minimum reliability threshold.
             statistical_significance: New significance level.
         """
-        self._config.set_config(
-            min_reliability=min_reliability,
-            statistical_significance=statistical_significance,
-        )
+        if min_reliability is not None:
+            self._min_reliability = min_reliability
+        if statistical_significance is not None:
+            self._statistical_significance = statistical_significance
 
     def get_test_state(self, test_name: str) -> str | None:
         """Get the burn-in state of a test.

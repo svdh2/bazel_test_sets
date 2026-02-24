@@ -13,12 +13,10 @@ import pytest
 
 from orchestrator.analysis.measurements import store_measurements
 from orchestrator.lifecycle.status import StatusFile
-from orchestrator.lifecycle.config import TestSetConfig
 from orchestrator.main import (
     _filter_manifest,
     _get_changed_files,
     _resolve_git_context,
-    _resolve_params,
     cmd_build_graph,
     cmd_burn_in,
     cmd_deflake,
@@ -311,108 +309,6 @@ class TestParseArgsCiGateFlags:
         assert args.min_reliability == 0.999
         assert args.statistical_significance == 0.90
         assert args.flaky_deadline_days == 7
-
-
-class TestResolveParams:
-    """Tests for _resolve_params merging CLI flags with config values."""
-
-    def test_cli_defaults_fall_through_to_config(self):
-        """When CLI uses defaults, config values are used."""
-        args = parse_args(["--manifest", "/path/manifest.json"])
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / ".test_set_config"
-            config_path.write_text(json.dumps({
-                "max_reruns": 200,
-                "max_test_percentage": 0.25,
-                "max_hops": 3,
-                "min_reliability": 0.999,
-                "statistical_significance": 0.90,
-                "max_failures": 5,
-                "max_parallel": 8,
-                "status_file": ".tests/status",
-            }))
-            config = TestSetConfig(config_path)
-
-            params = _resolve_params(args, config)
-            assert params.max_reruns == 200
-            assert params.max_test_percentage == 0.25
-            assert params.max_hops == 3
-            assert params.min_reliability == 0.999
-            assert params.statistical_significance == 0.90
-            assert params.max_failures == 5
-            assert params.max_parallel == 8
-            assert params.status_file == Path(".tests/status")
-
-    def test_cli_overrides_config(self):
-        """When CLI provides non-default values, they override config."""
-        args = parse_args([
-            "--manifest", "/path/manifest.json",
-            "--max-reruns", "5",
-            "--min-reliability", "0.95",
-            "--no-skip-unchanged",
-        ])
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / ".test_set_config"
-            config_path.write_text(json.dumps({
-                "max_reruns": 200,
-                "min_reliability": 0.999,
-            }))
-            config = TestSetConfig(config_path)
-
-            params = _resolve_params(args, config)
-            assert params.max_reruns == 5  # CLI overrides
-            assert params.min_reliability == 0.95  # CLI overrides
-            assert params.skip_unchanged is False  # CLI overrides
-
-    def test_no_config_uses_cli_defaults(self):
-        """When no config file exists, CLI defaults are used."""
-        args = parse_args(["--manifest", "/path/manifest.json"])
-        config = TestSetConfig(None)
-
-        params = _resolve_params(args, config)
-        assert params.max_reruns == 100
-        assert params.max_test_percentage == 0.10
-        assert params.max_hops == 2
-        assert params.min_reliability == 0.99
-        assert params.statistical_significance == 0.95
-        assert params.max_failures is None
-        assert params.max_parallel is None
-        assert params.status_file is None
-        assert params.skip_unchanged is True
-        assert params.flaky_deadline_days == 14
-
-    def test_cli_optional_params_override_config(self):
-        """CLI optional params (None by default) override config when set."""
-        args = parse_args([
-            "--manifest", "/path/manifest.json",
-            "--max-failures", "10",
-            "--max-parallel", "4",
-            "--status-file", "/custom/status",
-        ])
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / ".test_set_config"
-            config_path.write_text(json.dumps({
-                "max_failures": 5,
-                "max_parallel": 8,
-                "status_file": ".tests/status",
-            }))
-            config = TestSetConfig(config_path)
-
-            params = _resolve_params(args, config)
-            assert params.max_failures == 10  # CLI overrides
-            assert params.max_parallel == 4  # CLI overrides
-            assert params.status_file == Path("/custom/status")  # CLI overrides
-
-    def test_flaky_deadline_days_always_from_cli(self):
-        """flaky_deadline_days has no config equivalent, always from CLI."""
-        args = parse_args([
-            "--manifest", "/path/manifest.json",
-            "--flaky-deadline-days", "7",
-        ])
-        config = TestSetConfig(None)
-
-        params = _resolve_params(args, config)
-        assert params.flaky_deadline_days == 7
 
 
 class TestParseArgsSubcommands:
@@ -1116,10 +1012,6 @@ class TestEffortRegressionEndToEnd:
                 },
             }))
 
-            # Create config with max_parallel=1
-            config_path = Path(tmpdir) / ".test_set_config"
-            config_path.write_text(json.dumps({"max_parallel": 1}))
-
             # Create co-occurrence graph
             from datetime import datetime, timezone
             ts = datetime.now(timezone.utc).isoformat()
@@ -1152,7 +1044,7 @@ class TestEffortRegressionEndToEnd:
                 "--effort", "regression",
                 "--changed-files", "src/auth.py",
                 "--co-occurrence-graph", str(graph_path),
-                "--config-file", str(config_path),
+                "--max-parallel", "1",
             ])
             assert exit_code == 0
 
@@ -1178,10 +1070,6 @@ class TestEffortRegressionEndToEnd:
                     },
                 },
             }))
-
-            # Create config with max_parallel=1
-            config_path = Path(tmpdir) / ".test_set_config"
-            config_path.write_text(json.dumps({"max_parallel": 1}))
 
             # Create co-occurrence graph
             from datetime import datetime, timezone
@@ -1215,7 +1103,7 @@ class TestEffortRegressionEndToEnd:
                 "--effort", "regression",
                 "--changed-files", "src/auth.py",
                 "--co-occurrence-graph", str(graph_path),
-                "--config-file", str(config_path),
+                "--max-parallel", "1",
             ])
             assert exit_code == 0
 
@@ -1250,7 +1138,7 @@ class TestEffortConvergeRequiresStatusFile:
     """Tests for effort converge/max validation."""
 
     def test_converge_requires_status_file(self):
-        """--effort converge without status_file in config returns error."""
+        """--effort converge without --status-file returns error."""
         from orchestrator.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1267,7 +1155,7 @@ class TestEffortConvergeRequiresStatusFile:
             assert exit_code == 1
 
     def test_max_requires_status_file(self):
-        """--effort max without status_file in config returns error."""
+        """--effort max without --status-file returns error."""
         from orchestrator.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -421,8 +421,8 @@ def _make_status_file(
     """Create a StatusFile with optional config overrides."""
     from orchestrator.lifecycle.status import StatusFile
 
-    sf = StatusFile(path)
-    sf.set_config(
+    sf = StatusFile(
+        path,
         min_reliability=min_reliability,
         statistical_significance=significance,
     )

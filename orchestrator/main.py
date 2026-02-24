@@ -19,7 +19,6 @@ from typing import Any
 
 from orchestrator.execution.dag import TestDAG
 from orchestrator.execution.executor import AsyncExecutor, SequentialExecutor
-from orchestrator.lifecycle.config import TestSetConfig
 from orchestrator.lifecycle.status import StatusFile, runs_and_passes_from_history
 from orchestrator.reporting.html_reporter import write_html_report
 from orchestrator.reporting.reporter import Reporter
@@ -55,12 +54,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=None,
         help="Path to write the JSON report file",
-    )
-    parser.add_argument(
-        "--config-file",
-        type=Path,
-        default=None,
-        help="Path to the .test_set_config JSON file",
     )
     parser.add_argument(
         "--allow-dirty",
@@ -280,76 +273,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
 
     return parser.parse_args(argv)
-
-
-def _resolve_params(
-    args: argparse.Namespace, config: TestSetConfig
-) -> argparse.Namespace:
-    """Merge CLI flags with config file values (CLI takes precedence).
-
-    Creates a unified params namespace that checks CLI args first, then
-    falls back to config values. This enables backward compatibility during
-    the transition period from .test_set_config to ci_gate attributes.
-
-    Args:
-        args: Parsed CLI arguments.
-        config: Loaded test set configuration.
-
-    Returns:
-        A namespace with all parameters resolved (CLI overrides config).
-    """
-    # For each parameter, CLI value wins if it differs from the argparse
-    # default.  We detect "was explicitly passed" by comparing against the
-    # parser defaults.  For simplicity we always use CLI values when they
-    # are non-None (for optional params) or differ from the hardcoded
-    # argparse defaults (for required-default params).
-
-    params = argparse.Namespace()
-
-    # Integer / float params with defaults in both CLI and config
-    params.max_reruns = (
-        args.max_reruns if args.max_reruns != 100 else config.max_reruns
-    )
-    params.max_test_percentage = (
-        args.max_test_percentage
-        if args.max_test_percentage != 0.10
-        else config.max_test_percentage
-    )
-    params.max_hops = (
-        args.max_hops if args.max_hops != 2 else config.max_hops
-    )
-    params.min_reliability = (
-        args.min_reliability
-        if args.min_reliability != 0.99
-        else config.min_reliability
-    )
-    params.statistical_significance = (
-        args.statistical_significance
-        if args.statistical_significance != 0.95
-        else config.statistical_significance
-    )
-
-    # Optional params (None means "not set")
-    params.max_failures = (
-        args.max_failures if args.max_failures is not None
-        else config.max_failures
-    )
-    params.max_parallel = (
-        args.max_parallel if args.max_parallel is not None
-        else config.max_parallel
-    )
-    params.status_file = (
-        args.status_file if args.status_file is not None
-        else config.status_file
-    )
-
-    # Bool param -- CLI explicit override only via --no-skip-unchanged
-    params.skip_unchanged = args.skip_unchanged
-
-    # New param with no config-file equivalent
-    params.flaky_deadline_days = args.flaky_deadline_days
-
-    return params
 
 
 # --- Lifecycle subcommand handlers ---
@@ -763,9 +686,6 @@ def _resolve_git_context(allow_dirty: bool) -> str | None:
 
 def _run_orchestrator(args: argparse.Namespace) -> int:
     """Run the orchestrator test execution path (default, no subcommand)."""
-    # Load config (used for execution tuning parameters)
-    config = TestSetConfig(args.config_file)
-
     # Load manifest
     try:
         manifest = json.loads(args.manifest.read_text())
@@ -785,17 +705,21 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
 
     # Resolve git context when status file tracking is enabled
     commit_sha: str | None = None
-    if config.status_file:
+    if args.status_file:
         commit_sha = _resolve_git_context(args.allow_dirty)
     elif args.output:
         # Best-effort: tag report history with commit SHA without enforcing clean tree
         commit_sha = _resolve_git_context(allow_dirty=True)
 
     # Sync disabled state from manifest and remove disabled tests from DAG
-    if config.status_file:
+    if args.status_file:
         from orchestrator.lifecycle.burnin import sync_disabled_state
 
-        sf = StatusFile(config.status_file, config_path=config.path)
+        sf = StatusFile(
+            args.status_file,
+            min_reliability=args.min_reliability,
+            statistical_significance=args.statistical_significance,
+        )
         sync_events = sync_disabled_state(dag, sf)
         if sync_events:
             print("Disabled state sync:")
@@ -810,24 +734,24 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
 
     # Dispatch based on effort mode
     if args.effort == "regression":
-        return _run_regression(args, config, manifest, dag, commit_sha)
+        return _run_regression(args, manifest, dag, commit_sha)
     elif args.effort in ("converge", "max"):
-        return _run_effort(args, config, manifest, dag, commit_sha)
+        return _run_effort(args, manifest, dag, commit_sha)
 
     # Default: run all tests once, no verdict
     executor: SequentialExecutor | AsyncExecutor
-    if config.max_parallel == 1:
+    if args.max_parallel == 1:
         executor = SequentialExecutor(
             dag,
             mode=args.mode,
-            max_failures=config.max_failures,
+            max_failures=args.max_failures,
         )
     else:
         executor = AsyncExecutor(
             dag,
             mode=args.mode,
-            max_failures=config.max_failures,
-            max_parallel=config.max_parallel,
+            max_failures=args.max_failures,
+            max_parallel=args.max_parallel,
         )
 
     try:
@@ -836,15 +760,14 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
         print(f"Error during execution: {e}", file=sys.stderr)
         return 1
 
-    _update_status_file(results, config, commit_sha)
-    demoted = _print_results(results, args, config, commit_sha, manifest)
+    _update_status_file(results, args, commit_sha)
+    demoted = _print_results(results, args, commit_sha, manifest)
     has_failure = any(r.status == "failed" for r in results)
     return 1 if (has_failure or demoted) else 0
 
 
 def _run_regression(
     args: argparse.Namespace,
-    config: TestSetConfig,
     manifest: dict,
     dag: TestDAG,
     commit_sha: str | None = None,
@@ -853,7 +776,6 @@ def _run_regression(
 
     Args:
         args: Parsed CLI arguments.
-        config: Loaded test set configuration.
         manifest: Parsed manifest dict.
         dag: Constructed test DAG.
         commit_sha: Resolved git commit SHA (or None).
@@ -901,8 +823,8 @@ def _run_regression(
 
     # Configure and run regression selection
     regression_config = RegressionConfig(
-        max_test_percentage=config.max_test_percentage,
-        max_hops=config.max_hops,
+        max_test_percentage=args.max_test_percentage,
+        max_hops=args.max_hops,
     )
 
     selection = select_regression_tests(
@@ -934,18 +856,18 @@ def _run_regression(
 
     # Execute in the chosen mode (diagnostic or detection)
     executor: SequentialExecutor | AsyncExecutor
-    if config.max_parallel == 1:
+    if args.max_parallel == 1:
         executor = SequentialExecutor(
             filtered_dag,
             mode=args.mode,
-            max_failures=config.max_failures,
+            max_failures=args.max_failures,
         )
     else:
         executor = AsyncExecutor(
             filtered_dag,
             mode=args.mode,
-            max_failures=config.max_failures,
-            max_parallel=config.max_parallel,
+            max_failures=args.max_failures,
+            max_parallel=args.max_parallel,
         )
 
     try:
@@ -954,10 +876,10 @@ def _run_regression(
         print(f"Error during execution: {e}", file=sys.stderr)
         return 1
 
-    _update_status_file(results, config, commit_sha)
-    verdict_data = _compute_verdict(args, config, filtered_dag, commit_sha)
+    _update_status_file(results, args, commit_sha)
+    verdict_data = _compute_verdict(args, filtered_dag, commit_sha)
     demoted = _print_results(
-        results, args, config, commit_sha, manifest, verdict_data,
+        results, args, commit_sha, manifest, verdict_data,
     )
     has_failure = any(r.status == "failed" for r in results)
     return 1 if (has_failure or demoted) else 0
@@ -965,7 +887,6 @@ def _run_regression(
 
 def _run_effort(
     args: argparse.Namespace,
-    config: TestSetConfig,
     manifest: dict,
     dag: TestDAG,
     commit_sha: str | None = None,
@@ -974,7 +895,6 @@ def _run_effort(
 
     Args:
         args: Parsed CLI arguments.
-        config: Loaded test set configuration.
         manifest: Parsed manifest dict.
         dag: Constructed test DAG.
         commit_sha: Resolved git commit SHA (or None).
@@ -984,9 +904,9 @@ def _run_effort(
     """
     from orchestrator.execution.effort import EffortRunner
 
-    if not config.status_file:
+    if not args.status_file:
         print(
-            "Error: --effort converge/max requires status_file in .test_set_config",
+            "Error: --effort converge/max requires --status-file",
             file=sys.stderr,
         )
         return 1
@@ -1000,22 +920,26 @@ def _run_effort(
             )
             return 1
 
-    sf = StatusFile(config.status_file, config_path=config.path)
+    sf = StatusFile(
+        args.status_file,
+        min_reliability=args.min_reliability,
+        statistical_significance=args.statistical_significance,
+    )
 
     # Phase 1: Execute all tests once
     executor: SequentialExecutor | AsyncExecutor
-    if config.max_parallel == 1:
+    if args.max_parallel == 1:
         executor = SequentialExecutor(
             dag,
             mode=args.mode,
-            max_failures=config.max_failures,
+            max_failures=args.max_failures,
         )
     else:
         executor = AsyncExecutor(
             dag,
             mode=args.mode,
-            max_failures=config.max_failures,
-            max_parallel=config.max_parallel,
+            max_failures=args.max_failures,
+            max_parallel=args.max_parallel,
         )
 
     try:
@@ -1037,18 +961,18 @@ def _run_effort(
         dag=dag,
         status_file=sf,
         commit_sha=commit_sha,
-        max_reruns=config.max_reruns,
+        max_reruns=args.max_reruns,
         effort_mode=args.effort,
         initial_results=initial_results,
     )
     effort_result = runner.run()
 
     # Phase 3: Verdict
-    verdict_data = _compute_verdict(args, config, dag, commit_sha)
+    verdict_data = _compute_verdict(args, dag, commit_sha)
 
     # Phase 4: Print results
     _print_effort_results(
-        initial_results, effort_result, args, config, commit_sha, manifest,
+        initial_results, effort_result, args, commit_sha, manifest,
         verdict_data,
     )
 
@@ -1095,7 +1019,6 @@ def _filter_manifest(
 
 def _compute_verdict(
     args: argparse.Namespace,
-    config: TestSetConfig,
     dag: TestDAG,
     commit_sha: str | None,
 ) -> dict[str, Any] | None:
@@ -1109,7 +1032,7 @@ def _compute_verdict(
     Returns:
         Verdict dict for the reporter, or None if disabled.
     """
-    if args.effort is None or not config.status_file:
+    if args.effort is None or not args.status_file:
         return None
 
     from orchestrator.lifecycle.e_values import (
@@ -1118,7 +1041,11 @@ def _compute_verdict(
         verdict_to_dict,
     )
 
-    sf = StatusFile(config.status_file, config_path=config.path)
+    sf = StatusFile(
+        args.status_file,
+        min_reliability=args.min_reliability,
+        statistical_significance=args.statistical_significance,
+    )
     test_names = list(dag.nodes.keys())
 
     alpha_set = 0.05
@@ -1143,7 +1070,7 @@ def _compute_verdict(
             commit_sha=commit_sha,
             alpha_set=alpha_set,
             beta_set=beta_set,
-            max_reruns=config.max_reruns,
+            max_reruns=args.max_reruns,
         )
         hifi_result = evaluator.evaluate(test_names)
         verdict_data = verdict_to_dict(hifi_result.verdict)
@@ -1165,15 +1092,19 @@ def _compute_verdict(
 
 
 def _update_status_file(
-    results: list, config: TestSetConfig, commit_sha: str | None
+    results: list, args: argparse.Namespace, commit_sha: str | None
 ) -> None:
     """Update the status file with test results if status_file is configured."""
-    if not config.status_file:
+    if not args.status_file:
         return
 
     from orchestrator.lifecycle.burnin import process_results
 
-    sf = StatusFile(config.status_file, config_path=config.path)
+    sf = StatusFile(
+        args.status_file,
+        min_reliability=args.min_reliability,
+        statistical_significance=args.statistical_significance,
+    )
     events = process_results(results, sf, commit_sha=commit_sha)
     if events:
         print("\nLifecycle events:")
@@ -1209,7 +1140,6 @@ def _discover_and_merge(manifest: dict) -> dict:
 
 def _print_results(
     results: list, args: argparse.Namespace,
-    config: TestSetConfig,
     commit_sha: str | None = None,
     manifest: dict | None = None,
     verdict_data: dict[str, Any] | None = None,
@@ -1264,8 +1194,12 @@ def _print_results(
             reporter.set_e_value_verdict(verdict_data)
 
         # Feed lifecycle data from status file to reporter
-        if config.status_file and config.status_file.exists():
-            sf = StatusFile(config.status_file, config_path=config.path)
+        if args.status_file and args.status_file.exists():
+            sf = StatusFile(
+                args.status_file,
+                min_reliability=args.min_reliability,
+                statistical_significance=args.statistical_significance,
+            )
             lifecycle_data: dict[str, dict[str, Any]] = {}
             for test_name, entry in sf.get_all_tests().items():
                 lifecycle_data[test_name] = {
@@ -1304,7 +1238,6 @@ def _print_effort_results(
     initial_results: list,
     effort_result: Any,
     args: argparse.Namespace,
-    config: TestSetConfig,
     commit_sha: str | None = None,
     manifest: dict | None = None,
     verdict_data: dict[str, Any] | None = None,
@@ -1375,7 +1308,7 @@ def _print_effort_results(
         parts.append(f"{skipped} skipped")
     print(f"Results: {', '.join(parts)}")
     print(f"Total reruns: {effort_result.total_reruns} "
-          f"(budget: {config.max_reruns} per test)")
+          f"(budget: {args.max_reruns} per test)")
 
     # Generate reports
     if args.output:
@@ -1399,7 +1332,7 @@ def _print_effort_results(
         effort_data = {
             "mode": args.effort,
             "total_reruns": effort_result.total_reruns,
-            "max_reruns_per_test": config.max_reruns,
+            "max_reruns_per_test": args.max_reruns,
             "classifications": {
                 name: {
                     "classification": c.classification,
@@ -1413,8 +1346,12 @@ def _print_effort_results(
         }
         reporter.set_effort_data(effort_data)
 
-        if config.status_file and config.status_file.exists():
-            sf = StatusFile(config.status_file, config_path=config.path)
+        if args.status_file and args.status_file.exists():
+            sf = StatusFile(
+                args.status_file,
+                min_reliability=args.min_reliability,
+                statistical_significance=args.statistical_significance,
+            )
             lifecycle_data: dict[str, dict[str, Any]] = {}
             for test_name, entry in sf.get_all_tests().items():
                 lifecycle_data[test_name] = {

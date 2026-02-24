@@ -108,24 +108,23 @@ class TestStatusFileReadWrite:
 
 
 class TestStatusFileConfig:
-    """Tests for configuration management via TestSetConfig."""
+    """Tests for statistical parameter configuration."""
 
     def test_default_config(self):
-        """Default config matches expected values when no config file exists."""
+        """Default config matches expected values when no params passed."""
         with tempfile.TemporaryDirectory() as tmpdir:
             sf = StatusFile(Path(tmpdir) / "status.json")
             assert sf.min_reliability == 0.99
             assert sf.statistical_significance == 0.95
 
-    def test_config_from_file(self):
-        """Config is read from a .test_set_config file."""
+    def test_explicit_params(self):
+        """Statistical params can be passed directly to constructor."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / ".test_set_config"
-            config_path.write_text(json.dumps({
-                "min_reliability": 0.95,
-                "statistical_significance": 0.90,
-            }))
-            sf = StatusFile(Path(tmpdir) / "status.json", config_path=config_path)
+            sf = StatusFile(
+                Path(tmpdir) / "status.json",
+                min_reliability=0.95,
+                statistical_significance=0.90,
+            )
             assert sf.min_reliability == 0.95
             assert sf.statistical_significance == 0.90
 
