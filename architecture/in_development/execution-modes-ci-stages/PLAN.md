@@ -5,9 +5,9 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 
 ## Status Overview
 - **Overall Status**: In Progress
-- **Current Phase**: Phase 4: Integration and Mode Wiring
-- **Current Step**: Step 4.3: Burn-in Test Inclusion in Regression Selection
-- **Completed Steps**: 9 / 16
+- **Current Phase**: Phase 5: Burn-in Sweep in Effort Modes
+- **Current Step**: Step 5.1: BurnInSweep Same-Hash Evidence Pooling
+- **Completed Steps**: 10 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -936,7 +936,7 @@ Expected: Exit code 0
 ---
 
 ### Phase 4: Mini-Converge & Regression Enhancement
-**Phase Status**: In Progress
+**Phase Status**: Completed
 
 This phase implements the core behavioral changes: modifying EffortRunner for same-hash evidence pooling, adding mini-converge to regression mode, and including burn-in tests in regression selection.
 
@@ -1114,10 +1114,10 @@ Expected: Exit code 0
 ---
 
 #### Step 4.3: Burn-in Test Inclusion in Regression Selection
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: 6594e47
 
 **Objective**: When `status_file` is configured in regression mode, include `new` and `burning_in` tests alongside co-occurrence-selected stable tests. This ensures new tests entering via PRs get burn-in lifecycle progression.
 
@@ -1190,6 +1190,14 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 4.2 (mini-converge in regression mode)
 
 **Implementation Notes**:
+- Added burn-in test inclusion logic in `_run_regression` after co-occurrence selection and hash intersection
+- Uses `filter_tests_by_state` from `burnin.py` to find `new` and `burning_in` tests from the status file
+- Burn-in tests are added to the selected set regardless of hash change status (they need evidence)
+- Dependency closure is applied to the combined set via `add_dependency_closure` from `regression_selector.py`
+- Backward compatible: without status_file, no burn-in tests are added
+- Selection summary now reports burn-in test count when applicable
+- 6 new tests in `TestBurnInInclusionRegression` class: new test inclusion, burning_in inclusion, hash-independent inclusion, dependency closure, no-status-file backward compat, end-to-end lifecycle transition
+- All 1079 pytest tests pass, 9/9 Bazel tests pass, mypy clean
 
 ---
 
