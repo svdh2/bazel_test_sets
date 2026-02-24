@@ -5,9 +5,9 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 
 ## Status Overview
 - **Overall Status**: In Progress
-- **Current Phase**: Phase 5: Burn-in Sweep in Effort Modes
-- **Current Step**: Step 5.2: Burn-in Sweep Integration in _run_effort
-- **Completed Steps**: 11 / 16
+- **Current Phase**: Phase 6: Flaky Lifecycle & Deadline
+- **Current Step**: Step 6.1: Flaky Deadline and Auto-Disable
+- **Completed Steps**: 12 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -1202,7 +1202,7 @@ Expected: Exit code 0
 ---
 
 ### Phase 5: Burn-in Sweep in Effort Modes
-**Phase Status**: In Progress
+**Phase Status**: Completed
 
 This phase adds burn-in sweep integration after the SPRT rerun loop in converge/max modes, and updates BurnInSweep for same-hash evidence pooling.
 
@@ -1298,10 +1298,10 @@ Expected: Exit code 0
 ---
 
 #### Step 5.2: Burn-in Sweep Integration in _run_effort
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: b0f1c64
 
 **Objective**: Add a burn-in sweep phase after the SPRT rerun loop in `_run_effort`, so that `burning_in` tests in converge/max modes get evaluated and potentially promoted/demoted.
 
@@ -1374,6 +1374,12 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 5.1 (BurnInSweep same-hash evidence)
 
 **Implementation Notes**:
+- Added Phase 3 (burn-in sweep) to `_run_effort` after EffortRunner completes: checks for burning_in tests via `filter_tests_by_state`, creates `BurnInSweep` with target_hashes, runs sweep, and prints decided/undecided summary
+- Updated `_update_status_file` to accept and pass `target_hashes` parameter to `process_results`
+- Updated `_print_effort_results` to accept `sweep_result` and include sweep run counts in total reruns
+- Sweep reuses evidence already recorded during phases 1 and 2; tests with sufficient evidence may be decided without additional executions
+- 5 new tests in `TestBurnInSweepInEffort` class: sweep runs for burning_in tests, sweep skipped when no burning_in, promotion to stable, max mode support, skip_unchanged keeping burning_in tests
+- All 1096 pytest tests pass, 9/9 Bazel tests pass, mypy clean
 
 ---
 
@@ -1776,6 +1782,12 @@ All tests run via `./ci test` inside the Docker container. Type checks run via `
 Track major milestones and decisions during implementation:
 
 ### 2026-02-24
+- Step 5.2 completed: Burn-in sweep integration in _run_effort -- Phase 3 sweep after SPRT rerun loop for burning_in lifecycle progression (commit b0f1c64)
+- Step 5.1 completed: BurnInSweep same-hash evidence pooling -- cross-session SPRT evidence via target hash matching in sweep and process_results (commit b930275)
+- Phase 5 (Burn-in Sweep in Effort Modes) completed
+- Step 4.3 completed: Burn-in test inclusion in regression selection -- new/burning_in tests added alongside co-occurrence-selected stable tests (commit 6594e47)
+- Step 4.2 completed: Mini-converge rerun for regression mode -- budget-capped SPRT reruns to distinguish flakes from real failures (commit 5288e23)
+- Phase 4 (Burn-in Lifecycle in Regression Mode) completed
 - Step 4.1 completed: EffortRunner same-hash evidence pooling -- cross-session SPRT convergence via target hash matching (commit 81e5caf)
 - Step 3.1 completed: Lifecycle-aware exit code function -- classify_test_blocking + compute_exit_code with exhaustive matrix tests (commit 592745d)
 - Phase 3 (Lifecycle-Aware Exit Codes) completed
