@@ -1551,7 +1551,7 @@ class TestBurnInSweepSection:
     """Tests for burn-in sweep data in effort section of HTML reports."""
 
     def test_burn_in_sweep_renders_in_effort(self):
-        """Burn-in sweep data renders within effort section."""
+        """Burn-in sweep data renders within DAG detail panel."""
         report = {
             "report": {
                 "generated_at": "2026-01-01T00:00:00",
@@ -1560,6 +1560,18 @@ class TestBurnInSweepSection:
                              "passed+dependencies_failed": 0,
                              "failed+dependencies_failed": 0,
                              "total_duration_seconds": 3.0},
+                "test_set": {
+                    "name": "my_set",
+                    "assertion": "all pass",
+                    "status": "passed",
+                    "tests": {
+                        "//test:a": {"status": "passed", "assertion": "A",
+                                     "duration_seconds": 1.0},
+                        "//test:b": {"status": "passed", "assertion": "B",
+                                     "duration_seconds": 1.0},
+                    },
+                    "subsets": [],
+                },
                 "effort": {
                     "mode": "converge",
                     "total_reruns": 10,
@@ -1574,14 +1586,11 @@ class TestBurnInSweepSection:
             }
         }
         result = generate_html_report(report)
-        assert "Burn-in Sweep" in result
-        assert "Sweep runs" in result
-        assert "Decided" in result
-        assert "STABLE" in result
-        assert "Still burning in" in result
+        assert "Burn-in sweep" in result
+        assert "8 runs" in result
 
     def test_effort_without_sweep(self):
-        """Effort section renders correctly without sweep data."""
+        """Effort summary renders without sweep data in DAG detail panel."""
         report = {
             "report": {
                 "generated_at": "2026-01-01T00:00:00",
@@ -1590,6 +1599,16 @@ class TestBurnInSweepSection:
                              "passed+dependencies_failed": 0,
                              "failed+dependencies_failed": 0,
                              "total_duration_seconds": 1.0},
+                "test_set": {
+                    "name": "my_set",
+                    "assertion": "all pass",
+                    "status": "passed",
+                    "tests": {
+                        "//test:a": {"status": "passed", "assertion": "A",
+                                     "duration_seconds": 1.0},
+                    },
+                    "subsets": [],
+                },
                 "effort": {
                     "mode": "converge",
                     "total_reruns": 5,
@@ -1599,5 +1618,6 @@ class TestBurnInSweepSection:
             }
         }
         result = generate_html_report(report)
-        assert "Effort: converge" in result
-        assert "Burn-in Sweep" not in result
+        assert "Effort Classification" in result
+        assert "converge" in result
+        assert "Burn-in sweep" not in result

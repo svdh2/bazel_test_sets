@@ -1245,7 +1245,8 @@ class TestEValueVerdictEndToEnd:
                 "GREEN", "RED", "UNDECIDED",
             )
 
-            # HTML generation should not crash
+            # HTML generation should not crash; e-value data now
+            # appears in the DAG detail panel, not as a standalone section
             html_str = generate_html_report(report)
-            assert "Test Set Verdict" in html_str
+            assert "E-value Verdict" in html_str
             assert verdict_data["verdict"] in html_str

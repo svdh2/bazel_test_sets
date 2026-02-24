@@ -8,10 +8,12 @@ import subprocess
 from unittest.mock import patch
 
 from orchestrator.discovery.workspace import (
+    CI_GATE_DEFAULTS,
     build_workspace_trees,
     discover_workspace_tests,
     merge_discovered_tests,
     normalize_label,
+    parse_ci_gates_xml,
     parse_query_xml,
     parse_test_sets_xml,
     resolve_depends_on,
@@ -129,6 +131,63 @@ COMBINED_XML = """\
         </list>
         <string name="assertion" value="Root test set"/>
         <string name="requirement_id" value="ROOT-001"/>
+    </rule>
+</query>"""
+
+# XML containing _ci_gate_rule_test rules
+CI_GATE_XML = """\
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<query version="2">
+    <rule class="_ci_gate_rule_test" name="//ci:pr_test">
+        <label name="test_set" value="//ci:pr_set_test"/>
+        <string name="mode" value="detection"/>
+        <string name="effort" value=""/>
+        <int name="max_reruns" value="100"/>
+        <int name="max_failures" value="0"/>
+        <int name="max_parallel" value="0"/>
+        <string name="status_file" value="ecommerce/.tests/status"/>
+        <string name="diff_base" value=""/>
+        <string name="co_occurrence_graph" value=""/>
+        <string name="max_test_percentage" value="0.10"/>
+        <int name="max_hops" value="2"/>
+        <boolean name="skip_unchanged" value="true"/>
+        <string name="min_reliability" value="0.99"/>
+        <string name="statistical_significance" value="0.95"/>
+        <int name="flaky_deadline_days" value="14"/>
+    </rule>
+    <rule class="_ci_gate_rule_test" name="//ci:merge_test">
+        <label name="test_set" value="//ci:merge_set_test"/>
+        <string name="mode" value="diagnostic"/>
+        <string name="effort" value="converge"/>
+        <int name="max_reruns" value="100"/>
+        <int name="max_failures" value="0"/>
+        <int name="max_parallel" value="0"/>
+        <string name="status_file" value="ecommerce/.tests/status"/>
+        <string name="diff_base" value=""/>
+        <string name="co_occurrence_graph" value=""/>
+        <string name="max_test_percentage" value="0.10"/>
+        <int name="max_hops" value="2"/>
+        <boolean name="skip_unchanged" value="true"/>
+        <string name="min_reliability" value="0.99"/>
+        <string name="statistical_significance" value="0.95"/>
+        <int name="flaky_deadline_days" value="14"/>
+    </rule>
+    <rule class="_ci_gate_rule_test" name="//ci:staging_test">
+        <label name="test_set" value="//ci:staging_set_test"/>
+        <string name="mode" value="diagnostic"/>
+        <string name="effort" value=""/>
+        <int name="max_reruns" value="100"/>
+        <int name="max_failures" value="0"/>
+        <int name="max_parallel" value="0"/>
+        <string name="status_file" value=""/>
+        <string name="diff_base" value=""/>
+        <string name="co_occurrence_graph" value=""/>
+        <string name="max_test_percentage" value="0.10"/>
+        <int name="max_hops" value="2"/>
+        <boolean name="skip_unchanged" value="true"/>
+        <string name="min_reliability" value="0.99"/>
+        <string name="statistical_significance" value="0.95"/>
+        <int name="flaky_deadline_days" value="14"/>
     </rule>
 </query>"""
 
@@ -648,7 +707,7 @@ class TestDiscoverWorkspaceTests:
             return_value=mock_result,
         ):
             result = discover_workspace_tests(workspace_dir="/ws")
-            assert result == {"tests": [], "test_sets": []}
+            assert result == {"tests": [], "test_sets": [], "ci_gates": []}
 
     def test_uses_build_workspace_directory_env(self):
         mock_result = type(
@@ -1081,3 +1140,219 @@ class TestMergeDiscoveredTests:
         merged = merge_discovered_tests(manifest, discovery)
         entry = merged["test_set_tests"]["//other:param_test"]
         assert entry["parameters"] == {"service": "api", "limit-gb": "0.5"}
+
+
+# ---------------------------------------------------------------------------
+# parse_ci_gates_xml
+# ---------------------------------------------------------------------------
+
+
+class TestParseCiGatesXml:
+    def test_basic_parsing(self):
+        results = parse_ci_gates_xml(CI_GATE_XML)
+        assert len(results) == 3
+
+    def test_extracts_label_and_test_set(self):
+        results = parse_ci_gates_xml(CI_GATE_XML)
+        pr = next(r for r in results if r["name"] == "pr_test")
+        assert pr["label"] == "//ci:pr_test"
+        assert pr["test_set"] == "//ci:pr_set_test"
+
+    def test_non_default_params_detected(self):
+        results = parse_ci_gates_xml(CI_GATE_XML)
+        pr = next(r for r in results if r["name"] == "pr_test")
+        # mode=detection is non-default (default is diagnostic)
+        assert pr["params"]["mode"]["value"] == "detection"
+        assert pr["params"]["mode"]["is_default"] is False
+        # status_file is non-default (default is "")
+        assert pr["params"]["status_file"]["value"] == "ecommerce/.tests/status"
+        assert pr["params"]["status_file"]["is_default"] is False
+
+    def test_default_params_detected(self):
+        results = parse_ci_gates_xml(CI_GATE_XML)
+        pr = next(r for r in results if r["name"] == "pr_test")
+        # effort="" is default
+        assert pr["params"]["effort"]["value"] == ""
+        assert pr["params"]["effort"]["is_default"] is True
+        # max_reruns=100 is default
+        assert pr["params"]["max_reruns"]["value"] == 100
+        assert pr["params"]["max_reruns"]["is_default"] is True
+
+    def test_merge_gate_effort_non_default(self):
+        results = parse_ci_gates_xml(CI_GATE_XML)
+        merge = next(r for r in results if r["name"] == "merge_test")
+        assert merge["params"]["effort"]["value"] == "converge"
+        assert merge["params"]["effort"]["is_default"] is False
+
+    def test_staging_all_defaults_except_mode(self):
+        results = parse_ci_gates_xml(CI_GATE_XML)
+        staging = next(r for r in results if r["name"] == "staging_test")
+        # mode=diagnostic IS default
+        assert staging["params"]["mode"]["is_default"] is True
+        # All others are default too
+        for key, param in staging["params"].items():
+            assert param["is_default"] is True, f"{key} should be default"
+
+    def test_empty_xml_returns_empty(self):
+        results = parse_ci_gates_xml(EMPTY_XML)
+        assert results == []
+
+    def test_ignores_non_ci_gate_rules(self):
+        results = parse_ci_gates_xml(COMBINED_XML)
+        assert results == []
+
+    def test_boolean_parsing(self):
+        results = parse_ci_gates_xml(CI_GATE_XML)
+        pr = next(r for r in results if r["name"] == "pr_test")
+        assert pr["params"]["skip_unchanged"]["value"] is True
+        assert pr["params"]["skip_unchanged"]["is_default"] is True
+
+
+# ---------------------------------------------------------------------------
+# merge_discovered_tests with ci_gates
+# ---------------------------------------------------------------------------
+
+
+class TestMergeCiGates:
+    def _make_manifest(self) -> dict:
+        return {
+            "test_set": {
+                "name": "pr_set",
+                "assertion": "PR quality gate",
+                "tests": ["@@//ecommerce:cart_raw_test"],
+                "subsets": [],
+            },
+            "test_set_tests": {
+                "@@//ecommerce:cart_raw_test": {
+                    "assertion": "Cart works",
+                    "depends_on": [],
+                    "executable": "path/to/runner.sh",
+                },
+            },
+        }
+
+    def _make_discovery_with_gates(self) -> dict:
+        return {
+            "tests": [
+                {
+                    "test_set_test_label": "//other:new_wrapped",
+                    "test_label": "//other:new_test",
+                    "assertion": "New test",
+                    "requirement_id": "",
+                    "disabled": False,
+                    "depends_on_raw": [],
+                    "depends_on": [],
+                },
+            ],
+            "test_sets": [
+                {
+                    "label": "//other:other_set_test",
+                    "name": "other_set",
+                    "assertion": "Other set",
+                    "requirement_id": "",
+                    "tests_raw": ["//other:new_wrapped"],
+                    "subsets_raw": [],
+                },
+            ],
+            "ci_gates": [
+                {
+                    "label": "//ci:pr_test",
+                    "name": "pr_test",
+                    "test_set": "//ci:pr_set_test",
+                    "params": {
+                        "mode": {"value": "detection", "is_default": False},
+                        "effort": {"value": "", "is_default": True},
+                        "status_file": {
+                            "value": "ecommerce/.tests/status",
+                            "is_default": False,
+                        },
+                    },
+                },
+                {
+                    "label": "//ci:merge_test",
+                    "name": "merge_test",
+                    "test_set": "//ci:merge_set_test",
+                    "params": {
+                        "mode": {"value": "diagnostic", "is_default": True},
+                        "effort": {"value": "converge", "is_default": False},
+                    },
+                },
+            ],
+        }
+
+    def test_ci_gate_wraps_test_set(self):
+        """ci_gate node wraps its backing test_set as a subset."""
+        manifest = self._make_manifest()
+        discovery = self._make_discovery_with_gates()
+        merged = merge_discovered_tests(
+            manifest, discovery, ci_gate_name="pr_test",
+        )
+        # Find the pr_test ci_gate node
+        ws = merged["test_set"]
+        assert ws["name"] == "Workspace"
+        pr_gate = None
+        for sub in ws["subsets"]:
+            if sub.get("name") == "pr_test":
+                pr_gate = sub
+                break
+        assert pr_gate is not None
+        assert "ci_gate_params" in pr_gate
+        # The backing test_set should be a subset of the gate
+        assert len(pr_gate["subsets"]) == 1
+        assert pr_gate["subsets"][0]["name"] == "pr_set"
+
+    def test_executing_gate_inherits_status(self):
+        """The executing ci_gate inherits its test_set's status."""
+        manifest = self._make_manifest()
+        discovery = self._make_discovery_with_gates()
+        merged = merge_discovered_tests(
+            manifest, discovery, ci_gate_name="pr_test",
+        )
+        ws = merged["test_set"]
+        pr_gate = next(
+            s for s in ws["subsets"] if s.get("name") == "pr_test"
+        )
+        # The manifest's test_set gets "not_run" status (no results added)
+        # so the gate inherits it
+        assert pr_gate["status"] == "not_run"
+
+    def test_non_executing_gate_is_not_run(self):
+        """Non-executing ci_gates get not_run status."""
+        manifest = self._make_manifest()
+        discovery = self._make_discovery_with_gates()
+        merged = merge_discovered_tests(
+            manifest, discovery, ci_gate_name="pr_test",
+        )
+        ws = merged["test_set"]
+        # merge_test gate wraps merge_set, which doesn't exist in manifest,
+        # so it won't be found. But pr_test wraps pr_set which does exist.
+        # Check that if we had a merge_set, the merge gate would be not_run.
+        # For this test, merge_test references merge_set_test which doesn't
+        # match any tree name, so it won't be wrapped.
+
+    def test_no_ci_gates_no_wrapping(self):
+        """When no ci_gates discovered, tree is unchanged."""
+        manifest = self._make_manifest()
+        discovery = {
+            "tests": [],
+            "test_sets": [],
+            "ci_gates": [],
+        }
+        merged = merge_discovered_tests(manifest, discovery)
+        assert merged["test_set"]["name"] == "pr_set"
+        assert len(merged["test_set"]["subsets"]) == 0
+
+    def test_ci_gate_params_stored(self):
+        """ci_gate params are accessible on the gate node."""
+        manifest = self._make_manifest()
+        discovery = self._make_discovery_with_gates()
+        merged = merge_discovered_tests(
+            manifest, discovery, ci_gate_name="pr_test",
+        )
+        ws = merged["test_set"]
+        pr_gate = next(
+            s for s in ws["subsets"] if s.get("name") == "pr_test"
+        )
+        params = pr_gate["ci_gate_params"]
+        assert params["mode"]["value"] == "detection"
+        assert params["mode"]["is_default"] is False

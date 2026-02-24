@@ -38,7 +38,7 @@ ci_gate(
 The rule generates a bash script that:
 1. Locates the runfiles directory
 2. Creates the output report directory (`target/reports/`)
-3. Invokes the orchestrator with `--manifest`, `--output`, `--discover-workspace-tests`, and all baked-in flags
+3. Invokes the orchestrator with `--manifest`, `--output`, `--discover-workspace-tests`, `--ci-gate-name`, and all baked-in flags
 4. Passes through additional `"$@"` arguments for overrides
 
 ### Example Usage

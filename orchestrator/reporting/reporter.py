@@ -56,6 +56,8 @@ class Reporter:
         self.lifecycle_config: dict[str, Any] | None = None
         self.reliability_demoted_tests: list[str] = []
         self.source_link_base: str | None = None
+        self.ci_gate_name: str | None = None
+        self.status_file_history: dict[str, list[dict[str, Any]]] | None = None
 
     def set_manifest(self, manifest: dict[str, Any]) -> None:
         """Set the manifest for hierarchical report generation.
@@ -165,6 +167,27 @@ class Reporter:
         """
         self.source_link_base = base
 
+    def set_ci_gate_name(self, name: str) -> None:
+        """Set the name of the executing ci_gate target.
+
+        Args:
+            name: ci_gate target name (e.g. ``pr_test``).
+        """
+        self.ci_gate_name = name
+
+    def set_status_file_history(
+        self, history: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        """Set per-test history exported from the StatusFile.
+
+        Each entry is ``{"status": "passed"|"failed", "commit": "..."}``
+        in oldest-first order.
+
+        Args:
+            history: Dict mapping test name to list of history entries.
+        """
+        self.status_file_history = history
+
     def add_result(self, result: TestResult) -> None:
         """Add a test result to the report.
 
@@ -224,6 +247,12 @@ class Reporter:
 
         if self.lifecycle_config:
             report["lifecycle_config"] = self.lifecycle_config
+
+        if self.ci_gate_name:
+            report["ci_gate_name"] = self.ci_gate_name
+
+        if self.status_file_history:
+            report["status_file_history"] = self.status_file_history
 
         return {"report": report}
 
@@ -485,6 +514,10 @@ class Reporter:
             "tests": test_entries,
             "subsets": subset_nodes,
         }
+
+        # Preserve ci_gate execution parameters when present
+        if "ci_gate_params" in tree_node:
+            node["ci_gate_params"] = tree_node["ci_gate_params"]
 
         lifecycle_summary = self._compute_lifecycle_summary(
             test_entries, subset_nodes,

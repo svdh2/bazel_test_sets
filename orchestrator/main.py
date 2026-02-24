@@ -68,6 +68,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Discover all test_set_test targets in the workspace via bazel query "
              "and include them in the report (requires BUILD_WORKSPACE_DIRECTORY)",
     )
+    parser.add_argument(
+        "--ci-gate-name",
+        type=str,
+        default=None,
+        help="Name of the executing ci_gate target (set automatically by ci_gate rule)",
+    )
 
     # Execution tuning flags (ci_gate parameters)
     parser.add_argument(
@@ -1430,7 +1436,25 @@ def _update_status_file(
             print(f"  {name}: {old_state} \u2192 {new_state} ({etype})")
 
 
-def _discover_and_merge(manifest: dict) -> dict:
+def _export_status_file_history(sf: "StatusFile", reporter: Reporter) -> None:
+    """Export per-test history from StatusFile into the reporter."""
+    sf_history: dict[str, list[dict[str, Any]]] = {}
+    for test_name in sf.get_all_tests():
+        raw = sf.get_test_history(test_name)
+        sf_history[test_name] = [
+            {
+                "status": "passed" if e["passed"] else "failed",
+                "commit": e.get("commit", ""),
+            }
+            for e in reversed(raw)
+        ]
+    reporter.set_status_file_history(sf_history)
+
+
+def _discover_and_merge(
+    manifest: dict,
+    ci_gate_name: str | None = None,
+) -> dict:
     """Run workspace discovery and merge results into manifest for reporting.
 
     Returns the original manifest if discovery fails or finds nothing new.
@@ -1444,7 +1468,7 @@ def _discover_and_merge(manifest: dict) -> dict:
     if discovered is None:
         return manifest
 
-    merged = merge_discovered_tests(manifest, discovered)
+    merged = merge_discovered_tests(manifest, discovered, ci_gate_name=ci_gate_name)
 
     original_count = len(manifest.get("test_set_tests", {}))
     merged_count = len(merged.get("test_set_tests", {}))
@@ -1501,13 +1525,18 @@ def _print_results(
         reporter = Reporter()
         reporting_manifest = manifest
         if manifest is not None and args.discover_workspace_tests:
-            reporting_manifest = _discover_and_merge(manifest)
+            reporting_manifest = _discover_and_merge(
+                manifest, ci_gate_name=args.ci_gate_name,
+            )
         if reporting_manifest is not None:
             reporter.set_manifest(reporting_manifest)
         reporter.add_results(results)
         if commit_sha:
             reporter.set_commit_hash(commit_sha)
         reporter.set_source_link_base(resolve_source_link_base(commit_sha))
+
+        if args.ci_gate_name:
+            reporter.set_ci_gate_name(args.ci_gate_name)
 
         if verdict_data:
             reporter.set_e_value_verdict(verdict_data)
@@ -1532,6 +1561,7 @@ def _print_results(
                 "min_reliability": sf.min_reliability,
                 "statistical_significance": sf.statistical_significance,
             })
+            _export_status_file_history(sf, reporter)
 
         # Use history-aware generation so the HTML timeline accumulates
         existing = args.output if args.output.exists() else None
@@ -1643,13 +1673,18 @@ def _print_mini_converge_results(
         reporter = Reporter()
         reporting_manifest = manifest
         if manifest is not None and args.discover_workspace_tests:
-            reporting_manifest = _discover_and_merge(manifest)
+            reporting_manifest = _discover_and_merge(
+                manifest, ci_gate_name=args.ci_gate_name,
+            )
         if reporting_manifest is not None:
             reporter.set_manifest(reporting_manifest)
         reporter.add_results(initial_results)
         if commit_sha:
             reporter.set_commit_hash(commit_sha)
         reporter.set_source_link_base(resolve_source_link_base(commit_sha))
+
+        if args.ci_gate_name:
+            reporter.set_ci_gate_name(args.ci_gate_name)
 
         # Add effort classifications to report
         effort_data = {
@@ -1689,6 +1724,7 @@ def _print_mini_converge_results(
                 "min_reliability": sf.min_reliability,
                 "statistical_significance": sf.statistical_significance,
             })
+            _export_status_file_history(sf, reporter)
 
         existing = args.output if args.output.exists() else None
         report_data = reporter.generate_report_with_history(existing)
@@ -1791,13 +1827,18 @@ def _print_effort_results(
         reporter = Reporter()
         reporting_manifest = manifest
         if manifest is not None and args.discover_workspace_tests:
-            reporting_manifest = _discover_and_merge(manifest)
+            reporting_manifest = _discover_and_merge(
+                manifest, ci_gate_name=args.ci_gate_name,
+            )
         if reporting_manifest is not None:
             reporter.set_manifest(reporting_manifest)
         reporter.add_results(initial_results)
         if commit_sha:
             reporter.set_commit_hash(commit_sha)
         reporter.set_source_link_base(resolve_source_link_base(commit_sha))
+
+        if args.ci_gate_name:
+            reporter.set_ci_gate_name(args.ci_gate_name)
 
         if verdict_data:
             reporter.set_e_value_verdict(verdict_data)
@@ -1845,6 +1886,7 @@ def _print_effort_results(
                 "min_reliability": sf.min_reliability,
                 "statistical_significance": sf.statistical_significance,
             })
+            _export_status_file_history(sf, reporter)
 
         existing = args.output if args.output.exists() else None
         report_data = reporter.generate_report_with_history(existing)

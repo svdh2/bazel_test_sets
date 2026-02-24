@@ -31,6 +31,8 @@ class Reporter:
     def set_lifecycle_data(self, data: dict)
     def set_lifecycle_config(self, config: dict)
     def set_source_link_base(self, base: str | None)
+    def set_ci_gate_name(self, name: str)
+    def set_status_file_history(self, history: dict)
 
     # Report generation
     def generate_report(self) -> dict
@@ -91,6 +93,13 @@ class Reporter:
       "min_reliability": 0.99,
       "statistical_significance": 0.95
     },
+    "ci_gate_name": "pr_test",         // When --ci-gate-name was passed
+    "status_file_history": {           // When StatusFile is configured
+      "//test:a": [                    // Oldest-first, from StatusFile
+        {"status": "passed", "commit": "abc"},
+        {"status": "failed", "commit": "def"}
+      ]
+    },
     "source_link_base": "https://github.com/owner/repo/blob/<sha>",  // When git remote is GitHub and commit is clean
     "regression_selection": {},  // When --regression flag was used
     "e_value_verdict": {              // When --verdict flag was used
@@ -134,7 +143,7 @@ class Reporter:
 
 ## Key Design Decisions
 
-1. **Hierarchical vs flat**: When a manifest is set, the report mirrors the DAG structure with the test_set at the top and test entries nested underneath. Without a manifest, a flat list of test results is produced.
+1. **Hierarchical vs flat**: When a manifest is set, the report mirrors the DAG structure with the test_set at the top and test entries nested underneath. Without a manifest, a flat list of test results is produced. When a manifest tree node carries a `ci_gate_params` dict (added by workspace discovery's ci_gate wrapping), `_build_report_node()` preserves it on the report node so the HTML reporter can render ci_gate detail cards.
 
 2. **Rolling history with trimming**: `generate_report_with_history` loads an existing report, appends current results, and trims to `MAX_HISTORY` (500) entries per test. This provides a bounded reverse-chronological record for SPRT demotion evaluation.
 

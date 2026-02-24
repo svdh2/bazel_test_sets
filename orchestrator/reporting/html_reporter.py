@@ -507,17 +507,9 @@ def generate_html_report(report_data: dict[str, Any]) -> str:
             source_link_base=source_link_base,
         ))
 
-    # E-value verdict section
-    if "e_value_verdict" in report:
-        parts.append(_render_e_value_verdict(report["e_value_verdict"]))
-
     # Hash filter summary section
     if "hash_filter" in report:
         parts.append(_render_hash_filter_section(report["hash_filter"]))
-
-    # Effort classification section
-    if "effort" in report:
-        parts.append(_render_effort_section(report["effort"]))
 
     # Regression selection section
     if "regression_selection" in report:
@@ -624,6 +616,9 @@ def _render_test_entry(
     name: str, data: dict[str, Any],
     history_entries: list[dict[str, Any]] | None = None,
     source_link_base: str | None = None,
+    *,
+    effort_classification: dict[str, Any] | None = None,
+    e_value_per_test: dict[str, Any] | None = None,
 ) -> str:
     """Render a single test entry with expandable details."""
     parts: list[str] = []
@@ -703,6 +698,40 @@ def _render_test_entry(
     inferred_deps = data.get("inferred_dependencies")
     if inferred_deps:
         parts.append(_render_inferred_deps(inferred_deps))
+
+    # Effort classification badge
+    if effort_classification:
+        cls = effort_classification.get("classification", "")
+        cls_color = _CLASSIFICATION_COLORS.get(cls, "#FFFFFF")
+        initial = effort_classification.get("initial_status", "")
+        runs = effort_classification.get("runs", 0)
+        passes = effort_classification.get("passes", 0)
+        sprt = effort_classification.get("sprt_decision", "")
+        parts.append('<div style="margin-top:6px">')
+        parts.append(
+            f'<strong>Effort:</strong> '
+            f'<span class="status-badge" style="background:{cls_color}">'
+            f'{html.escape(cls)}</span>'
+        )
+        parts.append(
+            f' &mdash; initial: {html.escape(initial)}, '
+            f'{passes}/{runs} passed'
+        )
+        if sprt and sprt != "not_evaluated":
+            parts.append(f', SPRT: {html.escape(sprt)}')
+        parts.append("</div>")
+
+    # E-value evidence
+    if e_value_per_test:
+        s_val = e_value_per_test.get("s_value", 0)
+        runs = e_value_per_test.get("runs", 0)
+        passes = e_value_per_test.get("passes", 0)
+        commits = e_value_per_test.get("commits_included", 0)
+        parts.append(
+            f'<div style="margin-top:4px">'
+            f'<strong>E-value:</strong> S_i = <code>{s_val:.4f}</code>, '
+            f'{runs} runs, {passes} passes, {commits} commits</div>'
+        )
 
     parts.append("</div>")
     return "\n".join(parts)
@@ -1249,6 +1278,10 @@ def _render_set_summary_card(
     test_set: dict[str, Any],
     lifecycle_config: dict[str, Any] | None = None,
     history_entries: list[dict[str, Any]] | None = None,
+    *,
+    e_value_verdict: dict[str, Any] | None = None,
+    effort_data: dict[str, Any] | None = None,
+    ci_gate_name: str | None = None,
 ) -> str:
     """Render a hidden summary card for the DAG detail pane.
 
@@ -1287,7 +1320,181 @@ def _render_set_summary_card(
     if history_entries:
         parts.append(_render_history_timeline(history_entries))
 
+    # Inline e-value verdict on the root test_set (the one directly under the executing gate)
+    if e_value_verdict:
+        parts.append(_render_inline_e_value_verdict(e_value_verdict))
+
+    # Inline effort summary
+    if effort_data:
+        parts.append(_render_inline_effort_summary(effort_data))
+
     parts.append("</div>")
+    return "\n".join(parts)
+
+
+def _render_ci_gate_card(
+    node: dict[str, Any],
+    *,
+    e_value_verdict: dict[str, Any] | None = None,
+    effort_data: dict[str, Any] | None = None,
+    ci_gate_name: str | None = None,
+) -> str:
+    """Render a hidden detail card for a ci_gate DAG node.
+
+    The card carries a ``data-ci-gate-name`` attribute so the JavaScript
+    tap handler on ci_gate nodes can locate and clone it.
+    """
+    name = node.get("name", "CI Gate")
+    status = node.get("status", "not_run")
+    color = STATUS_COLORS.get(status, "#e8e8e8")
+    label = STATUS_LABELS.get(status, status.upper())
+    params = node.get("ci_gate_params", {})
+    is_executing = ci_gate_name is not None and name == ci_gate_name
+
+    parts: list[str] = []
+    parts.append(
+        f'<div data-ci-gate-name="{html.escape(name, quote=True)}"'
+        f' style="display:none">'
+    )
+    parts.append('<div class="test-set-header">')
+    parts.append(f"<h2>{html.escape(name)}</h2>")
+    parts.append(
+        f'<span class="status-badge" style="background:{color}">'
+        f"{html.escape(label)}</span>"
+    )
+    parts.append("</div>")
+
+    # Execution parameters table
+    if params:
+        parts.append("<h3>Execution Parameters</h3>")
+        parts.append('<table class="measurements-table">')
+        parts.append("<tr><th>Parameter</th><th>Value</th></tr>")
+        for pname, pinfo in sorted(params.items()):
+            val = pinfo.get("value", "")
+            is_default = pinfo.get("is_default", True)
+            style = ' style="color:#999"' if is_default else ' style="font-weight:bold"'
+            suffix = ""
+            if is_default:
+                suffix = ' <span style="color:#999;font-size:0.85em">(default)</span>'
+            parts.append(
+                f"<tr><td>{html.escape(str(pname))}</td>"
+                f"<td{style}>{html.escape(str(val))}{suffix}</td></tr>"
+            )
+        parts.append("</table>")
+
+    # E-value verdict (only for the executing gate)
+    if is_executing and e_value_verdict:
+        parts.append(_render_inline_e_value_verdict(e_value_verdict))
+
+    # Effort summary (only for the executing gate)
+    if is_executing and effort_data:
+        parts.append(_render_inline_effort_summary(effort_data))
+
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+def _render_inline_e_value_verdict(verdict_data: dict[str, Any]) -> str:
+    """Render e-value verdict inline within a detail card."""
+    parts: list[str] = []
+    parts.append("<h3>E-value Verdict</h3>")
+
+    verdict = verdict_data.get("verdict", "UNDECIDED")
+    color = _VERDICT_COLORS.get(verdict, "#FFFFAD")
+    parts.append(
+        f'<span class="verdict-badge" style="background:{color};'
+        f'padding:2px 8px;border-radius:4px">'
+        f"{html.escape(verdict)}</span>"
+    )
+
+    parts.append('<div style="margin-top:6px">')
+    e_set = verdict_data.get("e_set", 0)
+    red_thresh = verdict_data.get("red_threshold", 0)
+    min_s = verdict_data.get("min_s_value", 0)
+    green_thresh = verdict_data.get("green_threshold", 0)
+    n_tests = verdict_data.get("n_tests", 0)
+    weakest = verdict_data.get("weakest_test", "")
+
+    parts.append(
+        f"<strong>Tests:</strong> {n_tests}<br>"
+        f"<strong>RED:</strong> "
+        f"<code>E_set = {e_set:.4f}</code> "
+        f"(threshold: <code>{red_thresh:.4f}</code>)<br>"
+        f"<strong>GREEN:</strong> "
+        f"<code>min(S_i) = {min_s:.4f}</code> "
+        f"(threshold: <code>{green_thresh:.4f}</code>)"
+    )
+
+    if weakest:
+        parts.append(f"<br><strong>Weakest:</strong> {html.escape(str(weakest))}")
+
+    total_reruns = verdict_data.get("total_reruns")
+    if total_reruns is not None:
+        parts.append(f"<br><strong>HiFi reruns:</strong> {total_reruns}")
+
+    parts.append("</div>")
+
+    # Per-test E-value table
+    per_test = verdict_data.get("per_test", [])
+    if per_test:
+        parts.append("<details>")
+        parts.append(f"<summary>Per-test E-values ({len(per_test)})</summary>")
+        parts.append('<table class="measurements-table">')
+        parts.append(
+            "<tr><th>Test</th><th>E_i</th><th>S_i</th>"
+            "<th>Runs</th><th>Passes</th><th>Commits</th></tr>"
+        )
+        for tv in per_test:
+            tname = html.escape(str(tv.get("test_name", "")))
+            e_val = tv.get("e_value", 0)
+            s_val = tv.get("s_value", 0)
+            runs = tv.get("runs", 0)
+            passes = tv.get("passes", 0)
+            commits = tv.get("commits_included", 0)
+            parts.append(
+                f"<tr><td>{tname}</td><td>{e_val:.4f}</td>"
+                f"<td>{s_val:.4f}</td><td>{runs}</td>"
+                f"<td>{passes}</td><td>{commits}</td></tr>"
+            )
+        parts.append("</table>")
+        parts.append("</details>")
+
+    return "\n".join(parts)
+
+
+def _render_inline_effort_summary(effort_data: dict[str, Any]) -> str:
+    """Render effort summary inline within a detail card."""
+    parts: list[str] = []
+    parts.append("<h3>Effort Classification</h3>")
+
+    mode = effort_data.get("mode", "")
+    total_reruns = effort_data.get("total_reruns", 0)
+    max_reruns = effort_data.get("max_reruns_per_test", 0)
+    parts.append(
+        f"<strong>Mode:</strong> {html.escape(str(mode))}<br>"
+        f"<strong>Total reruns:</strong> {total_reruns} "
+        f"(budget: {max_reruns} per test)<br>"
+    )
+
+    classifications = effort_data.get("classifications", {})
+    if classifications:
+        counts: dict[str, int] = {}
+        for c in classifications.values():
+            cls = c.get("classification", "unknown")
+            counts[cls] = counts.get(cls, 0) + 1
+        summary_parts = [f"{count} {cls}" for cls, count in sorted(counts.items())]
+        parts.append(f"<strong>Summary:</strong> {', '.join(summary_parts)}<br>")
+
+    burn_in_sweep = effort_data.get("burn_in_sweep")
+    if burn_in_sweep:
+        sweep_total = burn_in_sweep.get("total_runs", 0)
+        decided = burn_in_sweep.get("decided", {})
+        undecided = burn_in_sweep.get("undecided", [])
+        parts.append(
+            f"<br><strong>Burn-in sweep:</strong> {sweep_total} runs, "
+            f"{len(decided)} decided, {len(undecided)} still burning in"
+        )
+
     return "\n".join(parts)
 
 
@@ -1793,6 +2000,39 @@ _DAG_JS = """\
                 }
             },
             {
+                selector: 'node.ci_gate',
+                style: {
+                    'shape': 'diamond',
+                    'background-color': function(ele) {
+                        return DAG_COLORS[ele.data('dagColor')] || '#e8e8e8';
+                    },
+                    'label': 'data(label)',
+                    'text-valign': 'center',
+                    'text-halign': 'center',
+                    'font-size': '12px',
+                    'font-weight': 'bold',
+                    'width': 'label',
+                    'height': 'label',
+                    'padding': '20px',
+                    'border-width': 3,
+                    'border-color': '#555'
+                }
+            },
+            {
+                selector: 'node.ci_gate[status = "not_run"]',
+                style: {
+                    'opacity': 0.6,
+                    'border-style': 'dashed'
+                }
+            },
+            {
+                selector: 'node.ci_gate:selected',
+                style: {
+                    'border-width': 4,
+                    'border-color': '#0d6efd'
+                }
+            },
+            {
                 selector: 'node.test',
                 style: {
                     'shape': 'rectangle',
@@ -2019,6 +2259,26 @@ _DAG_JS = """\
         var content = document.getElementById('dag-detail-content');
         showDetailPane();
         content.innerHTML = found.outerHTML;
+    });
+
+    /* Click ci_gate node to show detail pane */
+    cy.on('tap', 'node.ci_gate', function(evt) {
+        highlightNode(evt.target);
+        var nodeId = evt.target.data('id');
+        var entries = document.querySelectorAll('[data-ci-gate-name]');
+        var found = null;
+        for (var j = 0; j < entries.length; j++) {
+            if (entries[j].getAttribute('data-ci-gate-name') === nodeId) {
+                found = entries[j];
+                break;
+            }
+        }
+        if (!found) return;
+        var content = document.getElementById('dag-detail-content');
+        showDetailPane();
+        var clone = found.cloneNode(true);
+        clone.style.display = '';
+        content.innerHTML = clone.outerHTML;
     });
 
     /* Click group (set) node to show detail pane */
@@ -2361,6 +2621,7 @@ def _compute_dag_color(
     if data["type"] == "test":
         color = _STATUS_DAG_COLOR.get(data["status"], "grey")
     else:
+        # group and ci_gate: aggregate from children
         child_ids = children_map.get(node_id, [])
         if not child_ids:
             color = _STATUS_DAG_COLOR.get(data["status"], "grey")
@@ -2396,12 +2657,13 @@ def _walk_dag_for_graph(
     from the parent test-set node to its children.
     """
     node_id = node.get("name", "")
+    node_type = "ci_gate" if "ci_gate_params" in node else "group"
     first_visit = node_id not in seen_nodes
     if first_visit:
         seen_nodes[node_id] = {"data": {
             "id": node_id,
             "label": node_id,
-            "type": "group",
+            "type": node_type,
             "status": node.get("status", "no_tests"),
         }}
 
@@ -2540,11 +2802,12 @@ def _walk_for_search_index(
 ) -> None:
     """Recursively build search index entries for sets and tests."""
     name = test_set.get("name", "")
+    node_type = "ci_gate" if "ci_gate_params" in test_set else "group"
     if name and name != "Workspace":
         name_parts = [_decompose_identifier(name)]
         assertion = test_set.get("assertion", "")
         index[name] = {
-            "type": "group",
+            "type": node_type,
             "label": name,
             "fields": {
                 "name": " ".join(name_parts).lower(),
@@ -2624,17 +2887,25 @@ def _render_dag_data_elements(
     history: dict[str, list[dict[str, Any]]],
     lifecycle_config: dict[str, Any] | None = None,
     source_link_base: str | None = None,
+    *,
+    e_value_verdict: dict[str, Any] | None = None,
+    effort_data: dict[str, Any] | None = None,
+    ci_gate_name: str | None = None,
 ) -> str:
     """Render hidden data elements for the DAG detail pane.
 
-    Produces hidden test-entry divs (``data-test-name``) and set
-    summary cards (``data-set-name``) so that the Cytoscape tap
-    handlers can clone them into the detail pane.
+    Produces hidden test-entry divs (``data-test-name``), set
+    summary cards (``data-set-name``), and ci_gate cards
+    (``data-ci-gate-name``) so that the Cytoscape tap handlers
+    can clone them into the detail pane.
     """
     parts: list[str] = []
     parts.append('<div style="display:none">')
     _walk_for_data_elements(
         test_set, history, lifecycle_config, source_link_base, parts,
+        e_value_verdict=e_value_verdict,
+        effort_data=effort_data,
+        ci_gate_name=ci_gate_name,
     )
     parts.append("</div>")
     return "\n".join(parts)
@@ -2646,26 +2917,55 @@ def _walk_for_data_elements(
     lifecycle_config: dict[str, Any] | None,
     source_link_base: str | None,
     parts: list[str],
+    *,
+    e_value_verdict: dict[str, Any] | None = None,
+    effort_data: dict[str, Any] | None = None,
+    ci_gate_name: str | None = None,
 ) -> None:
-    """Recursively collect hidden data elements for every set and test."""
-    # Set summary card
-    set_test_names = _collect_test_names(test_set)
-    set_history = _compute_set_history(set_test_names, history)
-    parts.append(_render_set_summary_card(
-        test_set, lifecycle_config, set_history,
-    ))
+    """Recursively collect hidden data elements for every set, test, and ci_gate."""
+    # CI gate card
+    if "ci_gate_params" in test_set:
+        parts.append(_render_ci_gate_card(
+            test_set,
+            e_value_verdict=e_value_verdict,
+            effort_data=effort_data,
+            ci_gate_name=ci_gate_name,
+        ))
+    else:
+        # Set summary card (with inline e-value/effort for executing gate's test_set)
+        set_test_names = _collect_test_names(test_set)
+        set_history = _compute_set_history(set_test_names, history)
+        parts.append(_render_set_summary_card(
+            test_set, lifecycle_config, set_history,
+            e_value_verdict=e_value_verdict,
+            effort_data=effort_data,
+            ci_gate_name=ci_gate_name,
+        ))
 
     # Individual test entries
+    effort_classifications = (
+        effort_data.get("classifications", {}) if effort_data else {}
+    )
+    ev_per_test = {}
+    if e_value_verdict:
+        for tv in e_value_verdict.get("per_test", []):
+            ev_per_test[tv.get("test_name", "")] = tv
+
     for test_name, test_data in test_set.get("tests", {}).items():
         parts.append(_render_test_entry(
             test_name, test_data, history.get(test_name, []),
             source_link_base=source_link_base,
+            effort_classification=effort_classifications.get(test_name),
+            e_value_per_test=ev_per_test.get(test_name),
         ))
 
     # Recurse into subsets
     for subset in test_set.get("subsets", []):
         _walk_for_data_elements(
             subset, history, lifecycle_config, source_link_base, parts,
+            e_value_verdict=e_value_verdict,
+            effort_data=effort_data,
+            ci_gate_name=ci_gate_name,
         )
 
 
@@ -2679,6 +2979,12 @@ def _render_dag_section(
     test_set = report.get("test_set", {})
     graph_data = _build_graph_data(test_set)
     search_index = _build_search_index(test_set)
+
+    # Use StatusFile history when available (Step 7) — it contains the
+    # full run history that e-values are computed from.
+    sf_history = report.get("status_file_history")
+    if sf_history:
+        history = sf_history
 
     parts: list[str] = []
     parts.append(f"<style>{_DAG_CSS}</style>")
@@ -2731,11 +3037,14 @@ def _render_dag_section(
     parts.append("</div>")  # dag-container
     parts.append("</div>")  # dag-section
 
-    # Hidden data elements for detail pane (test entries + set summaries)
+    # Hidden data elements for detail pane (test entries + set summaries + ci_gates)
     parts.append(_render_dag_data_elements(
         test_set, history or {},
         lifecycle_config=lifecycle_config,
         source_link_base=source_link_base,
+        e_value_verdict=report.get("e_value_verdict"),
+        effort_data=report.get("effort"),
+        ci_gate_name=report.get("ci_gate_name"),
     ))
 
     # Embedded data

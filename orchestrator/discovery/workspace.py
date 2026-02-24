@@ -1,9 +1,11 @@
-"""Discover all test_set_test and test_set targets in a Bazel workspace.
+"""Discover all test_set_test, test_set, and ci_gate targets in a Bazel workspace.
 
-Runs ``bazel query --output=xml`` to discover both individual tests
-(``test_set_test``) and their hierarchical groupings (``_test_set_rule_test``).
-Discovered tests are merged into a manifest copy so the reporter can show
-the full workspace DAG structure, with undiscovered tests marked ``not_run``.
+Runs ``bazel query --output=xml`` to discover individual tests
+(``test_set_test``), their hierarchical groupings (``_test_set_rule_test``),
+and CI gate execution configurations (``_ci_gate_rule_test``).
+Discovered targets are merged into a manifest copy so the reporter can show
+the full workspace DAG structure, with undiscovered tests marked ``not_run``
+and ci_gate nodes wrapping their backing test_sets.
 """
 
 from __future__ import annotations
@@ -183,6 +185,106 @@ def resolve_depends_on(discovered: list[dict[str, Any]]) -> None:
         entry["depends_on"] = resolved
 
 
+# Default values for ci_gate rule attributes (from rules/ci_gate.bzl).
+# Used to determine which parameters were explicitly set by the user.
+CI_GATE_DEFAULTS: dict[str, Any] = {
+    "mode": "diagnostic",
+    "effort": "",
+    "max_reruns": 100,
+    "max_failures": 0,
+    "max_parallel": 0,
+    "status_file": "",
+    "diff_base": "",
+    "co_occurrence_graph": "",
+    "max_test_percentage": "0.10",
+    "max_hops": 2,
+    "skip_unchanged": True,
+    "min_reliability": "0.99",
+    "statistical_significance": "0.95",
+    "flaky_deadline_days": 14,
+}
+
+
+def parse_ci_gates_xml(xml_content: str) -> list[dict[str, Any]]:
+    """Parse ``bazel query --output=xml`` output for _ci_gate_rule_test rules.
+
+    Returns a list of dicts, one per discovered ci_gate, with keys:
+        label, test_set (label of backing test_set), params (dict of
+        parameter name to ``{"value": ..., "is_default": bool}``).
+    """
+    root = ET.fromstring(xml_content)
+    results: list[dict[str, Any]] = []
+
+    for rule in root.findall("rule"):
+        if rule.get("class") != "_ci_gate_rule_test":
+            continue
+
+        label = rule.get("name", "")
+
+        # Extract the backing test_set label (required)
+        test_set_elem = rule.find("label[@name='test_set']")
+        if test_set_elem is None:
+            continue
+        test_set_label = test_set_elem.get("value", "")
+
+        # Extract all execution parameters
+        params: dict[str, dict[str, Any]] = {}
+
+        # String attributes
+        for attr_name in ("mode", "effort", "status_file", "diff_base",
+                          "co_occurrence_graph", "max_test_percentage",
+                          "min_reliability", "statistical_significance"):
+            elem = rule.find(f"string[@name='{attr_name}']")
+            value = elem.get("value", "") if elem is not None else ""
+            default = CI_GATE_DEFAULTS[attr_name]
+            params[attr_name] = {
+                "value": value,
+                "is_default": value == default,
+            }
+
+        # Integer attributes
+        for attr_name in ("max_reruns", "max_failures", "max_parallel",
+                          "max_hops", "flaky_deadline_days"):
+            elem = rule.find(f"int[@name='{attr_name}']")
+            if elem is not None:
+                try:
+                    int_value = int(elem.get("value", "0"))
+                except ValueError:
+                    int_value = CI_GATE_DEFAULTS[attr_name]  # type: ignore[assignment]
+                params[attr_name] = {
+                    "value": int_value,
+                    "is_default": int_value == CI_GATE_DEFAULTS[attr_name],
+                }
+            else:
+                params[attr_name] = {
+                    "value": CI_GATE_DEFAULTS[attr_name],
+                    "is_default": True,
+                }
+
+        # Boolean attributes
+        elem = rule.find("boolean[@name='skip_unchanged']")
+        if elem is not None:
+            bool_value = elem.get("value", "").lower() == "true"
+        else:
+            bool_value = True
+        params["skip_unchanged"] = {
+            "value": bool_value,
+            "is_default": bool_value == CI_GATE_DEFAULTS["skip_unchanged"],
+        }
+
+        # Derive a display name from the label (strip package prefix)
+        name = label.rsplit(":", 1)[-1] if ":" in label else label
+
+        results.append({
+            "label": label,
+            "name": name,
+            "test_set": test_set_label,
+            "params": params,
+        })
+
+    return results
+
+
 def _collect_tree_names(tree: dict[str, Any]) -> set[str]:
     """Collect all test_set names from a manifest tree recursively."""
     names: set[str] = set()
@@ -322,10 +424,11 @@ def discover_workspace_tests(
     workspace_dir: str | None = None,
     timeout: int = 60,
 ) -> dict[str, Any] | None:
-    """Discover all test_set_test and test_set targets in the Bazel workspace.
+    """Discover all test_set_test, test_set, and ci_gate targets in the workspace.
 
-    Runs ``bazel query --output=xml`` to find both ``test_set_test`` rules
-    (individual tests) and ``_test_set_rule_test`` rules (test set groupings).
+    Runs ``bazel query --output=xml`` to find ``test_set_test`` rules
+    (individual tests), ``_test_set_rule_test`` rules (test set groupings),
+    and ``_ci_gate_rule_test`` rules (CI gate configurations).
 
     Args:
         workspace_dir: Path to Bazel workspace root.  If *None*, reads
@@ -333,9 +436,9 @@ def discover_workspace_tests(
         timeout: Timeout in seconds for the bazel query command.
 
     Returns:
-        Dict with ``tests`` and ``test_sets`` lists, or *None* if
-        discovery is unavailable (no workspace dir, bazel not found,
-        query failed, etc.).
+        Dict with ``tests``, ``test_sets``, and ``ci_gates`` lists, or
+        *None* if discovery is unavailable (no workspace dir, bazel not
+        found, query failed, etc.).
     """
     if workspace_dir is None:
         workspace_dir = os.environ.get("BUILD_WORKSPACE_DIRECTORY")
@@ -347,7 +450,8 @@ def discover_workspace_tests(
             [
                 "bazel", "query", "--output=xml",
                 'kind("test_set_test", //...)'
-                ' + kind("_test_set_rule_test", //...)',
+                ' + kind("_test_set_rule_test", //...)'
+                ' + kind("_ci_gate_rule_test", //...)',
             ],
             capture_output=True,
             text=True,
@@ -377,17 +481,120 @@ def discover_workspace_tests(
         return None
 
     if not result.stdout.strip():
-        return {"tests": [], "test_sets": []}
+        return {"tests": [], "test_sets": [], "ci_gates": []}
 
     tests = parse_query_xml(result.stdout)
     test_sets = parse_test_sets_xml(result.stdout)
+    ci_gates = parse_ci_gates_xml(result.stdout)
     resolve_depends_on(tests)
-    return {"tests": tests, "test_sets": test_sets}
+    return {"tests": tests, "test_sets": test_sets, "ci_gates": ci_gates}
+
+
+def _resolve_test_set_name(
+    test_set_label: str,
+    ts_lookup: dict[str, dict[str, Any]],
+) -> str | None:
+    """Resolve a ci_gate's test_set label to its name.
+
+    Handles both direct labels (``//ci:pr_set_test``) and alias
+    references (``//ci:pr_set``).
+    """
+    ts = ts_lookup.get(test_set_label)
+    if ts is not None:
+        return ts["name"]
+    return None
+
+
+def _wrap_test_sets_with_ci_gates(
+    tree: dict[str, Any],
+    ci_gates: list[dict[str, Any]],
+    ci_gate_name: str | None,
+) -> None:
+    """Insert ci_gate nodes as parents of their backing test_sets in *tree*.
+
+    Walks the tree's subsets looking for test_set nodes whose name matches
+    a ci_gate's backing test_set.  When found, replaces the test_set node
+    with a ci_gate wrapper node that has the test_set as its sole subset.
+
+    The executing ci_gate (matched by *ci_gate_name*) inherits the
+    test_set's status; non-executing gates get ``"not_run"``.
+    """
+    # Build lookup: test_set name -> list of ci_gates referencing it.
+    # A ci_gate's test_set label ends with _test (Bazel naming), and
+    # the test_set's name may differ (e.g., label //ci:pr_set_test,
+    # name "pr_set").  We resolve using the full tree.
+    ts_name_to_gates: dict[str, list[dict[str, Any]]] = {}
+    all_names = _collect_tree_names(tree)
+
+    for gate in ci_gates:
+        gate_test_set = gate["test_set"]
+        # Try matching by stripping package prefix
+        short = gate_test_set.rsplit(":", 1)[-1] if ":" in gate_test_set else gate_test_set
+        # The test_set macro creates rule "foo_test" with alias "foo".
+        # ci_gate may reference either the alias or the rule name.
+        # Try both: the short name, with _test suffix, and without _test suffix.
+        candidates = [short]
+        if not short.endswith("_test") or short.endswith("_tests"):
+            candidates.append(short + "_test")
+        if short.endswith("_test") and not short.endswith("_tests"):
+            candidates.append(short[:-5])
+
+        for candidate in candidates:
+            if candidate in all_names:
+                ts_name_to_gates.setdefault(candidate, []).append(gate)
+                break
+
+    if not ts_name_to_gates:
+        return
+
+    # Walk subsets and wrap matching test_sets
+    _wrap_subsets_recursive(tree, ts_name_to_gates, ci_gate_name)
+
+
+def _wrap_subsets_recursive(
+    node: dict[str, Any],
+    ts_name_to_gates: dict[str, list[dict[str, Any]]],
+    ci_gate_name: str | None,
+) -> None:
+    """Recursively wrap matching test_set subsets with ci_gate parent nodes."""
+    new_subsets: list[dict[str, Any]] = []
+    for subset in node.get("subsets", []):
+        subset_name = subset.get("name", "")
+        gates = ts_name_to_gates.get(subset_name, [])
+
+        if gates:
+            # Replace this test_set with ci_gate wrapper(s)
+            for gate in gates:
+                is_executing = (
+                    ci_gate_name is not None
+                    and gate["name"] == ci_gate_name
+                )
+                gate_status = (
+                    subset.get("status", "not_run") if is_executing
+                    else "not_run"
+                )
+                gate_node: dict[str, Any] = {
+                    "name": gate["name"],
+                    "assertion": subset.get("assertion", ""),
+                    "ci_gate_params": gate["params"],
+                    "status": gate_status,
+                    "tests": [],
+                    "subsets": [subset],
+                }
+                new_subsets.append(gate_node)
+        else:
+            new_subsets.append(subset)
+
+        # Recurse into the original subset (not the wrapper)
+        _wrap_subsets_recursive(subset, ts_name_to_gates, ci_gate_name)
+
+    node["subsets"] = new_subsets
 
 
 def merge_discovered_tests(
     manifest: dict[str, Any],
     discovery: dict[str, Any],
+    ci_gate_name: str | None = None,
 ) -> dict[str, Any]:
     """Merge discovered workspace tests into a manifest copy for reporting.
 
@@ -397,6 +604,11 @@ def merge_discovered_tests(
     synthetic *Workspace* root.  This ensures every report shows the same
     DAG shape regardless of which test_set is executed — only test
     statuses differ.
+
+    When *ci_gate_name* is provided and ci_gate targets are found in
+    *discovery*, ci_gate nodes are inserted as parents of their backing
+    test_sets.  The executing ci_gate inherits its test_set's aggregated
+    status; others are marked ``not_run``.
 
     Tests already in the manifest (matched by normalized label) are
     skipped.  Any new tests not placed in a discovered tree are grouped
@@ -500,4 +712,10 @@ def merge_discovered_tests(
             "subsets": [merged["test_set"]] + peer_subsets,
         }
 
+    # Wrap test_sets in ci_gate nodes when ci_gates are discovered
+    ci_gates = discovery.get("ci_gates", [])
+    if ci_gates:
+        _wrap_test_sets_with_ci_gates(
+            merged["test_set"], ci_gates, ci_gate_name,
+        )
     return merged

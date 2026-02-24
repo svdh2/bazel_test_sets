@@ -118,7 +118,8 @@ mkdir -p "$OUT_DIR"
 exec "$R/{workspace}/{orchestrator}" \\
   --manifest "$R/{workspace}/{manifest}" \\
   --output "$OUT_DIR/{name}.json" \\
-  --discover-workspace-tests{flags} \\
+  --discover-workspace-tests \\
+  --ci-gate-name "{name}"{flags} \\
   "$@"
 """.format(
             name = ctx.label.name,
