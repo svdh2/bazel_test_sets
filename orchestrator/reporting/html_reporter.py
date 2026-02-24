@@ -1559,7 +1559,7 @@ _DAG_CSS = """\
     flex: 1;
     display: flex;
     flex-direction: column;
-    min-height: 0;
+    min-height: 500px;
 }
 .dag-section h2 {
     margin: 0 0 12px 0;

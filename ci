@@ -344,10 +344,6 @@ def test_examples(ctx):
     console.print("[bold]--- Phase 1: Clean start + Bazel validation ---[/bold]")
     shutil.rmtree(status_path.parent, ignore_errors=True)
     console.print("[dim]Removed .tests/ directory[/dim]")
-    config_path = examples_dir / ".test_set_config"
-    if config_path.exists():
-        config_path.unlink()
-        console.print("[dim]Removed .test_set_config[/dim]")
     reports_dir = examples_dir / "target" / "reports"
     if reports_dir.exists():
         shutil.rmtree(reports_dir)
@@ -358,17 +354,17 @@ def test_examples(ctx):
     # Run the orchestrator many times so the report accumulates a visible
     # timeline. All tests pass during this phase; SPRT accepts after ~28 runs.
     console.print(f"[bold]--- Phase 2: Burn-in acceptance ({BURNIN_RUNS} runs) ---[/bold]")
-    _create_status_config(status_path)
+    _create_status_file(status_path)
 
     # First run populates the status file with "new" entries for all tests
-    _run_orchestrator_quiet(examples_dir, status_path)
+    _run_orchestrator_quiet(examples_dir)
     console.print(f"[dim]  Run 1/{BURNIN_RUNS}[/dim]")
 
     # Transition all tests to burning_in so SPRT evaluates them
     _transition_all_to_burnin(status_path)
 
     for i in range(2, BURNIN_RUNS + 1):
-        _run_orchestrator_quiet(examples_dir, status_path)
+        _run_orchestrator_quiet(examples_dir)
         if i % 10 == 0 or i == BURNIN_RUNS:
             console.print(f"[dim]  Run {i}/{BURNIN_RUNS}[/dim]")
 
@@ -383,7 +379,7 @@ def test_examples(ctx):
     )
     for i in range(1, DEGRADATION_RUNS + 1):
         _run_orchestrator_quiet(
-            examples_dir, status_path,
+            examples_dir,
             env={"TST_EMAIL_RELIABILITY": "0.6"},
             check=False,
         )
@@ -392,30 +388,24 @@ def test_examples(ctx):
 
     _print_lifecycle_summary(status_path, "after degradation")
 
-    # Phase 4: Generate reports for other examples
-    console.print("[bold]--- Phase 4: Other example reports ---[/bold]")
+    # Phase 4: Merge gate (ecommerce + macros_demo)
+    console.print("[bold]--- Phase 4: Merge gate ---[/bold]")
     run_cmd(
-        ["bazel", "run", "//macros_demo:deployment_validation", "--",
+        ["bazel", "run", "//ci:merge", "--",
          "--allow-dirty"],
         cwd=str(examples_dir),
     )
 
 
-def _create_status_config(status_path: Path) -> None:
-    """Create .test_set_config at workspace root and empty status file."""
+def _create_status_file(status_path: Path) -> None:
+    """Create an empty status file for the lifecycle demo.
+
+    The ci_gate targets in //ci: bake in the status_file path and SPRT
+    parameters (min_reliability, statistical_significance), so a separate
+    .test_set_config is no longer needed.
+    """
     import json as json_mod
 
-    # Create .test_set_config at the workspace root (parent of ecommerce/)
-    config_path = status_path.parent.parent.parent / ".test_set_config"
-    config = {
-        "min_reliability": 0.99,
-        "statistical_significance": 0.95,
-        "status_file": str(status_path),
-    }
-    config_path.write_text(json_mod.dumps(config, indent=2) + "\n")
-    console.print("[dim]  Created .test_set_config[/dim]")
-
-    # Create empty status file
     status = {"tests": {}}
     status_path.parent.mkdir(parents=True, exist_ok=True)
     status_path.write_text(json_mod.dumps(status, indent=2) + "\n")
@@ -442,21 +432,22 @@ def _transition_all_to_burnin(status_path: Path) -> None:
 
 def _run_orchestrator_quiet(
     examples_dir: Path,
-    status_path: Path,
+    *,
     env: dict[str, str] | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    """Run the ecommerce_tests orchestrator, suppressing output.
+    """Run the PR ci_gate, suppressing output.
 
-    Uses bazel run to invoke the orchestrator with status_file from config.
-    Output is captured so the demo shows clean progress counters.
+    Uses bazel run to invoke the //ci:pr gate which has status_file and
+    execution parameters baked in. Output is captured so the demo shows
+    clean progress counters.
     """
     run_env = dict(os.environ)
     if env:
         run_env.update(env)
     return subprocess.run(
         [
-            "bazel", "run", "//ecommerce:ecommerce_tests", "--",
+            "bazel", "run", "//ci:pr", "--",
             "--allow-dirty",
         ],
         cwd=str(examples_dir),

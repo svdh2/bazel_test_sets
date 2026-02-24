@@ -74,6 +74,10 @@ ci_gate(
 )
 ```
 
+### Working Example: `examples/ci/BUILD.bazel`
+
+The examples module defines three ci_gate targets (`pr`, `merge`, `staging`) wrapping backing test_set targets with distinct execution policies. These are invoked by the `./ci test-examples` command for the lifecycle demo.
+
 ## Dependencies
 
 - **test_set rule** (`rules/test_set.bzl`): Provides `TestSetInfo` with the manifest file

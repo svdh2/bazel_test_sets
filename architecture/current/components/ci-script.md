@@ -17,7 +17,7 @@ The outermost entry point for all build, test, and validation operations. A Pyth
 | `build` | Delegates | `bazel build //...` | Build all Bazel targets |
 | `test` | Delegates | `bazel test //...` + `pytest` | Run all Bazel tests and Python unit tests |
 | `check` | Delegates | `mypy` | Run type checks |
-| `test-examples` | Delegates | `bazel test //...` in examples/ + report generation | Test the examples module |
+| `test-examples` | Delegates | `bazel test //...` in examples/ + ci_gate lifecycle demo | Test the examples module via ci_gate targets |
 | `query <pattern>` | Delegates | `bazel query` | Query Bazel targets |
 | `shell` | Host only | N/A | Interactive bash in container |
 | `clean` | Host only | N/A | Remove target/ directory |
@@ -68,4 +68,6 @@ Bazel in turn triggers the **Orchestrator** (for test_set targets and lifecycle 
 
 3. **Pytest alongside Bazel test**: The `test` command runs both `bazel test //...` (Starlark analysis, integration tests) and `pytest` (Python unit tests). This covers both the Bazel rule tests and the orchestrator unit tests.
 
-4. **Report generation via bazel run**: The `test-examples` command uses `bazel run` (not `bazel test`) for report-generating targets, because `bazel test` sandboxes output away from the workspace.
+4. **Report generation via bazel run**: The `test-examples` command uses `bazel run` (not `bazel test`) for ci_gate targets, because `bazel test` sandboxes output away from the workspace.
+
+5. **CI gates drive test-examples**: The lifecycle demo (burn-in, degradation, merge gate) invokes `//ci:pr` and `//ci:merge` ci_gate targets rather than bare test_set targets. Execution parameters (mode, effort, status_file) are baked into the ci_gate BUILD targets.

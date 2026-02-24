@@ -1,7 +1,12 @@
+load("@test_sets_bazel_rules//rules:ci_gate.bzl", "ci_gate")
 load("@test_sets_bazel_rules//rules:test_set.bzl", "test_set")
 
+# Backing test sets: compose subsets with assertions.
+# These carry the test hierarchy; ci_gate targets below wrap them
+# with execution policy.
+
 test_set(
-    name = "pr",
+    name = "pr_set",
     subsets = [
         "//ecommerce:ecommerce_tests",
     ],
@@ -9,7 +14,7 @@ test_set(
 )
 
 test_set(
-    name = "merge",
+    name = "merge_set",
     subsets = [
         "//ecommerce:ecommerce_tests",
         "//macros_demo:deployment_validation",
@@ -18,9 +23,40 @@ test_set(
 )
 
 test_set(
-    name = "staging",
+    name = "staging_set",
     subsets = [
         "//macros_demo:memory_limits_staging",
     ],
     assertion = "Code passes the staging quality gate",
+)
+
+# CI gates: bundle test sets with execution policy for each CI stage.
+
+# PR gate: detection mode (fast-fail, roots-first) with status tracking.
+# Tagged manual: run explicitly via `bazel run`, not swept by `bazel test //...`.
+ci_gate(
+    name = "pr",
+    test_set = ":pr_set",
+    mode = "detection",
+    status_file = "ecommerce/.tests/status",
+    tags = ["manual"],
+)
+
+# Merge gate: diagnostic mode (leaves-first, dependency-gated) with
+# converge effort (reruns failures with SPRT to separate flakes).
+ci_gate(
+    name = "merge",
+    test_set = ":merge_set",
+    mode = "diagnostic",
+    effort = "converge",
+    status_file = "ecommerce/.tests/status",
+    tags = ["manual"],
+)
+
+# Staging gate: diagnostic mode, single pass (simplest configuration).
+ci_gate(
+    name = "staging",
+    test_set = ":staging_set",
+    mode = "diagnostic",
+    tags = ["manual"],
 )

@@ -7,7 +7,7 @@ Selects a subset of tests most likely to catch regressions for a given code chan
 ## Trigger
 
 ```bash
-bazel run //ci:pr_gate -- --mode diagnostic
+bazel run //ci:pr -- --allow-dirty
 ```
 
 Or directly via the orchestrator:
