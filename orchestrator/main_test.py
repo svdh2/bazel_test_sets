@@ -682,6 +682,139 @@ class TestDeflake:
             assert sf2.get_test_state("//test:a") == "burning_in"
             assert sf2.get_test_state("//test:b") == "burning_in"
 
+    def test_deflake_clears_target_hash(self):
+        """Deflake clears target_hash so test gets fresh hash tracking."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("//test:a", "flaky")
+            sf.set_target_hash("//test:a", "old_hash_abc")
+            sf.record_run("//test:a", True, target_hash="old_hash_abc")
+            sf.save()
+
+            # Verify hash is set before deflake
+            assert sf.get_target_hash("//test:a") == "old_hash_abc"
+
+            args = _make_args(
+                command="deflake",
+                status_file=status_path,
+                tests=["//test:a"],
+            )
+            exit_code = cmd_deflake(args)
+            assert exit_code == 0
+
+            sf2 = StatusFile(status_path)
+            assert sf2.get_test_state("//test:a") == "burning_in"
+            assert len(sf2.get_test_history("//test:a")) == 0
+            assert sf2.get_target_hash("//test:a") is None
+
+    def test_deflake_without_target_hash(self):
+        """Deflake works fine when no target_hash was set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("//test:a", "flaky")
+            sf.save()
+
+            args = _make_args(
+                command="deflake",
+                status_file=status_path,
+                tests=["//test:a"],
+            )
+            exit_code = cmd_deflake(args)
+            assert exit_code == 0
+
+            sf2 = StatusFile(status_path)
+            assert sf2.get_test_state("//test:a") == "burning_in"
+            assert sf2.get_target_hash("//test:a") is None
+
+    def test_deflake_workflow_to_stable(self):
+        """Full workflow: flaky -> deflake -> burning_in -> evidence -> stable."""
+        from orchestrator.lifecycle.burnin import process_results
+        from orchestrator.execution.executor import TestResult
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            status_path = Path(tmpdir) / "status.json"
+
+            # Step 1: Test starts as flaky with old hash
+            sf = StatusFile(status_path, min_reliability=0.99,
+                            statistical_significance=0.95)
+            sf.set_test_state("//test:fixed", "flaky")
+            sf.set_target_hash("//test:fixed", "old_hash")
+            sf.save()
+
+            # Step 2: Deflake the test
+            args = _make_args(
+                command="deflake",
+                status_file=status_path,
+                tests=["//test:fixed"],
+            )
+            exit_code = cmd_deflake(args)
+            assert exit_code == 0
+
+            # Verify deflake results
+            sf = StatusFile(status_path, min_reliability=0.99,
+                            statistical_significance=0.95)
+            assert sf.get_test_state("//test:fixed") == "burning_in"
+            assert sf.get_target_hash("//test:fixed") is None
+            assert len(sf.get_test_history("//test:fixed")) == 0
+
+            # Step 3: Simulate CI runs recording evidence (30 passes)
+            for _ in range(30):
+                result = TestResult(
+                    name="//test:fixed",
+                    assertion="test works",
+                    status="passed",
+                    duration=0.1,
+                    stdout="",
+                    stderr="",
+                    exit_code=0,
+                )
+                events = process_results(
+                    [result], sf, commit_sha="new_commit",
+                    target_hashes={"//test:fixed": "new_hash"},
+                )
+
+            # After 30 consecutive passes, SPRT should accept -> stable
+            assert sf.get_test_state("//test:fixed") == "stable"
+
+    def test_disabled_to_new_repromotion_via_sync(self):
+        """Disabled -> new re-promotion via sync_disabled_state when BUILD removes disabled flag."""
+        from orchestrator.lifecycle.burnin import sync_disabled_state
+        from orchestrator.execution.dag import TestDAG
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a non-disabled test in manifest
+            script_path = Path(tmpdir) / "test.sh"
+            script_path.write_text("#!/bin/bash\nexit 0\n")
+            script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "//test:was_disabled": {
+                        "assertion": "check",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                        # NOT disabled in manifest
+                    },
+                },
+            }
+            dag = TestDAG.from_manifest(manifest)
+
+            # Status file has test as disabled
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("//test:was_disabled", "disabled")
+            sf.save()
+
+            # Sync should transition disabled -> new
+            events = sync_disabled_state(dag, sf)
+
+            assert len(events) == 1
+            assert events[0] == ("re-enabled", "//test:was_disabled", "disabled", "new")
+            assert sf.get_test_state("//test:was_disabled") == "new"
+
 
 class TestTestStatus:
     """Tests for test-status subcommand."""

@@ -353,6 +353,10 @@ def cmd_deflake(args: argparse.Namespace) -> int:
 
         if current_state == "flaky":
             sf.set_test_state(test_name, "burning_in", clear_history=True)
+            # Clear target_hash so the test gets fresh hash tracking
+            entry = sf.get_test_entry(test_name)
+            if entry is not None and "target_hash" in entry:
+                del entry["target_hash"]
             print(f"  {test_name}: flaky -> burning_in (history reset)")
         elif current_state is None:
             print(
