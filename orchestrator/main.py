@@ -957,12 +957,42 @@ def _run_regression(
                 f"from regression selection"
             )
 
+    # Burn-in test inclusion: when status_file is configured, include
+    # new and burning_in tests alongside co-occurrence-selected stable
+    # tests.  These tests need evidence regardless of hash change status.
+    burn_in_added = 0
+    if args.status_file:
+        from orchestrator.lifecycle.burnin import filter_tests_by_state
+        from orchestrator.regression.regression_selector import add_dependency_closure
+
+        sf_burnin = StatusFile(
+            args.status_file,
+            min_reliability=args.min_reliability,
+            statistical_significance=args.statistical_significance,
+        )
+        new_tests = filter_tests_by_state(
+            dag, sf_burnin, include_states={"new"},
+        )
+        burning_in_tests = filter_tests_by_state(
+            dag, sf_burnin, include_states={"burning_in"},
+        )
+        burn_in_candidates = set(new_tests) | set(burning_in_tests)
+        # Only add tests not already selected
+        burn_in_new = burn_in_candidates - set(selected)
+        if burn_in_new:
+            selected = list(set(selected) | burn_in_new)
+            # Add dependency closure for the combined set
+            selected = add_dependency_closure(selected, manifest)
+            burn_in_added = len(burn_in_new)
+
     # Print selection summary
     print(f"Regression ({args.mode}): {len(selected)} tests selected "
           f"from {selection.total_stable_tests} stable tests "
           f"({len(changed_files)} files changed)")
     if selection.fallback_used:
         print("  (fallback: co-occurrence yielded too few tests)")
+    if burn_in_added > 0:
+        print(f"  (burn-in: {burn_in_added} new/burning_in tests included)")
     print()
 
     if not selected:

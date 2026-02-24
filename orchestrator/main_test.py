@@ -1565,6 +1565,462 @@ class TestMiniConvergeRegression:
             assert exit_code == 1
 
 
+class TestBurnInInclusionRegression:
+    """Tests for burn-in test inclusion in regression selection (Step 4.3)."""
+
+    def _make_graph(self, tmpdir: str, test_names: list[str]) -> Path:
+        """Create a co-occurrence graph that selects given tests via src/module.py."""
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        graph = {
+            "metadata": {
+                "last_commit": "abc",
+                "total_commits_analyzed": 1,
+                "source_extensions": [".py"],
+                "test_patterns": ["*_test.*"],
+            },
+            "file_commits": {
+                "src/module.py": [
+                    {"commit": "c1", "timestamp": ts},
+                ],
+            },
+            "commit_files": {
+                "c1": {
+                    "timestamp": ts,
+                    "source_files": ["src/module.py"],
+                    "test_files": [f"tests/{name}.py" for name in test_names],
+                },
+            },
+        }
+        graph_path = Path(tmpdir) / "graph.json"
+        graph_path.write_text(json.dumps(graph))
+        return graph_path
+
+    def _make_script(self, tmpdir: str, name: str, exit_code: int = 0) -> str:
+        """Create a test script."""
+        script_path = Path(tmpdir) / f"{name}.sh"
+        script_path.write_text(f"#!/bin/bash\nexit {exit_code}\n")
+        script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+        return str(script_path)
+
+    def test_burn_in_inclusion_new_tests_added(self):
+        """New tests are included in regression selection when status_file is configured."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pass_script = self._make_script(tmpdir, "pass", 0)
+
+            # stable_test is selected by co-occurrence
+            # new_test is NOT in the co-occurrence graph but IS in manifest + status file
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "stable_test": {
+                        "assertion": "Stable check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                    "new_test": {
+                        "assertion": "New check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            # Graph only knows about stable_test
+            graph_path = self._make_graph(tmpdir, ["stable_test"])
+
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("stable_test", "stable")
+            sf.set_test_state("new_test", "new")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=False,
+                status_file=status_path,
+                max_reruns=5,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            exit_code = _run_regression(args, manifest, dag, "abc123")
+
+            # Both tests should pass (exit 0)
+            assert exit_code == 0
+
+            # Verify new_test was executed by checking status file
+            sf2 = StatusFile(status_path)
+            history = sf2.get_test_history("new_test")
+            assert len(history) >= 1, "new_test should have been executed"
+
+    def test_burn_in_inclusion_burning_in_tests_added(self):
+        """burning_in tests are included in regression selection."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pass_script = self._make_script(tmpdir, "pass", 0)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "stable_test": {
+                        "assertion": "Stable check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                    "burnin_test": {
+                        "assertion": "Burn-in check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            # Graph only selects stable_test
+            graph_path = self._make_graph(tmpdir, ["stable_test"])
+
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("stable_test", "stable")
+            sf.set_test_state("burnin_test", "burning_in")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=False,
+                status_file=status_path,
+                max_reruns=5,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            exit_code = _run_regression(args, manifest, dag, "abc123")
+            assert exit_code == 0
+
+            # Verify burning_in test was executed
+            sf2 = StatusFile(status_path)
+            history = sf2.get_test_history("burnin_test")
+            assert len(history) >= 1, "burnin_test should have been executed"
+
+    def test_burn_in_inclusion_regardless_of_hash(self):
+        """Burn-in tests are included regardless of hash change status."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pass_script = self._make_script(tmpdir, "pass", 0)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "stable_test": {
+                        "assertion": "Stable check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                    "burnin_test": {
+                        "assertion": "Burn-in check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            graph_path = self._make_graph(tmpdir, ["stable_test"])
+
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("stable_test", "stable")
+            sf.set_test_state("burnin_test", "burning_in")
+            # Set hash for burning_in test - same hash means "unchanged"
+            sf.set_target_hash("burnin_test", "same_hash")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            # Mock compute_target_hashes to return the same hash for burnin_test
+            # (unchanged), but the burn-in inclusion should still add it
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=True,  # Hash filtering active
+                status_file=status_path,
+                max_reruns=5,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {
+                    "stable_test": "new_hash",
+                    "burnin_test": "same_hash",  # unchanged
+                }
+                exit_code = _run_regression(args, manifest, dag, "abc123")
+
+            assert exit_code == 0
+
+            # Verify burning_in test was executed despite unchanged hash
+            sf2 = StatusFile(status_path)
+            history = sf2.get_test_history("burnin_test")
+            assert len(history) >= 1, (
+                "burnin_test should be executed even with unchanged hash"
+            )
+
+    def test_burn_in_closure_includes_dependencies(self):
+        """Dependency closure includes dependencies of burn-in tests."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pass_script = self._make_script(tmpdir, "pass", 0)
+
+            # dep_test is a dependency of burnin_test, not selected by co-occurrence
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "stable_test": {
+                        "assertion": "Stable check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                    "dep_test": {
+                        "assertion": "Dependency check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                    "burnin_test": {
+                        "assertion": "Burn-in check",
+                        "executable": pass_script,
+                        "depends_on": ["dep_test"],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            # Graph only selects stable_test
+            graph_path = self._make_graph(tmpdir, ["stable_test"])
+
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("stable_test", "stable")
+            sf.set_test_state("dep_test", "stable")
+            sf.set_test_state("burnin_test", "burning_in")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=False,
+                status_file=status_path,
+                max_reruns=5,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            exit_code = _run_regression(args, manifest, dag, "abc123")
+            assert exit_code == 0
+
+            # Verify both burnin_test and its dependency dep_test were executed
+            sf2 = StatusFile(status_path)
+            burnin_history = sf2.get_test_history("burnin_test")
+            dep_history = sf2.get_test_history("dep_test")
+            assert len(burnin_history) >= 1, "burnin_test should have been executed"
+            assert len(dep_history) >= 1, (
+                "dep_test should be included via dependency closure"
+            )
+
+    def test_burn_in_no_status_file_no_inclusion(self):
+        """Without status_file, no burn-in tests are added."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pass_script = self._make_script(tmpdir, "pass", 0)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "stable_test": {
+                        "assertion": "Stable check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                    "new_test": {
+                        "assertion": "New check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            # Graph only selects stable_test
+            graph_path = self._make_graph(tmpdir, ["stable_test"])
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=False,
+                status_file=None,  # No status file
+                max_reruns=5,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            exit_code = _run_regression(args, manifest, dag, None)
+
+            # Only stable_test runs, new_test is NOT included
+            # exit 0 because stable_test passes
+            assert exit_code == 0
+
+    def test_burn_in_end_to_end_lifecycle_transition(self):
+        """End-to-end: burning_in test included in regression, lifecycle transitions fire."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pass_script = self._make_script(tmpdir, "pass", 0)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "stable_test": {
+                        "assertion": "Stable check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                    "burnin_test": {
+                        "assertion": "Burn-in check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            graph_path = self._make_graph(tmpdir, ["stable_test"])
+
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(
+                status_path,
+                min_reliability=0.90,
+                statistical_significance=0.90,
+            )
+            sf.set_test_state("stable_test", "stable")
+            sf.set_test_state("burnin_test", "burning_in")
+            # Seed burning_in test with prior passes so SPRT can decide
+            for _ in range(50):
+                sf.record_run("burnin_test", True, commit="prior")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=False,
+                status_file=status_path,
+                max_reruns=5,
+                min_reliability=0.90,
+                statistical_significance=0.90,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            exit_code = _run_regression(args, manifest, dag, "abc123")
+            assert exit_code == 0
+
+            # Check lifecycle: burning_in test should have more evidence now
+            sf2 = StatusFile(status_path)
+            history = sf2.get_test_history("burnin_test")
+            # Should have 50 prior + at least 1 new run
+            assert len(history) > 50
+
+
 class TestEffortConvergeRequiresStatusFile:
     """Tests for effort converge/max validation."""
 
