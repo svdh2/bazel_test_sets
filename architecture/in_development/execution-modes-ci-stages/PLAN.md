@@ -5,10 +5,10 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 
 ## Status Overview
 - **Overall Status**: In Progress
-- **Current Phase**: Phase 1: Foundation -- CLI & Config Migration
-- **Current Step**: Step 1.3: ci_gate Starlark Rule
-- **Completed Steps**: 2 / 16
-- **Last Updated**: 2026-02-23
+- **Current Phase**: Phase 2: Hash-Based Filtering
+- **Current Step**: Step 2.1: Target Hash Computation Spike
+- **Completed Steps**: 3 / 16
+- **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
 
@@ -206,7 +206,7 @@ graph TD
 ## Implementation Sequence
 
 ### Phase 1: Foundation -- CLI & Config Migration
-**Phase Status**: In Progress
+**Phase Status**: Completed
 
 This phase migrates all execution parameters from `TestSetConfig` / `.test_set_config` to CLI flags, then creates the `ci_gate` Starlark rule that generates runner scripts with baked-in flags. This is the foundation for all subsequent work.
 
@@ -420,10 +420,10 @@ Expected: Exit code 0
 ---
 
 #### Step 1.3: ci_gate Starlark Rule
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-23
+**Completed**: 2026-02-24
+**PR/Commit**: 1cfdb2b
 
 **Objective**: Implement the `ci_gate` Starlark rule that bundles a `test_set` reference with execution policy attributes and generates a runner script that invokes the orchestrator with baked-in flags.
 
@@ -500,6 +500,18 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 1.2 to be completed first
 
 **Implementation Notes**:
+- Created `rules/ci_gate.bzl` with `_ci_gate_rule_test` rule and `ci_gate` macro
+- All 15 attributes from the design implemented: mode, effort, max_reruns, max_failures, max_parallel, status_file, diff_base, co_occurrence_graph, max_test_percentage, max_hops, skip_unchanged, min_reliability, statistical_significance, flaky_deadline_days
+- Float-valued attributes (min_reliability, statistical_significance, max_test_percentage) use `attr.string` with `_validate_float_string()` validation since Starlark lacks native float types
+- Runner script only includes non-default/non-None attributes as flags, keeping scripts clean
+- Path-based attributes (status_file, co_occurrence_graph) resolved relative to `BUILD_WORKSPACE_DIRECTORY`
+- Added `manifest` field to `TestSetInfo` provider in `test_set.bzl` so ci_gate can access the manifest file
+- Used `test = True` for the rule so ci_gate targets work with `bazel test` and `bazel run`
+- Macro follows same naming convention as test_set: appends `_test` suffix if not present, creates alias
+- 3 example ci_gate targets added (local_gate, pr_gate, merge_gate) tagged `manual` to avoid running in `bazel test //...` (they require workspace prerequisites like status files)
+- Integration test (`ci_gate_runner_test.py`) verifies generated runner scripts contain correct flags via Bazel py_test; skipped when run via standalone pytest
+- `test_set.bzl` `--config-file` removal was already done in Step 1.2
+- All 19 Bazel targets build, 9/9 Bazel tests pass, 859 pytest tests pass, mypy clean
 
 ---
 
@@ -1693,6 +1705,8 @@ Track major milestones and decisions during implementation:
 - Implementation plan created
 - Step 1.1 completed: Added 10 CLI flags for ci_gate parameters and _resolve_params() helper (commit 03be64f)
 - Step 1.2 completed: Eliminated TestSetConfig dependency from orchestrator -- StatusFile now accepts statistical params directly, all config from CLI args (commit 87751f5)
+- Step 1.3 completed: ci_gate Starlark rule with all 15 attributes, runner script generation, Bazel integration tests (commit 1cfdb2b)
+- Phase 1 (Foundation -- CLI & Config Migration) completed
 
 ## Future Enhancements
 
