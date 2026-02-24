@@ -596,6 +596,98 @@ def cmd_build_graph(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- Hash-based filtering ---
+
+
+def _compute_and_filter_hashes(
+    dag: TestDAG,
+    sf: StatusFile,
+    *,
+    skip_unchanged: bool = True,
+) -> tuple[set[str], set[str], dict[str, str]]:
+    """Compute target hashes, compare with stored hashes, and filter tests.
+
+    1. Calls ``compute_target_hashes`` for all test labels in the DAG.
+    2. Compares each hash against the value stored in the status file.
+    3. For changed hashes: calls ``sf.invalidate_evidence(test_name)`` and
+       updates the stored hash.
+    4. For unchanged hashes: marks the test as skippable (if the test has
+       a conclusive SPRT decision in same-hash history).
+    5. Updates stored hashes in the status file and saves.
+
+    Args:
+        dag: Test DAG containing all test labels.
+        sf: StatusFile instance for reading/writing hashes.
+        skip_unchanged: If True, tests with unchanged hashes and conclusive
+            SPRT may be skipped.
+
+    Returns:
+        Tuple of (hash_changed_tests, hash_unchanged_skippable, target_hashes).
+        - hash_changed_tests: set of test names whose hash changed or is new.
+        - hash_unchanged_skippable: set of test names that can be skipped
+          (only populated when skip_unchanged is True).
+        - target_hashes: mapping of test name to current hash value.
+    """
+    from orchestrator.execution.target_hash import compute_target_hashes
+
+    test_labels = list(dag.nodes.keys())
+    target_hashes = compute_target_hashes(test_labels)
+
+    if not target_hashes:
+        # Hash computation failed (Bazel not available, timeout, etc.)
+        # Fall back to no filtering -- treat all as changed
+        print(
+            "Warning: target hash computation failed, "
+            "skipping hash-based filtering",
+            file=sys.stderr,
+        )
+        return set(test_labels), set(), {}
+
+    hash_changed: set[str] = set()
+    hash_unchanged_skippable: set[str] = set()
+
+    for label in test_labels:
+        current_hash = target_hashes.get(label)
+        if current_hash is None:
+            # No hash available for this target -- treat as changed
+            hash_changed.add(label)
+            continue
+
+        stored_hash = sf.get_target_hash(label)
+
+        if stored_hash is None or stored_hash != current_hash:
+            # Hash is new or changed -- invalidate evidence
+            hash_changed.add(label)
+            if stored_hash is not None:
+                sf.invalidate_evidence(label)
+            sf.set_target_hash(label, current_hash)
+        else:
+            # Hash unchanged -- check if skippable
+            if skip_unchanged:
+                # A test is skippable if it has a conclusive SPRT decision
+                # in its same-hash history.  For simplicity, a non-empty
+                # same-hash history with a stable/flaky state indicates
+                # conclusiveness.
+                state = sf.get_test_state(label)
+                if state in ("stable", "flaky", "disabled"):
+                    hash_unchanged_skippable.add(label)
+                # burning_in / new tests are NOT skippable -- they need
+                # more evidence regardless of hash.
+
+    sf.save()
+
+    # Print summary
+    n_changed = len(hash_changed)
+    n_unchanged = len(test_labels) - n_changed
+    n_skipped = len(hash_unchanged_skippable)
+    print(
+        f"Hash filter: {n_changed} tests changed, "
+        f"{n_unchanged} unchanged ({n_skipped} skippable)"
+    )
+
+    return hash_changed, hash_unchanged_skippable, target_hashes
+
+
 # --- Orchestrator run helpers ---
 
 
@@ -821,6 +913,19 @@ def _run_regression(
         print("No changed files detected. No tests to run.")
         return 0
 
+    # Compute target hashes (if status_file is configured)
+    target_hashes: dict[str, str] = {}
+    hash_changed_tests: set[str] = set()
+    if args.status_file:
+        sf = StatusFile(
+            args.status_file,
+            min_reliability=args.min_reliability,
+            statistical_significance=args.statistical_significance,
+        )
+        hash_changed_tests, _, target_hashes = _compute_and_filter_hashes(
+            dag, sf, skip_unchanged=args.skip_unchanged,
+        )
+
     # Configure and run regression selection
     regression_config = RegressionConfig(
         max_test_percentage=args.max_test_percentage,
@@ -834,20 +939,38 @@ def _run_regression(
         config=regression_config,
     )
 
+    selected = list(selection.selected_tests)
+
+    # If we have hash information, intersect selected stable tests with
+    # hash-changed tests.  This skips tests that were selected by
+    # co-occurrence but whose target inputs haven't actually changed.
+    if hash_changed_tests and args.skip_unchanged:
+        before_count = len(selected)
+        selected = [
+            t for t in selected
+            if t in hash_changed_tests
+        ]
+        hash_filtered = before_count - len(selected)
+        if hash_filtered > 0:
+            print(
+                f"Hash filter removed {hash_filtered} unchanged tests "
+                f"from regression selection"
+            )
+
     # Print selection summary
-    print(f"Regression ({args.mode}): {len(selection.selected_tests)} tests selected "
+    print(f"Regression ({args.mode}): {len(selected)} tests selected "
           f"from {selection.total_stable_tests} stable tests "
           f"({len(changed_files)} files changed)")
     if selection.fallback_used:
         print("  (fallback: co-occurrence yielded too few tests)")
     print()
 
-    if not selection.selected_tests:
+    if not selected:
         print("No tests selected for regression run.")
         return 0
 
     # Build a filtered DAG with only selected tests
-    filtered_manifest = _filter_manifest(manifest, selection.selected_tests)
+    filtered_manifest = _filter_manifest(manifest, selected)
     try:
         filtered_dag = TestDAG.from_manifest(filtered_manifest)
     except ValueError as e:
@@ -926,6 +1049,28 @@ def _run_effort(
         statistical_significance=args.statistical_significance,
     )
 
+    # Hash-based filtering
+    target_hashes: dict[str, str] = {}
+    if args.skip_unchanged:
+        hash_changed, hash_skippable, target_hashes = (
+            _compute_and_filter_hashes(dag, sf, skip_unchanged=True)
+        )
+        if hash_skippable:
+            # Remove skippable tests from the DAG
+            for label in hash_skippable:
+                if label in dag.nodes:
+                    dag.nodes.pop(label, None)
+            print(
+                f"Skipped {len(hash_skippable)} unchanged tests "
+                f"with conclusive SPRT"
+            )
+            print()
+    else:
+        # Even without skip_unchanged, compute hashes for evidence pooling
+        _, _, target_hashes = _compute_and_filter_hashes(
+            dag, sf, skip_unchanged=False,
+        )
+
     # Phase 1: Execute all tests once
     executor: SequentialExecutor | AsyncExecutor
     if args.max_parallel == 1:
@@ -953,7 +1098,10 @@ def _run_effort(
         if r.status == "dependencies_failed":
             continue
         passed = r.status == "passed"
-        sf.record_run(r.name, passed, commit=commit_sha)
+        sf.record_run(
+            r.name, passed, commit=commit_sha,
+            target_hash=target_hashes.get(r.name),
+        )
     sf.save()
 
     # Phase 2: SPRT rerun loop

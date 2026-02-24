@@ -12,8 +12,10 @@ from unittest.mock import patch
 import pytest
 
 from orchestrator.analysis.measurements import store_measurements
+from orchestrator.execution.dag import TestDAG
 from orchestrator.lifecycle.status import StatusFile
 from orchestrator.main import (
+    _compute_and_filter_hashes,
     _filter_manifest,
     _get_changed_files,
     _resolve_git_context,
@@ -1251,6 +1253,295 @@ def _has_git_repo() -> bool:
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
+
+
+class TestComputeAndFilterHashes:
+    """Tests for _compute_and_filter_hashes function."""
+
+    def _make_dag(self, test_names: list[str]) -> TestDAG:
+        """Create a simple DAG with the given test names."""
+        from orchestrator.execution.dag import TestNode
+
+        dag = TestDAG()
+        for name in test_names:
+            dag.nodes[name] = TestNode(
+                name=name,
+                assertion=f"assert_{name}",
+                executable=f"/bin/{name}",
+            )
+        return dag
+
+    def test_all_new_hashes_treated_as_changed(self):
+        """All tests with no stored hash are treated as changed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable")
+            sf.set_test_state("//test:b", "stable")
+            sf.save()
+
+            dag = self._make_dag(["//test:a", "//test:b"])
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {
+                    "//test:a": "hash_a",
+                    "//test:b": "hash_b",
+                }
+                changed, skippable, hashes = _compute_and_filter_hashes(
+                    dag, sf, skip_unchanged=True,
+                )
+
+            assert changed == {"//test:a", "//test:b"}
+            assert skippable == set()
+            assert hashes == {"//test:a": "hash_a", "//test:b": "hash_b"}
+
+    def test_unchanged_hash_stable_is_skippable(self):
+        """Stable test with unchanged hash is skippable."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable")
+            sf.set_target_hash("//test:a", "hash_a")
+            sf.save()
+
+            dag = self._make_dag(["//test:a"])
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {"//test:a": "hash_a"}
+                changed, skippable, hashes = _compute_and_filter_hashes(
+                    dag, sf, skip_unchanged=True,
+                )
+
+            assert changed == set()
+            assert skippable == {"//test:a"}
+
+    def test_unchanged_hash_burning_in_not_skippable(self):
+        """burning_in test with unchanged hash is NOT skippable."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "burning_in")
+            sf.set_target_hash("//test:a", "hash_a")
+            sf.save()
+
+            dag = self._make_dag(["//test:a"])
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {"//test:a": "hash_a"}
+                changed, skippable, hashes = _compute_and_filter_hashes(
+                    dag, sf, skip_unchanged=True,
+                )
+
+            assert changed == set()
+            assert skippable == set()
+
+    def test_changed_hash_invalidates_evidence(self):
+        """Changed hash triggers invalidate_evidence."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable")
+            sf.set_target_hash("//test:a", "old_hash")
+            sf.record_run("//test:a", True, commit="c1", target_hash="old_hash")
+            sf.record_run("//test:a", True, commit="c2", target_hash="old_hash")
+            sf.save()
+
+            dag = self._make_dag(["//test:a"])
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {"//test:a": "new_hash"}
+                changed, skippable, hashes = _compute_and_filter_hashes(
+                    dag, sf, skip_unchanged=True,
+                )
+
+            assert "//test:a" in changed
+            # Evidence should be invalidated
+            assert sf.get_test_state("//test:a") == "burning_in"
+            assert len(sf.get_test_history("//test:a")) == 0
+            # Hash should be updated
+            assert sf.get_target_hash("//test:a") == "new_hash"
+
+    def test_skip_unchanged_false_no_skippable(self):
+        """With skip_unchanged=False, no tests are skippable."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable")
+            sf.set_target_hash("//test:a", "hash_a")
+            sf.save()
+
+            dag = self._make_dag(["//test:a"])
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {"//test:a": "hash_a"}
+                changed, skippable, hashes = _compute_and_filter_hashes(
+                    dag, sf, skip_unchanged=False,
+                )
+
+            assert changed == set()
+            assert skippable == set()
+
+    def test_hash_computation_failure_fallback(self):
+        """When hash computation fails, all tests treated as changed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable")
+            sf.save()
+
+            dag = self._make_dag(["//test:a"])
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {}  # Empty = failure
+                changed, skippable, hashes = _compute_and_filter_hashes(
+                    dag, sf, skip_unchanged=True,
+                )
+
+            assert changed == {"//test:a"}
+            assert skippable == set()
+            assert hashes == {}
+
+    def test_mixed_changed_and_unchanged(self):
+        """Mix of changed and unchanged tests."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable")
+            sf.set_target_hash("//test:a", "hash_a")
+            sf.set_test_state("//test:b", "stable")
+            sf.set_target_hash("//test:b", "old_hash_b")
+            sf.set_test_state("//test:c", "burning_in")
+            sf.set_target_hash("//test:c", "hash_c")
+            sf.save()
+
+            dag = self._make_dag(["//test:a", "//test:b", "//test:c"])
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {
+                    "//test:a": "hash_a",      # unchanged, stable -> skippable
+                    "//test:b": "new_hash_b",  # changed
+                    "//test:c": "hash_c",      # unchanged, burning_in -> not skippable
+                }
+                changed, skippable, hashes = _compute_and_filter_hashes(
+                    dag, sf, skip_unchanged=True,
+                )
+
+            assert changed == {"//test:b"}
+            assert skippable == {"//test:a"}
+
+    def test_new_hash_for_existing_test(self):
+        """Test with no stored hash gets hash set."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable")
+            # No hash set
+            sf.save()
+
+            dag = self._make_dag(["//test:a"])
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {"//test:a": "hash_a"}
+                changed, skippable, hashes = _compute_and_filter_hashes(
+                    dag, sf, skip_unchanged=True,
+                )
+
+            assert "//test:a" in changed
+            # Hash should be stored
+            assert sf.get_target_hash("//test:a") == "hash_a"
+            # No invalidation since there was no previous hash
+            assert sf.get_test_state("//test:a") == "stable"
+
+    def test_label_missing_from_hash_result(self):
+        """Test label not in hash result is treated as changed."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "stable")
+            sf.save()
+
+            dag = self._make_dag(["//test:a", "//test:b"])
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                # Only returns hash for //test:a
+                mock_compute.return_value = {"//test:a": "hash_a"}
+                changed, skippable, hashes = _compute_and_filter_hashes(
+                    dag, sf, skip_unchanged=True,
+                )
+
+            assert "//test:b" in changed
+            assert "//test:a" in changed  # new hash, no stored
+
+    def test_flaky_unchanged_is_skippable(self):
+        """Flaky test with unchanged hash is skippable."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "flaky")
+            sf.set_target_hash("//test:a", "hash_a")
+            sf.save()
+
+            dag = self._make_dag(["//test:a"])
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {"//test:a": "hash_a"}
+                changed, skippable, hashes = _compute_and_filter_hashes(
+                    dag, sf, skip_unchanged=True,
+                )
+
+            assert changed == set()
+            assert skippable == {"//test:a"}
+
+    def test_new_test_unchanged_not_skippable(self):
+        """new test with unchanged hash is NOT skippable."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf.set_test_state("//test:a", "new")
+            sf.set_target_hash("//test:a", "hash_a")
+            sf.save()
+
+            dag = self._make_dag(["//test:a"])
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {"//test:a": "hash_a"}
+                changed, skippable, hashes = _compute_and_filter_hashes(
+                    dag, sf, skip_unchanged=True,
+                )
+
+            assert changed == set()
+            assert skippable == set()
+
+    def test_hash_saved_after_computation(self):
+        """Status file is saved after hash computation."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "status.json"
+            sf = StatusFile(path)
+            sf.set_test_state("//test:a", "stable")
+            sf.save()
+
+            dag = self._make_dag(["//test:a"])
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {"//test:a": "hash_a"}
+                _compute_and_filter_hashes(dag, sf, skip_unchanged=True)
+
+            # Reload from disk to verify save was called
+            sf2 = StatusFile(path)
+            assert sf2.get_target_hash("//test:a") == "hash_a"
 
 
 @pytest.mark.skipif(not _has_git_repo(), reason="No git repository available")
