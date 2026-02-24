@@ -999,12 +999,78 @@ def _run_regression(
         print(f"Error during execution: {e}", file=sys.stderr)
         return 1
 
+    has_failure = any(r.status == "failed" for r in results)
+
+    # Mini-converge: if status_file is configured and there are failures,
+    # run SPRT reruns on failed tests to distinguish flakes from real failures.
+    if args.status_file and has_failure and commit_sha:
+        from orchestrator.execution.effort import EffortRunner
+        from orchestrator.execution.exit_code import compute_exit_code
+
+        sf = StatusFile(
+            args.status_file,
+            min_reliability=args.min_reliability,
+            statistical_significance=args.statistical_significance,
+        )
+
+        # Record initial results in status file before mini-converge
+        for r in results:
+            if r.status == "dependencies_failed":
+                continue
+            passed = r.status == "passed"
+            sf.record_run(
+                r.name, passed, commit=commit_sha,
+                target_hash=target_hashes.get(r.name),
+            )
+        sf.save()
+
+        runner = EffortRunner(
+            dag=filtered_dag,
+            status_file=sf,
+            commit_sha=commit_sha,
+            max_reruns=args.max_reruns,
+            effort_mode="converge",
+            initial_results=results,
+            target_hashes=target_hashes or None,
+        )
+        effort_result = runner.run()
+
+        # Print mini-converge results
+        _print_mini_converge_results(
+            results, effort_result, args, commit_sha, manifest,
+        )
+
+        # Apply lifecycle-aware exit code
+        exit_summary = compute_exit_code(
+            effort_result.classifications, sf, "regression",
+        )
+        if exit_summary.warnings:
+            for warning in exit_summary.warnings:
+                print(f"  Warning: {warning}")
+        if exit_summary.blocking_tests:
+            print(
+                f"\nBlocking tests ({len(exit_summary.blocking_tests)}): "
+                + ", ".join(exit_summary.blocking_tests)
+            )
+        if exit_summary.non_blocking_tests:
+            nb_classified = [
+                name for name in exit_summary.non_blocking_tests
+                if effort_result.classifications[name].classification != "true_pass"
+            ]
+            if nb_classified:
+                print(
+                    f"Non-blocking ({len(nb_classified)}): "
+                    + ", ".join(nb_classified)
+                )
+
+        return exit_summary.exit_code
+
+    # No mini-converge: use raw pass/fail (backward compatible)
     _update_status_file(results, args, commit_sha)
     verdict_data = _compute_verdict(args, filtered_dag, commit_sha)
     demoted = _print_results(
         results, args, commit_sha, manifest, verdict_data,
     )
-    has_failure = any(r.status == "failed" for r in results)
     return 1 if (has_failure or demoted) else 0
 
 
@@ -1381,6 +1447,149 @@ def _print_results(
         return reporter.reliability_demoted_tests
 
     return []
+
+
+def _print_mini_converge_results(
+    initial_results: list,
+    effort_result: Any,
+    args: argparse.Namespace,
+    commit_sha: str | None = None,
+    manifest: dict | None = None,
+) -> None:
+    """Print mini-converge results for regression mode.
+
+    Shows per-test SPRT classifications when mini-converge was applied
+    to distinguish flakes from real failures in regression mode.
+    """
+    mode_label = f"{args.mode} + effort:regression (mini-converge)"
+    print(f"Mode: {mode_label}")
+    print(f"Tests executed: {len(initial_results)} (initial), "
+          f"{effort_result.total_reruns} reruns")
+    print()
+
+    _CLASSIFICATION_ICONS = {
+        "true_pass": "TRUE_PASS",
+        "true_fail": "TRUE_FAIL",
+        "flake": "FLAKE",
+        "undecided": "UNDECIDED",
+    }
+
+    true_pass = 0
+    true_fail = 0
+    flake = 0
+    undecided = 0
+    skipped = 0
+
+    for r in initial_results:
+        if r.status == "dependencies_failed":
+            skipped += 1
+            print(f"  [SKIP] {r.name} - {r.assertion} (dependencies_failed)")
+            continue
+
+        c = effort_result.classifications.get(r.name)
+        if c is None:
+            print(f"  [???] {r.name} - {r.assertion}")
+            continue
+
+        icon = _CLASSIFICATION_ICONS.get(c.classification, c.classification.upper())
+
+        detail = f"{c.passes}/{c.runs} passed"
+        if c.sprt_decision not in ("not_evaluated",):
+            detail += f", SPRT: {c.sprt_decision}"
+
+        print(f"  [{icon}] {r.name} - {r.assertion} ({r.duration:.2f}s, {detail})")
+
+        if r.status == "failed" and c.classification == "true_fail" and r.stderr:
+            for line in r.stderr.strip().splitlines():
+                print(f"         {line}")
+
+        if c.classification == "true_pass":
+            true_pass += 1
+        elif c.classification == "true_fail":
+            true_fail += 1
+        elif c.classification == "flake":
+            flake += 1
+        elif c.classification == "undecided":
+            undecided += 1
+
+    print()
+    parts = []
+    if true_pass:
+        parts.append(f"{true_pass} true_pass")
+    if true_fail:
+        parts.append(f"{true_fail} true_fail")
+    if flake:
+        parts.append(f"{flake} flake")
+    if undecided:
+        parts.append(f"{undecided} undecided")
+    if skipped:
+        parts.append(f"{skipped} skipped")
+    print(f"Results: {', '.join(parts)}")
+    print(f"Total reruns: {effort_result.total_reruns} "
+          f"(budget: {args.max_reruns} per test)")
+
+    # Generate reports
+    if args.output:
+        from orchestrator.reporting.source_links import resolve_source_link_base
+
+        reporter = Reporter()
+        reporting_manifest = manifest
+        if manifest is not None and args.discover_workspace_tests:
+            reporting_manifest = _discover_and_merge(manifest)
+        if reporting_manifest is not None:
+            reporter.set_manifest(reporting_manifest)
+        reporter.add_results(initial_results)
+        if commit_sha:
+            reporter.set_commit_hash(commit_sha)
+        reporter.set_source_link_base(resolve_source_link_base(commit_sha))
+
+        # Add effort classifications to report
+        effort_data = {
+            "mode": "regression",
+            "mini_converge": True,
+            "total_reruns": effort_result.total_reruns,
+            "max_reruns_per_test": args.max_reruns,
+            "classifications": {
+                name: {
+                    "classification": c.classification,
+                    "initial_status": c.initial_status,
+                    "runs": c.runs,
+                    "passes": c.passes,
+                    "sprt_decision": c.sprt_decision,
+                }
+                for name, c in effort_result.classifications.items()
+            },
+        }
+        reporter.set_effort_data(effort_data)
+
+        if args.status_file and args.status_file.exists():
+            sf = StatusFile(
+                args.status_file,
+                min_reliability=args.min_reliability,
+                statistical_significance=args.statistical_significance,
+            )
+            lifecycle_data: dict[str, dict[str, Any]] = {}
+            for test_name, entry in sf.get_all_tests().items():
+                lifecycle_data[test_name] = {
+                    "state": entry.get("state", "new"),
+                }
+            reporter.set_lifecycle_data(lifecycle_data)
+            reporter.set_lifecycle_config({
+                "min_reliability": sf.min_reliability,
+                "statistical_significance": sf.statistical_significance,
+            })
+
+        existing = args.output if args.output.exists() else None
+        report_data = reporter.generate_report_with_history(existing)
+
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.output, "w") as f:
+            json.dump(report_data, f, indent=2)
+        print(f"Report written to: {args.output}")
+
+        html_path = args.output.with_suffix(".html")
+        write_html_report(report_data, html_path)
+        print(f"HTML report written to: {html_path}")
 
 
 def _print_effort_results(

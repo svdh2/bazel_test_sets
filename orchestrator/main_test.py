@@ -1136,6 +1136,435 @@ class TestEffortRegressionEndToEnd:
             assert exit_code == 0
 
 
+class TestMiniConvergeRegression:
+    """Tests for mini-converge in regression mode with status_file."""
+
+    def _make_graph(self, tmpdir: str, test_name: str) -> Path:
+        """Create a co-occurrence graph that selects the given test."""
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat()
+        graph = {
+            "metadata": {
+                "last_commit": "abc",
+                "total_commits_analyzed": 1,
+                "source_extensions": [".py"],
+                "test_patterns": ["*_test.*"],
+            },
+            "file_commits": {
+                "src/module.py": [
+                    {"commit": "c1", "timestamp": ts},
+                ],
+            },
+            "commit_files": {
+                "c1": {
+                    "timestamp": ts,
+                    "source_files": ["src/module.py"],
+                    "test_files": [f"tests/{test_name}.py"],
+                },
+            },
+        }
+        graph_path = Path(tmpdir) / "graph.json"
+        graph_path.write_text(json.dumps(graph))
+        return graph_path
+
+    def test_mini_converge_true_fail_blocks(self):
+        """Regression with status_file: consistently failing test -> exit 1."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a failing test script
+            script_path = Path(tmpdir) / "fail_test.sh"
+            script_path.write_text("#!/bin/bash\nexit 1\n")
+            script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "fail_test": {
+                        "assertion": "Should fail",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            graph_path = self._make_graph(tmpdir, "fail_test")
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("fail_test", "stable")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=False,
+                status_file=status_path,
+                max_reruns=5,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            with patch("orchestrator.main._resolve_git_context") as mock_git:
+                mock_git.return_value = "abc123"
+                exit_code = _run_regression(args, manifest, dag, "abc123")
+
+            # Consistently failing stable test -> blocks (exit 1)
+            assert exit_code == 1
+
+    def test_mini_converge_flaky_test_non_blocking(self):
+        """Regression with status_file: flaky-state test failure -> exit 0."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a failing test script
+            script_path = Path(tmpdir) / "flaky_test.sh"
+            script_path.write_text("#!/bin/bash\nexit 1\n")
+            script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "flaky_test": {
+                        "assertion": "Flaky check",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            graph_path = self._make_graph(tmpdir, "flaky_test")
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("flaky_test", "flaky")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=False,
+                status_file=status_path,
+                max_reruns=5,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            exit_code = _run_regression(args, manifest, dag, "abc123")
+
+            # Flaky test failure is non-blocking in regression mode
+            assert exit_code == 0
+
+    def test_mini_converge_burning_in_non_blocking(self):
+        """Regression with status_file: burning_in test failure -> exit 0."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script_path = Path(tmpdir) / "burnin_test.sh"
+            script_path.write_text("#!/bin/bash\nexit 1\n")
+            script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "burnin_test": {
+                        "assertion": "Burn-in check",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            graph_path = self._make_graph(tmpdir, "burnin_test")
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("burnin_test", "burning_in")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=False,
+                status_file=status_path,
+                max_reruns=5,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            exit_code = _run_regression(args, manifest, dag, "abc123")
+
+            # burning_in test failure is non-blocking in regression mode
+            assert exit_code == 0
+
+    def test_regression_no_status_file_backward_compatible(self):
+        """Without status_file, regression uses raw pass/fail (no mini-converge)."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create a failing test
+            script_path = Path(tmpdir) / "fail_test.sh"
+            script_path.write_text("#!/bin/bash\nexit 1\n")
+            script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "fail_test": {
+                        "assertion": "Should fail",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            graph_path = self._make_graph(tmpdir, "fail_test")
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=False,
+                status_file=None,  # No status file
+                max_reruns=5,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            exit_code = _run_regression(args, manifest, dag, None)
+
+            # No status file -> raw pass/fail, failure blocks
+            assert exit_code == 1
+
+    def test_mini_converge_all_pass_exit_zero(self):
+        """Regression with status_file: all tests pass -> exit 0 (no mini-converge)."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script_path = Path(tmpdir) / "pass_test.sh"
+            script_path.write_text("#!/bin/bash\nexit 0\n")
+            script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "pass_test": {
+                        "assertion": "Should pass",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            graph_path = self._make_graph(tmpdir, "pass_test")
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("pass_test", "stable")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=False,
+                status_file=status_path,
+                max_reruns=5,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            exit_code = _run_regression(args, manifest, dag, "abc123")
+
+            # All pass -> no mini-converge needed, exit 0
+            assert exit_code == 0
+
+    def test_mini_converge_records_runs_in_status_file(self):
+        """Mini-converge records rerun results in the status file."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script_path = Path(tmpdir) / "fail_test.sh"
+            script_path.write_text("#!/bin/bash\nexit 1\n")
+            script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "fail_test": {
+                        "assertion": "Should fail",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            graph_path = self._make_graph(tmpdir, "fail_test")
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("fail_test", "stable")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=False,
+                status_file=status_path,
+                max_reruns=3,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            _run_regression(args, manifest, dag, "abc123")
+
+            # Reload status file and check history
+            sf2 = StatusFile(status_path)
+            history = sf2.get_test_history("fail_test")
+            # Should have initial run + up to max_reruns entries
+            assert len(history) >= 2  # At least initial + 1 rerun
+
+    def test_regression_no_commit_sha_no_mini_converge(self):
+        """Without commit_sha, regression skips mini-converge."""
+        from orchestrator.main import _run_regression
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            script_path = Path(tmpdir) / "fail_test.sh"
+            script_path.write_text("#!/bin/bash\nexit 1\n")
+            script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "fail_test": {
+                        "assertion": "Should fail",
+                        "executable": str(script_path),
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            graph_path = self._make_graph(tmpdir, "fail_test")
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("fail_test", "stable")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="regression",
+                changed_files="src/module.py",
+                co_occurrence_graph=graph_path,
+                max_parallel=1,
+                max_failures=None,
+                max_test_percentage=1.0,
+                max_hops=2,
+                skip_unchanged=False,
+                status_file=status_path,
+                max_reruns=5,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            # No commit_sha -> falls through to raw pass/fail path
+            exit_code = _run_regression(args, manifest, dag, None)
+
+            # Without commit SHA, mini-converge doesn't run, raw fail
+            assert exit_code == 1
+
+
 class TestEffortConvergeRequiresStatusFile:
     """Tests for effort converge/max validation."""
 
