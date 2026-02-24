@@ -1212,13 +1212,36 @@ def _run_effort(
     )
     effort_result = runner.run()
 
-    # Phase 3: Verdict
+    # Phase 3: Burn-in sweep (if burning_in tests exist)
+    from orchestrator.lifecycle.burnin import BurnInSweep, filter_tests_by_state
+
+    sweep_result = None
+    burning_in_tests = filter_tests_by_state(
+        dag, sf, include_states={"burning_in"},
+    )
+    if burning_in_tests:
+        sweep = BurnInSweep(
+            dag, sf, commit_sha=commit_sha,
+            target_hashes=target_hashes or None,
+        )
+        sweep_result = sweep.run(test_names=burning_in_tests)
+
+        if sweep_result.decided:
+            print(f"\nBurn-in sweep: {len(sweep_result.decided)} test(s) decided")
+            for name, state in sweep_result.decided.items():
+                print(f"  {name}: burning_in -> {state}")
+        if sweep_result.undecided:
+            print(
+                f"  {len(sweep_result.undecided)} test(s) still burning_in"
+            )
+
+    # Phase 4: Verdict
     verdict_data = _compute_verdict(args, dag, commit_sha)
 
-    # Phase 4: Print results
+    # Phase 5: Print results
     _print_effort_results(
         initial_results, effort_result, args, commit_sha, manifest,
-        verdict_data,
+        verdict_data, sweep_result=sweep_result,
     )
 
     # Exit code: 1 if any true_fail or flake
@@ -1337,7 +1360,10 @@ def _compute_verdict(
 
 
 def _update_status_file(
-    results: list, args: argparse.Namespace, commit_sha: str | None
+    results: list,
+    args: argparse.Namespace,
+    commit_sha: str | None,
+    target_hashes: dict[str, str] | None = None,
 ) -> None:
     """Update the status file with test results if status_file is configured."""
     if not args.status_file:
@@ -1350,7 +1376,10 @@ def _update_status_file(
         min_reliability=args.min_reliability,
         statistical_significance=args.statistical_significance,
     )
-    events = process_results(results, sf, commit_sha=commit_sha)
+    events = process_results(
+        results, sf, commit_sha=commit_sha,
+        target_hashes=target_hashes,
+    )
     if events:
         print("\nLifecycle events:")
         for etype, name, old_state, new_state in events:
@@ -1629,12 +1658,16 @@ def _print_effort_results(
     commit_sha: str | None = None,
     manifest: dict | None = None,
     verdict_data: dict[str, Any] | None = None,
+    sweep_result: Any | None = None,
 ) -> None:
     """Print effort mode results with per-test SPRT classifications."""
     mode_label = f"{args.mode} + effort:{args.effort}"
     print(f"Mode: {mode_label}")
+    sweep_runs = sweep_result.total_runs if sweep_result else 0
+    total_reruns = effort_result.total_reruns + sweep_runs
     print(f"Tests executed: {len(initial_results)} (initial), "
-          f"{effort_result.total_reruns} reruns")
+          f"{total_reruns} reruns"
+          + (f" ({sweep_runs} burn-in sweep)" if sweep_runs else ""))
     print()
 
     _CLASSIFICATION_ICONS = {

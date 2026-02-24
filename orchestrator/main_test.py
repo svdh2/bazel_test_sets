@@ -2021,6 +2021,327 @@ class TestBurnInInclusionRegression:
             assert len(history) > 50
 
 
+class TestBurnInSweepInEffort:
+    """Tests for burn-in sweep phase in effort converge/max modes (Step 5.2)."""
+
+    def _make_script(self, tmpdir: str, name: str, exit_code: int = 0) -> str:
+        """Create a test script."""
+        script_path = Path(tmpdir) / f"{name}.sh"
+        script_path.write_text(f"#!/bin/bash\nexit {exit_code}\n")
+        script_path.chmod(script_path.stat().st_mode | stat.S_IEXEC)
+        return str(script_path)
+
+    def test_effort_burnin_sweep_runs_for_burning_in_tests(self):
+        """Converge mode runs burn-in sweep after SPRT rerun for burning_in tests."""
+        from orchestrator.main import _run_effort
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pass_script = self._make_script(tmpdir, "pass", 0)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "stable_test": {
+                        "assertion": "Stable check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                    "burnin_test": {
+                        "assertion": "Burn-in check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("stable_test", "stable")
+            sf.set_test_state("burnin_test", "burning_in")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="converge",
+                max_parallel=1,
+                max_failures=None,
+                max_reruns=5,
+                skip_unchanged=False,
+                status_file=status_path,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {
+                    "stable_test": "hash_s",
+                    "burnin_test": "hash_b",
+                }
+                exit_code = _run_effort(args, manifest, dag, "abc123")
+
+            assert exit_code == 0
+
+            # Verify burnin_test has evidence from sweep
+            sf2 = StatusFile(status_path)
+            history = sf2.get_test_history("burnin_test")
+            # Should have initial run + effort reruns + sweep runs
+            assert len(history) >= 2
+
+    def test_effort_no_burnin_sweep_skipped(self):
+        """Converge mode skips burn-in sweep when no burning_in tests exist."""
+        from orchestrator.main import _run_effort
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pass_script = self._make_script(tmpdir, "pass", 0)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "stable_test": {
+                        "assertion": "Stable check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("stable_test", "stable")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="converge",
+                max_parallel=1,
+                max_failures=None,
+                max_reruns=5,
+                skip_unchanged=False,
+                status_file=status_path,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {"stable_test": "hash_s"}
+                exit_code = _run_effort(args, manifest, dag, "abc123")
+
+            # All stable, all pass -> exit 0
+            assert exit_code == 0
+
+    def test_effort_burnin_sweep_promotes_to_stable(self):
+        """Burn-in sweep in effort mode promotes test to stable after enough evidence."""
+        from orchestrator.main import _run_effort
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pass_script = self._make_script(tmpdir, "pass", 0)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "burnin_test": {
+                        "assertion": "Burn-in check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("burnin_test", "burning_in")
+            # Pre-populate with enough prior passes so sweep can decide
+            for _ in range(20):
+                sf.record_run("burnin_test", True, commit="prior")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="converge",
+                max_parallel=1,
+                max_failures=None,
+                max_reruns=5,
+                skip_unchanged=False,
+                status_file=status_path,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {"burnin_test": "hash_b"}
+                exit_code = _run_effort(args, manifest, dag, "abc123")
+
+            assert exit_code == 0
+
+            # After initial run + effort + sweep, test should be promoted
+            sf2 = StatusFile(status_path)
+            state = sf2.get_test_state("burnin_test")
+            assert state == "stable", (
+                f"Expected stable after burn-in sweep, got {state}"
+            )
+
+    def test_effort_max_mode_with_burnin(self):
+        """Max mode also runs burn-in sweep for burning_in tests."""
+        from orchestrator.main import _run_effort
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pass_script = self._make_script(tmpdir, "pass", 0)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "burnin_test": {
+                        "assertion": "Burn-in check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("burnin_test", "burning_in")
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="max",
+                max_parallel=1,
+                max_failures=None,
+                max_reruns=5,
+                skip_unchanged=False,
+                status_file=status_path,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {"burnin_test": "hash_b"}
+                exit_code = _run_effort(args, manifest, dag, "abc123")
+
+            assert exit_code == 0
+
+            # Verify burnin_test received sweep runs
+            sf2 = StatusFile(status_path)
+            history = sf2.get_test_history("burnin_test")
+            assert len(history) >= 2
+
+    def test_effort_skip_unchanged_keeps_burning_in(self):
+        """skip_unchanged=True does not skip burning_in tests (they need evidence)."""
+        from orchestrator.main import _run_effort
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pass_script = self._make_script(tmpdir, "pass", 0)
+
+            manifest = {
+                "test_set": {"name": "tests", "assertion": "test"},
+                "test_set_tests": {
+                    "stable_test": {
+                        "assertion": "Stable check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                    "burnin_test": {
+                        "assertion": "Burn-in check",
+                        "executable": pass_script,
+                        "depends_on": [],
+                    },
+                },
+            }
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text(json.dumps(manifest))
+
+            status_path = Path(tmpdir) / "status.json"
+            sf = StatusFile(status_path)
+            sf.set_test_state("stable_test", "stable")
+            sf.set_target_hash("stable_test", "hash_s")  # unchanged
+            sf.set_test_state("burnin_test", "burning_in")
+            sf.set_target_hash("burnin_test", "hash_b")  # unchanged
+            sf.save()
+
+            dag = TestDAG.from_manifest(manifest)
+
+            args = _make_args(
+                manifest=manifest_path,
+                mode="diagnostic",
+                effort="converge",
+                max_parallel=1,
+                max_failures=None,
+                max_reruns=5,
+                skip_unchanged=True,  # Hash filtering active
+                status_file=status_path,
+                min_reliability=0.99,
+                statistical_significance=0.95,
+                allow_dirty=True,
+                output=None,
+                discover_workspace_tests=False,
+                flaky_deadline_days=14,
+            )
+
+            with patch(
+                "orchestrator.execution.target_hash.compute_target_hashes"
+            ) as mock_compute:
+                mock_compute.return_value = {
+                    "stable_test": "hash_s",   # unchanged
+                    "burnin_test": "hash_b",   # unchanged
+                }
+                exit_code = _run_effort(args, manifest, dag, "abc123")
+
+            assert exit_code == 0
+
+            # stable_test should be skipped (unchanged + conclusive)
+            # burnin_test should NOT be skipped (burning_in needs evidence)
+            sf2 = StatusFile(status_path)
+            burnin_history = sf2.get_test_history("burnin_test")
+            assert len(burnin_history) >= 1, (
+                "burnin_test should have been executed despite unchanged hash"
+            )
+
+
 class TestEffortConvergeRequiresStatusFile:
     """Tests for effort converge/max validation."""
 
