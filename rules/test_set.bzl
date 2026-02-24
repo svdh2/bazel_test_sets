@@ -12,6 +12,7 @@ TestSetInfo = provider(
         "subset_labels": "List of direct subset test_set labels",
         "all_tests": "Depset of all TestSetTestInfo across tests and subsets",
         "tree": "Recursive tree dict for hierarchical reporting",
+        "manifest": "The generated manifest JSON file (File)",
     },
 )
 
@@ -134,6 +135,7 @@ exec "$R/{workspace}/{orchestrator}" \\
             subset_labels = [s.label for s in ctx.attr.subsets],
             all_tests = all_tests,
             tree = tree,
+            manifest = manifest_file,
         ),
     ]
 

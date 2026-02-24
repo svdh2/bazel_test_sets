@@ -1,4 +1,5 @@
 load("@rules_python//python:defs.bzl", "py_binary", "py_test")
+load("//rules:ci_gate.bzl", "ci_gate")
 load("//rules:test_set_test.bzl", "test_set_test")
 load("//rules:test_set.bzl", "test_set")
 
@@ -70,4 +71,55 @@ test_set(
     tests = [":sample_dep_wrapped"],
     subsets = [":basic_tests"],
     assertion = "All sample operations work correctly",
+)
+
+# --- ci_gate targets ---
+
+# ci_gate with all defaults (local dev, no effort).
+# Tagged manual: these are example targets for demonstrating ci_gate usage
+# and runner script generation. They are not meant to pass as standalone tests
+# because they require workspace-level prerequisites (status files, etc.).
+ci_gate(
+    name = "local_gate",
+    test_set = ":sample_tests",
+    tags = ["manual"],
+)
+
+# ci_gate with regression effort (PR gate style)
+ci_gate(
+    name = "pr_gate",
+    test_set = ":sample_tests",
+    mode = "diagnostic",
+    effort = "regression",
+    max_reruns = 5,
+    diff_base = "main",
+    tags = ["manual"],
+)
+
+# ci_gate with converge effort and non-default statistical params
+ci_gate(
+    name = "merge_gate",
+    test_set = ":basic_tests",
+    mode = "detection",
+    effort = "converge",
+    max_reruns = 10,
+    max_failures = 1,
+    min_reliability = "0.999",
+    skip_unchanged = False,
+    tags = ["manual"],
+)
+
+# --- ci_gate integration test ---
+
+# Verifies that ci_gate runner scripts contain correct baked-in flags.
+# Uses py_test since sh_test requires @rules_shell which is not available.
+py_test(
+    name = "ci_gate_runner_test",
+    srcs = ["ci_gate_runner_test.py"],
+    main = "ci_gate_runner_test.py",
+    data = [
+        ":local_gate_test",
+        ":pr_gate_test",
+        ":merge_gate_test",
+    ],
 )

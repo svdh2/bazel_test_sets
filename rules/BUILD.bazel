@@ -1,6 +1,7 @@
 # BUILD file for Starlark rules
 
 exports_files([
+    "ci_gate.bzl",
     "test_set_test.bzl",
     "test_set.bzl",
 ])
