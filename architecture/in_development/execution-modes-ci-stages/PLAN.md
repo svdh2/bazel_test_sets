@@ -6,8 +6,8 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 ## Status Overview
 - **Overall Status**: In Progress
 - **Current Phase**: Phase 3: Lifecycle-Aware Exit Codes
-- **Current Step**: Step 3.1 Completed -- Ready for Phase 4
-- **Completed Steps**: 7 / 16
+- **Current Step**: Step 4.1 Completed -- Ready for Step 4.2
+- **Completed Steps**: 8 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -936,17 +936,17 @@ Expected: Exit code 0
 ---
 
 ### Phase 4: Mini-Converge & Regression Enhancement
-**Phase Status**: Not Started
+**Phase Status**: In Progress
 
 This phase implements the core behavioral changes: modifying EffortRunner for same-hash evidence pooling, adding mini-converge to regression mode, and including burn-in tests in regression selection.
 
 ---
 
 #### Step 4.1: EffortRunner Same-Hash Evidence Pooling
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: 81e5caf
 
 **Objective**: Modify `EffortRunner` to pool SPRT evidence from prior sessions with matching target hashes, instead of using only session-local data. This enables cross-session evidence accumulation for burn-in tests and faster SPRT convergence.
 
@@ -1012,6 +1012,16 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 2.3 (hash filtering in orchestrator, which provides target_hashes)
 
 **Implementation Notes**:
+- Added `target_hashes: dict[str, str] | None = None` parameter to `EffortRunner.__init__`
+- Added `_get_target_hash(name)` helper returning hash for a test or None
+- Added `_load_prior_evidence(name)` helper that queries `sf.get_same_hash_history()` and returns (runs, passes) tuple from prior sessions
+- SPRT evaluation now uses `total_runs`/`total_passes` (prior + session) instead of session-only counters
+- Separate `session_runs`/`session_passes` tracking preserved for diagnostic purposes
+- `record_run()` calls now pass `target_hash=self._get_target_hash(name)` for per-entry hash tracking
+- Updated `main.py` to pass `target_hashes=target_hashes or None` to EffortRunner constructor
+- Backward compatible: when `target_hashes` is None, `_load_prior_evidence` returns (0, 0), behavior identical to session-only
+- 13 new tests across 3 test classes: TestEffortRunnerSameHashPooling (7 tests), TestEffortRunnerRecordRunWithHash (6 tests including flake detection and runs counting), plus 1 new backward-compatibility test in TestEffortRunnerSessionOnly
+- All 1066 pytest tests pass, 9/9 Bazel tests pass, mypy clean
 
 ---
 
@@ -1743,6 +1753,7 @@ All tests run via `./ci test` inside the Docker container. Type checks run via `
 Track major milestones and decisions during implementation:
 
 ### 2026-02-24
+- Step 4.1 completed: EffortRunner same-hash evidence pooling -- cross-session SPRT convergence via target hash matching (commit 81e5caf)
 - Step 3.1 completed: Lifecycle-aware exit code function -- classify_test_blocking + compute_exit_code with exhaustive matrix tests (commit 592745d)
 - Phase 3 (Lifecycle-Aware Exit Codes) completed
 - Step 2.3 completed: Hash-based filtering in orchestrator -- _compute_and_filter_hashes integrated into regression and effort paths (commit fe063c5)
