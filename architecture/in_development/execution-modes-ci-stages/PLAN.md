@@ -6,8 +6,8 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 ## Status Overview
 - **Overall Status**: In Progress
 - **Current Phase**: Phase 1: Foundation -- CLI & Config Migration
-- **Current Step**: Step 1.1: Add CLI Flags for ci_gate Parameters
-- **Completed Steps**: 0 / 16
+- **Current Step**: Step 1.3: ci_gate Starlark Rule
+- **Completed Steps**: 2 / 16
 - **Last Updated**: 2026-02-23
 
 ## How to Use This Plan
@@ -213,10 +213,10 @@ This phase migrates all execution parameters from `TestSetConfig` / `.test_set_c
 ---
 
 #### Step 1.1: Add CLI Flags for ci_gate Parameters
-**Status**: In Progress
+**Status**: Completed
 **Started**: 2026-02-23
-**Completed**:
-**PR/Commit**:
+**Completed**: 2026-02-23
+**PR/Commit**: 03be64f
 
 **Objective**: Add all new CLI flags to the orchestrator's argument parser so that the `ci_gate` runner script can pass execution policy and statistical/lifecycle parameters via the command line.
 
@@ -297,14 +297,19 @@ Expected: Exit code 0, no type errors
 **Dependencies**: None
 
 **Implementation Notes**:
+- Added 10 new CLI flags to `parse_args()` matching DEFAULT_CONFIG values
+- `--skip-unchanged` / `--no-skip-unchanged` uses `store_true`/`store_false` with `dest="skip_unchanged"`
+- `_resolve_params()` merges CLI with config using default-detection heuristic (CLI non-default value wins)
+- 31 new tests added (26 for parse_args, 5 for _resolve_params)
+- All 864 existing tests pass unchanged; type checks pass
 
 ---
 
 #### Step 1.2: Eliminate TestSetConfig Dependency from Orchestrator
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-23
+**Completed**: 2026-02-23
+**PR/Commit**: 87751f5
 
 **Objective**: Remove the orchestrator's dependency on `TestSetConfig` and `.test_set_config` files. All parameters are now read from CLI flags (which will be set by `ci_gate` runner scripts). The `StatusFile` class is updated to accept statistical parameters directly instead of delegating to `TestSetConfig`.
 
@@ -400,6 +405,17 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 1.1 to be completed first
 
 **Implementation Notes**:
+- Removed `TestSetConfig` import and all `config_path`/`_config` delegation from `StatusFile`
+- Added `min_reliability` and `statistical_significance` as keyword-only constructor params with `DEFAULT_CONFIG` defaults
+- Removed all `max_*` property delegations from `StatusFile` (orchestrator concerns, not status file concerns)
+- Removed `--config-file` CLI flag from `parse_args()` and deleted `_resolve_params()` function
+- Updated all helper functions in `main.py` to use `args.xxx` instead of `config.xxx`
+- Updated `StatusFile` construction throughout to pass statistical params directly
+- Also updated `rules/test_set.bzl` runner script to remove `--config-file` (pulled forward from Step 1.3 scope since removing the CLI flag would break the generated runner script)
+- Updated 3 integration tests in `tests/integration/test_end_to_end.py` to use `--max-parallel 1` instead of `--config-file`
+- Removed `TestResolveParams` test class (5 tests) from `main_test.py` since `_resolve_params` was deleted
+- Net reduction: 110 insertions, 310 deletions across 7 files
+- All 859 tests pass, mypy clean, Bazel build successful
 
 ---
 
@@ -1675,6 +1691,8 @@ Track major milestones and decisions during implementation:
 
 ### 2026-02-23
 - Implementation plan created
+- Step 1.1 completed: Added 10 CLI flags for ci_gate parameters and _resolve_params() helper (commit 03be64f)
+- Step 1.2 completed: Eliminated TestSetConfig dependency from orchestrator -- StatusFile now accepts statistical params directly, all config from CLI args (commit 87751f5)
 
 ## Future Enhancements
 
