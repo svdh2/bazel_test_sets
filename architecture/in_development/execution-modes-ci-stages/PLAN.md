@@ -5,9 +5,9 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 
 ## Status Overview
 - **Overall Status**: In Progress
-- **Current Phase**: Phase 2: Hash-Based Filtering
-- **Current Step**: Step 2.3: Hash-Based Filtering in Orchestrator
-- **Completed Steps**: 5 / 16
+- **Current Phase**: Phase 3: Lifecycle-Aware Exit Codes
+- **Current Step**: Step 3.1: Lifecycle-Aware Exit Code Function
+- **Completed Steps**: 6 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -516,7 +516,7 @@ Expected: Exit code 0
 ---
 
 ### Phase 2: Hash-Based Filtering
-**Phase Status**: In Progress
+**Phase Status**: Completed
 
 This phase implements target hash computation via `bazel aquery`, stores hashes in the status file, and adds hash-based filtering to the orchestrator. This is a risky area due to the external dependency on `bazel aquery` performance and output format.
 
@@ -739,10 +739,10 @@ Expected: Exit code 0
 ---
 
 #### Step 2.3: Hash-Based Filtering in Orchestrator
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: fe063c5
 
 **Objective**: Integrate target hash computation and hash-based filtering into the orchestrator's execution pipeline. Before running tests, compute hashes, compare with stored hashes, invalidate evidence for changed tests, and optionally skip unchanged tests.
 
@@ -809,6 +809,16 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 2.2 to be completed (StatusFile target_hash storage)
 
 **Implementation Notes**:
+- Added `_compute_and_filter_hashes(dag, sf, skip_unchanged)` function to `orchestrator/main.py`
+- Function computes target hashes via `compute_target_hashes()`, compares against stored hashes in StatusFile, invalidates evidence for changed hashes, identifies skippable unchanged tests
+- Skippable logic: stable/flaky/disabled tests with unchanged hash are skippable; burning_in/new tests are never skippable (need more evidence)
+- Wired into `_run_effort`: computes hashes before Phase 1 execution, removes skippable tests from DAG when `skip_unchanged=True`, passes `target_hash` to `sf.record_run()` for evidence pooling
+- Wired into `_run_regression`: computes hashes when `status_file` is configured, intersects co-occurrence-selected tests with hash-changed tests to skip unchanged stable tests
+- Graceful fallback: when `compute_target_hashes()` returns empty dict (Bazel not available, timeout), all tests treated as changed with stderr warning
+- Hash computation skipped entirely when no effort mode is set (default local dev path)
+- Prints summary: "Hash filter: X tests changed, Y unchanged (Z skippable)"
+- 12 new tests in TestComputeAndFilterHashes covering all scenarios
+- All 937 pytest tests pass, 9/9 Bazel tests pass, mypy clean
 
 ---
 
@@ -1721,6 +1731,8 @@ All tests run via `./ci test` inside the Docker container. Type checks run via `
 Track major milestones and decisions during implementation:
 
 ### 2026-02-24
+- Step 2.3 completed: Hash-based filtering in orchestrator -- _compute_and_filter_hashes integrated into regression and effort paths (commit fe063c5)
+- Phase 2 (Hash-Based Filtering) completed
 - Step 2.2 completed: StatusFile target hash storage -- per-test and per-history-entry hash tracking with evidence invalidation and same-hash filtering (commit 6ea001c)
 - Step 2.1 completed: Target hash computation spike -- standalone module using `bazel aquery --output=jsonproto` with 35 unit tests (commit 3615423)
 
