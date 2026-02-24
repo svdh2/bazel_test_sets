@@ -13,10 +13,12 @@ import pytest
 
 from orchestrator.analysis.measurements import store_measurements
 from orchestrator.lifecycle.status import StatusFile
+from orchestrator.lifecycle.config import TestSetConfig
 from orchestrator.main import (
     _filter_manifest,
     _get_changed_files,
     _resolve_git_context,
+    _resolve_params,
     cmd_build_graph,
     cmd_burn_in,
     cmd_deflake,
@@ -127,6 +129,290 @@ class TestParseArgsEffort:
             "--allow-dirty",
         ])
         assert args.allow_dirty is True
+
+
+class TestParseArgsCiGateFlags:
+    """Tests for ci_gate parameter CLI flags."""
+
+    def test_max_reruns_default(self):
+        """--max-reruns defaults to 100."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        assert args.max_reruns == 100
+
+    def test_max_reruns_override(self):
+        """--max-reruns accepts an integer value."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--max-reruns", "5",
+        ])
+        assert args.max_reruns == 5
+
+    def test_max_failures_default(self):
+        """--max-failures defaults to None."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        assert args.max_failures is None
+
+    def test_max_failures_override(self):
+        """--max-failures accepts an integer value."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--max-failures", "3",
+        ])
+        assert args.max_failures == 3
+
+    def test_max_parallel_default(self):
+        """--max-parallel defaults to None."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        assert args.max_parallel is None
+
+    def test_max_parallel_override(self):
+        """--max-parallel accepts an integer value."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--max-parallel", "8",
+        ])
+        assert args.max_parallel == 8
+
+    def test_status_file_default(self):
+        """--status-file defaults to None."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        assert args.status_file is None
+
+    def test_status_file_override(self):
+        """--status-file accepts a path value."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--status-file", ".tests/status",
+        ])
+        assert args.status_file == Path(".tests/status")
+
+    def test_max_test_percentage_default(self):
+        """--max-test-percentage defaults to 0.10."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        assert args.max_test_percentage == 0.10
+
+    def test_max_test_percentage_override(self):
+        """--max-test-percentage accepts a float value."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--max-test-percentage", "0.25",
+        ])
+        assert args.max_test_percentage == 0.25
+
+    def test_max_hops_default(self):
+        """--max-hops defaults to 2."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        assert args.max_hops == 2
+
+    def test_max_hops_override(self):
+        """--max-hops accepts an integer value."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--max-hops", "3",
+        ])
+        assert args.max_hops == 3
+
+    def test_skip_unchanged_default_true(self):
+        """--skip-unchanged defaults to True."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        assert args.skip_unchanged is True
+
+    def test_skip_unchanged_explicit(self):
+        """--skip-unchanged can be set explicitly."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--skip-unchanged",
+        ])
+        assert args.skip_unchanged is True
+
+    def test_no_skip_unchanged(self):
+        """--no-skip-unchanged sets skip_unchanged to False."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--no-skip-unchanged",
+        ])
+        assert args.skip_unchanged is False
+
+    def test_min_reliability_default(self):
+        """--min-reliability defaults to 0.99."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        assert args.min_reliability == 0.99
+
+    def test_min_reliability_override(self):
+        """--min-reliability accepts a float value."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--min-reliability", "0.999",
+        ])
+        assert args.min_reliability == 0.999
+
+    def test_statistical_significance_default(self):
+        """--statistical-significance defaults to 0.95."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        assert args.statistical_significance == 0.95
+
+    def test_statistical_significance_override(self):
+        """--statistical-significance accepts a float value."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--statistical-significance", "0.90",
+        ])
+        assert args.statistical_significance == 0.90
+
+    def test_flaky_deadline_days_default(self):
+        """--flaky-deadline-days defaults to 14."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        assert args.flaky_deadline_days == 14
+
+    def test_flaky_deadline_days_override(self):
+        """--flaky-deadline-days accepts an integer value."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--flaky-deadline-days", "7",
+        ])
+        assert args.flaky_deadline_days == 7
+
+    def test_all_defaults_match_default_config(self):
+        """Default CLI flag values match DEFAULT_CONFIG values."""
+        from orchestrator.lifecycle.config import DEFAULT_CONFIG
+
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        assert args.max_reruns == DEFAULT_CONFIG["max_reruns"]
+        assert args.max_failures == DEFAULT_CONFIG["max_failures"]
+        assert args.max_parallel == DEFAULT_CONFIG["max_parallel"]
+        assert args.status_file is None  # DEFAULT_CONFIG["status_file"] is None
+        assert args.max_test_percentage == DEFAULT_CONFIG["max_test_percentage"]
+        assert args.max_hops == DEFAULT_CONFIG["max_hops"]
+        assert args.min_reliability == DEFAULT_CONFIG["min_reliability"]
+        assert args.statistical_significance == DEFAULT_CONFIG["statistical_significance"]
+
+    def test_all_flags_combined(self):
+        """All ci_gate flags can be combined."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--max-reruns", "5",
+            "--max-failures", "3",
+            "--max-parallel", "4",
+            "--status-file", ".tests/status",
+            "--max-test-percentage", "0.20",
+            "--max-hops", "3",
+            "--no-skip-unchanged",
+            "--min-reliability", "0.999",
+            "--statistical-significance", "0.90",
+            "--flaky-deadline-days", "7",
+        ])
+        assert args.max_reruns == 5
+        assert args.max_failures == 3
+        assert args.max_parallel == 4
+        assert args.status_file == Path(".tests/status")
+        assert args.max_test_percentage == 0.20
+        assert args.max_hops == 3
+        assert args.skip_unchanged is False
+        assert args.min_reliability == 0.999
+        assert args.statistical_significance == 0.90
+        assert args.flaky_deadline_days == 7
+
+
+class TestResolveParams:
+    """Tests for _resolve_params merging CLI flags with config values."""
+
+    def test_cli_defaults_fall_through_to_config(self):
+        """When CLI uses defaults, config values are used."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".test_set_config"
+            config_path.write_text(json.dumps({
+                "max_reruns": 200,
+                "max_test_percentage": 0.25,
+                "max_hops": 3,
+                "min_reliability": 0.999,
+                "statistical_significance": 0.90,
+                "max_failures": 5,
+                "max_parallel": 8,
+                "status_file": ".tests/status",
+            }))
+            config = TestSetConfig(config_path)
+
+            params = _resolve_params(args, config)
+            assert params.max_reruns == 200
+            assert params.max_test_percentage == 0.25
+            assert params.max_hops == 3
+            assert params.min_reliability == 0.999
+            assert params.statistical_significance == 0.90
+            assert params.max_failures == 5
+            assert params.max_parallel == 8
+            assert params.status_file == Path(".tests/status")
+
+    def test_cli_overrides_config(self):
+        """When CLI provides non-default values, they override config."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--max-reruns", "5",
+            "--min-reliability", "0.95",
+            "--no-skip-unchanged",
+        ])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".test_set_config"
+            config_path.write_text(json.dumps({
+                "max_reruns": 200,
+                "min_reliability": 0.999,
+            }))
+            config = TestSetConfig(config_path)
+
+            params = _resolve_params(args, config)
+            assert params.max_reruns == 5  # CLI overrides
+            assert params.min_reliability == 0.95  # CLI overrides
+            assert params.skip_unchanged is False  # CLI overrides
+
+    def test_no_config_uses_cli_defaults(self):
+        """When no config file exists, CLI defaults are used."""
+        args = parse_args(["--manifest", "/path/manifest.json"])
+        config = TestSetConfig(None)
+
+        params = _resolve_params(args, config)
+        assert params.max_reruns == 100
+        assert params.max_test_percentage == 0.10
+        assert params.max_hops == 2
+        assert params.min_reliability == 0.99
+        assert params.statistical_significance == 0.95
+        assert params.max_failures is None
+        assert params.max_parallel is None
+        assert params.status_file is None
+        assert params.skip_unchanged is True
+        assert params.flaky_deadline_days == 14
+
+    def test_cli_optional_params_override_config(self):
+        """CLI optional params (None by default) override config when set."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--max-failures", "10",
+            "--max-parallel", "4",
+            "--status-file", "/custom/status",
+        ])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / ".test_set_config"
+            config_path.write_text(json.dumps({
+                "max_failures": 5,
+                "max_parallel": 8,
+                "status_file": ".tests/status",
+            }))
+            config = TestSetConfig(config_path)
+
+            params = _resolve_params(args, config)
+            assert params.max_failures == 10  # CLI overrides
+            assert params.max_parallel == 4  # CLI overrides
+            assert params.status_file == Path("/custom/status")  # CLI overrides
+
+    def test_flaky_deadline_days_always_from_cli(self):
+        """flaky_deadline_days has no config equivalent, always from CLI."""
+        args = parse_args([
+            "--manifest", "/path/manifest.json",
+            "--flaky-deadline-days", "7",
+        ])
+        config = TestSetConfig(None)
+
+        params = _resolve_params(args, config)
+        assert params.flaky_deadline_days == 7
 
 
 class TestParseArgsSubcommands:

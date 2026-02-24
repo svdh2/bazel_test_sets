@@ -76,6 +76,75 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "and include them in the report (requires BUILD_WORKSPACE_DIRECTORY)",
     )
 
+    # Execution tuning flags (ci_gate parameters)
+    parser.add_argument(
+        "--max-reruns",
+        type=int,
+        default=100,
+        help="Maximum SPRT reruns per test (default: 100)",
+    )
+    parser.add_argument(
+        "--max-failures",
+        type=int,
+        default=None,
+        help="Stop after N failures (detection mode)",
+    )
+    parser.add_argument(
+        "--max-parallel",
+        type=int,
+        default=None,
+        help="Maximum parallel test executions",
+    )
+    parser.add_argument(
+        "--status-file",
+        type=Path,
+        default=None,
+        help="Path to the status file (enables lifecycle features)",
+    )
+    parser.add_argument(
+        "--max-test-percentage",
+        type=float,
+        default=0.10,
+        help="Regression: max fraction of tests to select (default: 0.10)",
+    )
+    parser.add_argument(
+        "--max-hops",
+        type=int,
+        default=2,
+        help="Regression: max BFS hops in co-occurrence graph (default: 2)",
+    )
+    parser.add_argument(
+        "--skip-unchanged",
+        action="store_true",
+        dest="skip_unchanged",
+        default=True,
+        help="Skip hash-unchanged tests with conclusive SPRT (default: True)",
+    )
+    parser.add_argument(
+        "--no-skip-unchanged",
+        action="store_false",
+        dest="skip_unchanged",
+        help="Do not skip unchanged tests",
+    )
+    parser.add_argument(
+        "--min-reliability",
+        type=float,
+        default=0.99,
+        help="SPRT: minimum reliability threshold (default: 0.99)",
+    )
+    parser.add_argument(
+        "--statistical-significance",
+        type=float,
+        default=0.95,
+        help="SPRT: significance level for decisions (default: 0.95)",
+    )
+    parser.add_argument(
+        "--flaky-deadline-days",
+        type=int,
+        default=14,
+        help="Days before flaky tests auto-disable (default: 14)",
+    )
+
     # Regression option flags
     parser.add_argument(
         "--diff-base",
@@ -211,6 +280,76 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
 
     return parser.parse_args(argv)
+
+
+def _resolve_params(
+    args: argparse.Namespace, config: TestSetConfig
+) -> argparse.Namespace:
+    """Merge CLI flags with config file values (CLI takes precedence).
+
+    Creates a unified params namespace that checks CLI args first, then
+    falls back to config values. This enables backward compatibility during
+    the transition period from .test_set_config to ci_gate attributes.
+
+    Args:
+        args: Parsed CLI arguments.
+        config: Loaded test set configuration.
+
+    Returns:
+        A namespace with all parameters resolved (CLI overrides config).
+    """
+    # For each parameter, CLI value wins if it differs from the argparse
+    # default.  We detect "was explicitly passed" by comparing against the
+    # parser defaults.  For simplicity we always use CLI values when they
+    # are non-None (for optional params) or differ from the hardcoded
+    # argparse defaults (for required-default params).
+
+    params = argparse.Namespace()
+
+    # Integer / float params with defaults in both CLI and config
+    params.max_reruns = (
+        args.max_reruns if args.max_reruns != 100 else config.max_reruns
+    )
+    params.max_test_percentage = (
+        args.max_test_percentage
+        if args.max_test_percentage != 0.10
+        else config.max_test_percentage
+    )
+    params.max_hops = (
+        args.max_hops if args.max_hops != 2 else config.max_hops
+    )
+    params.min_reliability = (
+        args.min_reliability
+        if args.min_reliability != 0.99
+        else config.min_reliability
+    )
+    params.statistical_significance = (
+        args.statistical_significance
+        if args.statistical_significance != 0.95
+        else config.statistical_significance
+    )
+
+    # Optional params (None means "not set")
+    params.max_failures = (
+        args.max_failures if args.max_failures is not None
+        else config.max_failures
+    )
+    params.max_parallel = (
+        args.max_parallel if args.max_parallel is not None
+        else config.max_parallel
+    )
+    params.status_file = (
+        args.status_file if args.status_file is not None
+        else config.status_file
+    )
+
+    # Bool param -- CLI explicit override only via --no-skip-unchanged
+    params.skip_unchanged = args.skip_unchanged
+
+    # New param with no config-file equivalent
+    params.flaky_deadline_days = args.flaky_deadline_days
+
+    return params
 
 
 # --- Lifecycle subcommand handlers ---
