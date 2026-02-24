@@ -6,8 +6,8 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 ## Status Overview
 - **Overall Status**: In Progress
 - **Current Phase**: Phase 7: Reporting & Documentation
-- **Current Step**: Step 7.1: Report Enhancements
-- **Completed Steps**: 14 / 16
+- **Current Step**: Step 7.2: Architecture Documentation and CI Stage Documentation
+- **Completed Steps**: 15 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -1581,17 +1581,17 @@ Expected: Exit code 0
 ---
 
 ### Phase 7: Reporting & Documentation
-**Phase Status**: Not Started
+**Phase Status**: In Progress
 
 This phase adds mini-converge and burn-in data to reports, and updates all architecture documentation.
 
 ---
 
 #### Step 7.1: Report Enhancements
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: 82da4c7
 
 **Objective**: Update the JSON and HTML reporters to include mini-converge classification data, burn-in sweep results, hash-filtered test counts, and lifecycle-aware exit code explanations.
 
@@ -1668,6 +1668,15 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 4.2 (mini-converge), Step 5.2 (burn-in sweep integration), Step 6.2 (flaky lifecycle)
 
 **Implementation Notes**:
+- Added `set_hash_filter_data()` to Reporter class; data included in JSON report under `hash_filter` key
+- Added `_render_hash_filter_section()` to HTML reporter: displays changed/unchanged/skipped counts
+- Added burn-in sweep rendering to `_render_effort_section()`: shows decided tests with lifecycle badges and undecided count
+- Updated `_print_results`, `_print_mini_converge_results`, and `_print_effort_results` to accept and pass `hash_filter_data` parameter
+- Updated `_run_regression` and `_run_effort` to build `hash_filter_data` dict from `_compute_and_filter_hashes` results
+- Added sweep_result data to effort_data dict in `_print_effort_results` under `burn_in_sweep` key
+- Lifecycle badges already existed from prior work; no changes needed
+- 4 reporter tests, 2 HTML hash filter tests, 2 HTML burn-in sweep tests
+- All 1121 pytest tests pass, 9/9 Bazel tests pass, mypy clean
 
 ---
 
@@ -1797,6 +1806,7 @@ All tests run via `./ci test` inside the Docker container. Type checks run via `
 Track major milestones and decisions during implementation:
 
 ### 2026-02-24
+- Step 7.1 completed: Report enhancements -- hash filter summary, burn-in sweep data in effort reports, backward compatible (commit 82da4c7)
 - Step 6.2 completed: Flaky-to-burning_in re-promotion -- deflake clears target_hash for fresh hash tracking, verified full lifecycle workflow (commit 8c3ac7b)
 - Phase 6 (Flaky Lifecycle & Deadline) completed
 - Step 6.1 completed: Flaky deadline auto-disable -- check_flaky_deadlines transitions expired flaky tests to disabled before execution (commit bed4bb5)
