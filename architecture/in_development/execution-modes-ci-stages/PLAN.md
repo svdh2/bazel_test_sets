@@ -6,8 +6,8 @@ This implementation plan is based on: [architecture/in_development/execution-mod
 ## Status Overview
 - **Overall Status**: In Progress
 - **Current Phase**: Phase 5: Burn-in Sweep in Effort Modes
-- **Current Step**: Step 5.1: BurnInSweep Same-Hash Evidence Pooling
-- **Completed Steps**: 10 / 16
+- **Current Step**: Step 5.2: Burn-in Sweep Integration in _run_effort
+- **Completed Steps**: 11 / 16
 - **Last Updated**: 2026-02-24
 
 ## How to Use This Plan
@@ -1202,17 +1202,17 @@ Expected: Exit code 0
 ---
 
 ### Phase 5: Burn-in Sweep in Effort Modes
-**Phase Status**: Not Started
+**Phase Status**: In Progress
 
 This phase adds burn-in sweep integration after the SPRT rerun loop in converge/max modes, and updates BurnInSweep for same-hash evidence pooling.
 
 ---
 
 #### Step 5.1: BurnInSweep Same-Hash Evidence Pooling
-**Status**: Not Started
-**Started**:
-**Completed**:
-**PR/Commit**:
+**Status**: Completed
+**Started**: 2026-02-24
+**Completed**: 2026-02-24
+**PR/Commit**: b930275
 
 **Objective**: Modify `BurnInSweep` to accumulate and evaluate SPRT evidence across sessions using matching target hashes, enabling cross-session burn-in progression.
 
@@ -1286,6 +1286,14 @@ Expected: Exit code 0
 **Dependencies**: Requires Step 2.3 (hash filtering provides target_hashes context)
 
 **Implementation Notes**:
+- Added `target_hashes: dict[str, str] | None = None` parameter to `BurnInSweep.__init__`
+- Sweep loop now passes `target_hash` to `record_run()` for per-entry hash tracking
+- SPRT evaluation uses `get_same_hash_history()` when target hash is available, falls back to full history when no hash
+- Added `target_hashes` parameter to `process_results` function; passes target_hash to `record_run()` and uses same-hash history for burning_in SPRT evaluation
+- Backward compatible: when `target_hashes` is None or test not in dict, behavior is identical to before
+- 6 new tests in `TestBurnInSweepSameHashPooling`: hash recording, no-hash recording, same-hash SPRT speedup, different-hash isolation, test-not-in-hashes fallback, backward compatibility
+- 6 new tests in `TestProcessResultsTargetHashes`: hash pass-through, no-hash default, missing-test fallback, same-hash SPRT for burning_in, backward compatibility, multiple tests with different hashes
+- All 1091 pytest tests pass, 9/9 Bazel tests pass, mypy clean
 
 ---
 
