@@ -7,7 +7,13 @@ import tempfile
 from pathlib import Path
 
 from orchestrator.execution.executor import TestResult
-from orchestrator.reporting.reporter import MAX_HISTORY, VALID_STATUSES, Reporter, _aggregate_status
+from orchestrator.reporting.reporter import (
+    MAX_HISTORY,
+    VALID_VERDICT_STATES,
+    Reporter,
+    _aggregate_status,
+    _execution_status_to_verdict,
+)
 
 
 class TestReporterBasics:
@@ -21,7 +27,7 @@ class TestReporterBasics:
         assert "report" in report
         summary = report["report"]["summary"]
         assert summary["total"] == 0
-        assert summary["passed"] == 0
+        assert summary["success"] == 0
         assert summary["failed"] == 0
         assert report["report"]["tests"] == []
 
@@ -41,7 +47,7 @@ class TestReporterBasics:
 
         report = reporter.generate_report()
         assert report["report"]["summary"]["total"] == 1
-        assert report["report"]["summary"]["passed"] == 1
+        assert report["report"]["summary"]["success"] == 1
         assert len(report["report"]["tests"]) == 1
 
     def test_add_results_bulk(self):
@@ -84,11 +90,11 @@ class TestSourceLinkBase:
         assert "source_link_base" not in report["report"]
 
 
-class TestAllFiveStatuses:
-    """Tests for the five-status model."""
+class TestExecutorStatuses:
+    """Tests for executor status handling and verdict mapping."""
 
-    def test_all_statuses_representable(self):
-        """All five status values are representable in TestResult."""
+    def test_all_executor_statuses_representable(self):
+        """All executor status values are representable in TestResult."""
         statuses = [
             "passed",
             "failed",
@@ -100,20 +106,21 @@ class TestAllFiveStatuses:
             r = TestResult(name="test", assertion="a", status=s, duration=1.0)
             assert r.status == s
 
-    def test_valid_statuses_constant(self):
-        """VALID_STATUSES contains exactly the six statuses."""
-        expected = {
-            "passed",
-            "failed",
-            "dependencies_failed",
-            "passed+dependencies_failed",
-            "failed+dependencies_failed",
-            "not_run",
-        }
-        assert VALID_STATUSES == expected
+    def test_valid_verdict_states_constant(self):
+        """VALID_VERDICT_STATES contains exactly the four verdict states."""
+        expected = {"success", "failed", "missing_result", "undecided"}
+        assert VALID_VERDICT_STATES == expected
 
-    def test_summary_counts_all_statuses(self):
-        """Summary correctly counts all five status types."""
+    def test_execution_status_to_verdict_mapping(self):
+        """Executor statuses map correctly to verdict states."""
+        assert _execution_status_to_verdict("passed") == "success"
+        assert _execution_status_to_verdict("failed") == "failed"
+        assert _execution_status_to_verdict("dependencies_failed") == "failed"
+        assert _execution_status_to_verdict("passed+dependencies_failed") == "failed"
+        assert _execution_status_to_verdict("failed+dependencies_failed") == "failed"
+
+    def test_summary_counts_verdict_states(self):
+        """Summary counts using verdict state vocabulary."""
         reporter = Reporter()
         reporter.add_results([
             TestResult(name="a", assertion="A", status="passed", duration=1.0),
@@ -141,11 +148,9 @@ class TestAllFiveStatuses:
         report = reporter.generate_report()
         summary = report["report"]["summary"]
         assert summary["total"] == 5
-        assert summary["passed"] == 1
-        assert summary["failed"] == 1
-        assert summary["dependencies_failed"] == 1
-        assert summary["passed+dependencies_failed"] == 1
-        assert summary["failed+dependencies_failed"] == 1
+        # "passed" maps to success; all others map to failed
+        assert summary["success"] == 1
+        assert summary["failed"] == 4
 
 
 class TestReportFormatting:
@@ -170,7 +175,7 @@ class TestReportFormatting:
         test_entry = report["report"]["tests"][0]
         assert test_entry["name"] == "my_test"
         assert test_entry["assertion"] == "My test works"
-        assert test_entry["status"] == "passed"
+        assert test_entry["status"] == "success"
         assert test_entry["duration_seconds"] == 1.234
         assert test_entry["exit_code"] == 0
         assert test_entry["stdout"] == "hello"
@@ -303,18 +308,14 @@ class TestJsonOutput:
             assert loaded["report"]["summary"]["total"] == 2
             assert len(loaded["report"]["tests"]) == 2
 
-    def test_json_output_all_statuses(self):
-        """JSON output includes all five status types."""
+    def test_json_output_verdict_states(self):
+        """JSON output maps executor statuses to verdict states."""
         reporter = Reporter()
-        for status in VALID_STATUSES:
-            reporter.add_result(
-                TestResult(
-                    name=f"test_{status}",
-                    assertion=f"Test {status}",
-                    status=status,
-                    duration=1.0,
-                )
-            )
+        reporter.add_results([
+            TestResult(name="a", assertion="A", status="passed", duration=1.0),
+            TestResult(name="b", assertion="B", status="failed", duration=1.0),
+            TestResult(name="c", assertion="C", status="dependencies_failed", duration=1.0),
+        ])
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "report.json"
@@ -324,7 +325,8 @@ class TestJsonOutput:
             statuses_in_report = {
                 t["status"] for t in loaded["report"]["tests"]
             }
-            assert statuses_in_report == VALID_STATUSES
+            # passed → success, failed → failed, dependencies_failed → failed
+            assert statuses_in_report == {"success", "failed"}
 
     def test_json_output_creates_parent_dirs(self):
         """write_report creates parent directories if needed."""
@@ -370,14 +372,28 @@ class TestJsonOutput:
             assert len(tests) == 2
 
             assert tests[0]["name"] == "a"
-            assert tests[0]["status"] == "passed"
+            assert tests[0]["status"] == "success"
             assert tests[0]["duration_seconds"] == 1.234
             assert tests[0]["stdout"] == "hello world"
             assert tests[0]["exit_code"] == 0
 
             assert tests[1]["name"] == "b"
-            assert tests[1]["status"] == "dependencies_failed"
+            assert tests[1]["status"] == "failed"  # dependencies_failed → failed
+            assert tests[1]["execution_status"] == "dependencies_failed"
             assert tests[1]["duration_seconds"] == 0.0
+
+    def test_execution_mode_in_report(self):
+        """execution_mode appears in report when set."""
+        reporter = Reporter()
+        reporter.set_execution_mode("detection")
+        report = reporter.generate_report()
+        assert report["report"]["execution_mode"] == "detection"
+
+    def test_execution_mode_absent_when_not_set(self):
+        """execution_mode is absent from report when not set."""
+        reporter = Reporter()
+        report = reporter.generate_report()
+        assert "execution_mode" not in report["report"]
 
 
 SAMPLE_MANIFEST = {
@@ -434,10 +450,10 @@ class TestHierarchicalReport:
         auth_entry = report["report"]["test_set"]["tests"]["auth_test"]
         assert auth_entry["assertion"] == "Auth works"
         assert auth_entry["requirement_id"] == "REQ-AUTH-001"
-        assert auth_entry["status"] == "passed"
+        assert auth_entry["status"] == "success"
 
     def test_hierarchical_aggregated_status_passed(self):
-        """Aggregated status is 'passed' when all children pass."""
+        """Aggregated status is 'success' when all children pass."""
         reporter = Reporter()
         reporter.set_manifest(SAMPLE_MANIFEST)
         reporter.add_results([
@@ -446,7 +462,7 @@ class TestHierarchicalReport:
         ])
 
         report = reporter.generate_report()
-        assert report["report"]["test_set"]["status"] == "passed"
+        assert report["report"]["test_set"]["status"] == "success"
 
     def test_hierarchical_aggregated_status_failed(self):
         """Aggregated status is 'failed' when any child fails."""
@@ -549,7 +565,7 @@ class TestNestedSubsets:
         child = test_set["subsets"][0]
         assert child["name"] == "child_tests"
         assert "child_test" in child["tests"]
-        assert child["tests"]["child_test"]["status"] == "passed"
+        assert child["tests"]["child_test"]["status"] == "success"
 
     def test_nested_aggregated_status(self):
         """Subset failure propagates to parent status."""
@@ -762,28 +778,31 @@ class TestInferredDependencies:
 
 
 class TestAggregateStatus:
-    """Tests for status aggregation function."""
+    """Tests for four-state priority aggregation."""
 
-    def test_all_passed(self):
-        assert _aggregate_status(["passed", "passed"]) == "passed"
+    def test_all_success(self):
+        assert _aggregate_status(["success", "success"]) == "success"
 
     def test_any_failed(self):
-        assert _aggregate_status(["passed", "failed"]) == "failed"
+        assert _aggregate_status(["success", "failed"]) == "failed"
 
     def test_empty(self):
-        assert _aggregate_status([]) == "no_tests"
+        assert _aggregate_status([]) == "success"
 
-    def test_mixed_without_failure(self):
-        assert _aggregate_status(["passed", "dependencies_failed"]) == "mixed"
+    def test_missing_result_beats_failed(self):
+        assert _aggregate_status(["failed", "missing_result"]) == "missing_result"
 
-    def test_combined_status_failed(self):
-        assert _aggregate_status(["passed", "failed+dependencies_failed"]) == "failed"
+    def test_undecided_beats_all(self):
+        assert _aggregate_status(["success", "failed", "undecided"]) == "undecided"
 
-    def test_all_not_run(self):
-        assert _aggregate_status(["not_run", "not_run"]) == "not_run"
+    def test_undecided_beats_missing_result(self):
+        assert _aggregate_status(["missing_result", "undecided"]) == "undecided"
 
-    def test_not_run_ignored_for_active(self):
-        assert _aggregate_status(["passed", "not_run"]) == "passed"
+    def test_all_undecided(self):
+        assert _aggregate_status(["undecided", "undecided"]) == "undecided"
+
+    def test_all_missing_result(self):
+        assert _aggregate_status(["missing_result", "missing_result"]) == "missing_result"
 
 
 class TestLifecycleDataInReport:
@@ -1143,6 +1162,8 @@ class TestReliabilityDemotion:
             reporter.add_results([
                 TestResult(name="auth_test", assertion="Auth works",
                            status="passed", duration=1.0),
+                TestResult(name="billing_test", assertion="Billing works",
+                           status="passed", duration=1.0),
             ])
 
             report = reporter.generate_report_with_history(path)
@@ -1220,12 +1241,14 @@ class TestReliabilityDemotion:
             reporter.add_results([
                 TestResult(name="auth_test", assertion="Auth works",
                            status="passed", duration=1.0),
+                TestResult(name="billing_test", assertion="Billing works",
+                           status="passed", duration=1.0),
             ])
 
             report = reporter.generate_report_with_history(path)
             auth = report["report"]["test_set"]["tests"]["auth_test"]
             assert auth["lifecycle"]["state"] == "stable"
-            assert report["report"]["test_set"]["status"] == "passed"
+            assert report["report"]["test_set"]["status"] == "success"
             assert reporter.reliability_demoted_tests == []
 
     def test_nested_flaky_propagates_to_root(self):
@@ -1370,4 +1393,4 @@ class TestHashFilterData:
         ])
         report = reporter.generate_report()
         assert "hash_filter" not in report["report"]
-        assert report["report"]["summary"]["passed"] == 1
+        assert report["report"]["summary"]["success"] == 1

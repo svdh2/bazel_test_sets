@@ -843,11 +843,14 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
         print(f"Disabled tests excluded from execution: {len(removed)}")
         print()
 
+    # Snapshot execution scope: tests in DAG after disabled removal
+    execution_scope = set(dag.nodes.keys())
+
     # Dispatch based on effort mode
     if args.effort == "regression":
-        return _run_regression(args, manifest, dag, commit_sha)
+        return _run_regression(args, manifest, dag, commit_sha, execution_scope)
     elif args.effort in ("converge", "max"):
-        return _run_effort(args, manifest, dag, commit_sha)
+        return _run_effort(args, manifest, dag, commit_sha, execution_scope)
 
     # Default: run all tests once, no verdict
     executor: SequentialExecutor | AsyncExecutor
@@ -872,7 +875,10 @@ def _run_orchestrator(args: argparse.Namespace) -> int:
         return 1
 
     _update_status_file(results, args, commit_sha)
-    demoted = _print_results(results, args, commit_sha, manifest)
+    demoted = _print_results(
+        results, args, commit_sha, manifest,
+        execution_scope=execution_scope,
+    )
     has_failure = any(r.status == "failed" for r in results)
     return 1 if (has_failure or demoted) else 0
 
@@ -882,6 +888,7 @@ def _run_regression(
     manifest: dict,
     dag: TestDAG,
     commit_sha: str | None = None,
+    execution_scope: set[str] | None = None,
 ) -> int:
     """Execute with regression option: select tests then run in chosen mode.
 
@@ -890,6 +897,7 @@ def _run_regression(
         manifest: Parsed manifest dict.
         dag: Constructed test DAG.
         commit_sha: Resolved git commit SHA (or None).
+        execution_scope: Test names in DAG after disabled removal.
 
     Returns:
         Exit code.
@@ -1037,6 +1045,9 @@ def _run_regression(
         print(f"Error building filtered DAG: {e}", file=sys.stderr)
         return 1
 
+    # Regression scope: only selected tests are in scope
+    regression_scope = set(filtered_dag.nodes.keys())
+
     # Execute in the chosen mode (diagnostic or detection)
     executor: SequentialExecutor | AsyncExecutor
     if args.max_parallel == 1:
@@ -1099,6 +1110,7 @@ def _run_regression(
         _print_mini_converge_results(
             results, effort_result, args, commit_sha, manifest,
             hash_filter_data=hash_filter_data,
+            execution_scope=regression_scope,
         )
 
         # Apply lifecycle-aware exit code
@@ -1132,6 +1144,7 @@ def _run_regression(
     demoted = _print_results(
         results, args, commit_sha, manifest, verdict_data,
         hash_filter_data=hash_filter_data,
+        execution_scope=regression_scope,
     )
     return 1 if (has_failure or demoted) else 0
 
@@ -1141,6 +1154,7 @@ def _run_effort(
     manifest: dict,
     dag: TestDAG,
     commit_sha: str | None = None,
+    execution_scope: set[str] | None = None,
 ) -> int:
     """Execute with effort converge/max: run tests then SPRT-rerun for classification.
 
@@ -1149,6 +1163,7 @@ def _run_effort(
         manifest: Parsed manifest dict.
         dag: Constructed test DAG.
         commit_sha: Resolved git commit SHA (or None).
+        execution_scope: Test names in DAG after disabled removal.
 
     Returns:
         Exit code.
@@ -1215,6 +1230,9 @@ def _run_effort(
                 "unchanged": n_total - n_changed,
                 "skipped": 0,
             }
+
+    # Update execution scope after hash-filter removal
+    effort_scope = set(dag.nodes.keys())
 
     # Phase 1: Execute all tests once
     executor: SequentialExecutor | AsyncExecutor
@@ -1292,6 +1310,7 @@ def _run_effort(
         initial_results, effort_result, args, commit_sha, manifest,
         verdict_data, sweep_result=sweep_result,
         hash_filter_data=hash_filter_data,
+        execution_scope=effort_scope,
     )
 
     # Exit code: 1 if any true_fail or flake
@@ -1486,6 +1505,7 @@ def _print_results(
     manifest: dict | None = None,
     verdict_data: dict[str, Any] | None = None,
     hash_filter_data: dict[str, Any] | None = None,
+    execution_scope: set[str] | None = None,
 ) -> list[str]:
     """Print test execution results summary.
 
@@ -1531,12 +1551,15 @@ def _print_results(
         if reporting_manifest is not None:
             reporter.set_manifest(reporting_manifest)
         reporter.add_results(results)
+        if execution_scope is not None:
+            reporter.set_execution_scope(execution_scope)
         if commit_sha:
             reporter.set_commit_hash(commit_sha)
         reporter.set_source_link_base(resolve_source_link_base(commit_sha))
 
         if args.ci_gate_name:
             reporter.set_ci_gate_name(args.ci_gate_name)
+        reporter.set_execution_mode(args.mode)
 
         if verdict_data:
             reporter.set_e_value_verdict(verdict_data)
@@ -1593,6 +1616,7 @@ def _print_mini_converge_results(
     commit_sha: str | None = None,
     manifest: dict | None = None,
     hash_filter_data: dict[str, Any] | None = None,
+    execution_scope: set[str] | None = None,
 ) -> None:
     """Print mini-converge results for regression mode.
 
@@ -1679,12 +1703,15 @@ def _print_mini_converge_results(
         if reporting_manifest is not None:
             reporter.set_manifest(reporting_manifest)
         reporter.add_results(initial_results)
+        if execution_scope is not None:
+            reporter.set_execution_scope(execution_scope)
         if commit_sha:
             reporter.set_commit_hash(commit_sha)
         reporter.set_source_link_base(resolve_source_link_base(commit_sha))
 
         if args.ci_gate_name:
             reporter.set_ci_gate_name(args.ci_gate_name)
+        reporter.set_execution_mode(args.mode)
 
         # Add effort classifications to report
         effort_data = {
@@ -1748,6 +1775,7 @@ def _print_effort_results(
     verdict_data: dict[str, Any] | None = None,
     sweep_result: Any | None = None,
     hash_filter_data: dict[str, Any] | None = None,
+    execution_scope: set[str] | None = None,
 ) -> None:
     """Print effort mode results with per-test SPRT classifications."""
     mode_label = f"{args.mode} + effort:{args.effort}"
@@ -1833,12 +1861,15 @@ def _print_effort_results(
         if reporting_manifest is not None:
             reporter.set_manifest(reporting_manifest)
         reporter.add_results(initial_results)
+        if execution_scope is not None:
+            reporter.set_execution_scope(execution_scope)
         if commit_sha:
             reporter.set_commit_hash(commit_sha)
         reporter.set_source_link_base(resolve_source_link_base(commit_sha))
 
         if args.ci_gate_name:
             reporter.set_ci_gate_name(args.ci_gate_name)
+        reporter.set_execution_mode(args.mode)
 
         if verdict_data:
             reporter.set_e_value_verdict(verdict_data)

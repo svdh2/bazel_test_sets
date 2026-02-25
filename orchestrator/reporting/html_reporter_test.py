@@ -144,7 +144,7 @@ class TestGenerateHtmlReport:
         report = _make_flat_report(tests=tests, summary=summary)
         result = generate_html_report(report)
         assert "Total: 2" in result
-        assert "Passed: 1" in result
+        assert "Success: 1" in result
         assert "Failed: 1" in result
 
     def test_empty_report(self):
