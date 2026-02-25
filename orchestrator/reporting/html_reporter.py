@@ -21,10 +21,15 @@ from orchestrator.analysis.log_parser import (
 from orchestrator.reporting.source_links import render_source_link
 
 
-# Status color mapping
+# Status color mapping (verdict states + backward-compat aliases)
 STATUS_COLORS: dict[str, str] = {
-    "passed": "#90EE90",
+    # Verdict states
+    "success": "#90EE90",
     "failed": "#FFB6C1",
+    "missing_result": "#FFFFAD",
+    "undecided": "#B0C4DE",
+    # Backward-compat aliases for old reports
+    "passed": "#90EE90",
     "dependencies_failed": "#D3D3D3",
     "passed+dependencies_failed": "#FFFFAD",
     "failed+dependencies_failed": "#FFB6C1",
@@ -51,10 +56,15 @@ LIFECYCLE_LABELS: dict[str, str] = {
     "disabled": "DISABLED",
 }
 
-# Status display labels
+# Status display labels (verdict states + backward-compat aliases)
 STATUS_LABELS: dict[str, str] = {
-    "passed": "PASSED",
+    # Verdict states
+    "success": "SUCCESS",
     "failed": "FAILED",
+    "missing_result": "MISSING RESULT",
+    "undecided": "UNDECIDED",
+    # Backward-compat aliases for old reports
+    "passed": "PASSED",
     "dependencies_failed": "DEPS FAILED",
     "passed+dependencies_failed": "PASSED (deps failed)",
     "failed+dependencies_failed": "FAILED (deps failed)",
@@ -103,6 +113,33 @@ body {
     border-radius: 6px;
     font-weight: 600;
     font-size: 14px;
+}
+.trigger-context {
+    margin-top: 12px;
+    padding: 10px 14px;
+    background: #f4f6f9;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #444;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.trigger-context .trigger-label {
+    font-weight: 600;
+    color: #222;
+}
+.trigger-context .trigger-pill {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 12px;
+    background: #e0e4ea;
+    font-size: 12px;
+    font-weight: 500;
+}
+.trigger-context .trigger-sep {
+    color: #bbb;
 }
 .test-set-header {
     display: flex;
@@ -568,45 +605,108 @@ def _render_header(report: dict[str, Any]) -> str:
     if meta_parts:
         parts.append(f'<div class="meta">{" | ".join(meta_parts)}</div>')
 
+    parts.append(_render_trigger_context(report))
+
     summary = report.get("summary", {})
     if summary:
         parts.append('<div class="summary">')
         total = summary.get("total", 0)
-        passed = summary.get("passed", 0)
+        success = summary.get("success", summary.get("passed", 0))
         failed = summary.get("failed", 0)
-        dep_failed = summary.get("dependencies_failed", 0)
         duration = summary.get("total_duration_seconds", 0)
 
         parts.append(
             f'<div class="summary-item" style="background:#e8e8e8">'
             f"Total: {total}</div>"
         )
-        if passed:
+        if success:
             parts.append(
                 f'<div class="summary-item" style="background:#90EE90">'
-                f"Passed: {passed}</div>"
+                f"Success: {success}</div>"
             )
         if failed:
             parts.append(
                 f'<div class="summary-item" style="background:#FFB6C1">'
                 f"Failed: {failed}</div>"
             )
-        if dep_failed:
+        missing = summary.get("missing_result", 0)
+        if missing:
             parts.append(
-                f'<div class="summary-item" style="background:#D3D3D3">'
-                f"Deps Failed: {dep_failed}</div>"
+                f'<div class="summary-item" style="background:#FFFFAD">'
+                f"Missing Result: {missing}</div>"
             )
-        not_run = summary.get("not_run", 0)
-        if not_run:
+        undecided = summary.get("undecided", summary.get("not_run", 0))
+        if undecided:
             parts.append(
                 f'<div class="summary-item" style="background:#B0C4DE">'
-                f"Not Run: {not_run}</div>"
+                f"Undecided: {undecided}</div>"
             )
         parts.append(
             f'<div class="summary-item" style="background:#e8e8e8">'
             f"Duration: {duration:.3f}s</div>"
         )
         parts.append("</div>")
+
+    parts.append("</div>")
+    return "\n".join(parts)
+
+
+def _render_trigger_context(report: dict[str, Any]) -> str:
+    """Render a compact context banner showing how the report was generated."""
+    parts: list[str] = ['<div class="trigger-context">']
+
+    # Trigger source
+    ci_gate = report.get("ci_gate_name")
+    test_set_name = report.get("test_set", {}).get("name")
+    if ci_gate:
+        parts.append(
+            f'<span class="trigger-label">CI Gate:</span> '
+            f"{html.escape(str(ci_gate))}"
+        )
+    elif test_set_name:
+        parts.append(
+            '<span class="trigger-label">Test Set:</span> '
+            f"{html.escape(str(test_set_name))}"
+        )
+    else:
+        parts.append(
+            '<span class="trigger-label">Direct invocation</span>'
+        )
+
+    # If we showed ci_gate and there's also a test set, show it too
+    if ci_gate and test_set_name:
+        parts.append('<span class="trigger-sep">&middot;</span>')
+        parts.append(
+            f'<span class="trigger-label">Test Set:</span> '
+            f"{html.escape(str(test_set_name))}"
+        )
+
+    # Execution mode pill
+    mode = report.get("execution_mode")
+    if mode:
+        parts.append('<span class="trigger-sep">&middot;</span>')
+        parts.append(
+            f'<span class="trigger-pill">{html.escape(mode)}</span>'
+        )
+
+    # Effort pill
+    effort = report.get("effort", {})
+    effort_mode = effort.get("mode") if isinstance(effort, dict) else None
+    if effort_mode:
+        parts.append(
+            f'<span class="trigger-pill">effort: {html.escape(effort_mode)}</span>'
+        )
+
+    # Hash filter pill
+    hf = report.get("hash_filter")
+    if isinstance(hf, dict):
+        skipped = hf.get("skipped", 0)
+        total = hf.get("changed", 0) + hf.get("unchanged", 0)
+        if total > 0:
+            parts.append(
+                f'<span class="trigger-pill">'
+                f"hash-skip: {skipped}/{total}</span>"
+            )
 
     parts.append("</div>")
     return "\n".join(parts)
@@ -622,7 +722,7 @@ def _render_test_entry(
 ) -> str:
     """Render a single test entry with expandable details."""
     parts: list[str] = []
-    status = data.get("status", "no_tests")
+    status = data.get("status", "success")
     color = STATUS_COLORS.get(status, "#e8e8e8")
     label = STATUS_LABELS.get(status, status.upper())
     duration = data.get("duration_seconds", 0)
@@ -1054,10 +1154,15 @@ def _render_block_segment(
     return "\n".join(parts)
 
 
-# History timeline status-to-color mapping
+# History timeline status-to-color mapping (verdict + backward-compat)
 _TIMELINE_COLORS: dict[str, str] = {
-    "passed": "#2da44e",
+    # Verdict states
+    "success": "#2da44e",
     "failed": "#cf222e",
+    "missing_result": "#d4a72c",
+    "undecided": "#B0C4DE",
+    # Backward-compat aliases for old history entries
+    "passed": "#2da44e",
     "dependencies_failed": "#999",
     "passed+dependencies_failed": "#d4a72c",
     "failed+dependencies_failed": "#cf222e",
@@ -1098,7 +1203,7 @@ def _render_history_timeline(entries: list[dict[str, Any]]) -> str:
         title_attr = f' title="{commit_tip}"' if commit_tip else ""
         parts.append(f'<div class="ht-commit {cls}"{title_attr}>')
         for entry in group:
-            status = entry.get("status", "no_tests")
+            status = entry.get("status", "success")
             color = _TIMELINE_COLORS.get(status, "#999")
             entry_commit = entry.get("commit", "")
             tooltip = (
@@ -1243,6 +1348,7 @@ def _compute_set_history(
     })
     _GREY_STATUSES = frozenset({
         "dependencies_failed", "no_tests",
+        "missing_result", "undecided",
     })
 
     result: list[dict[str, Any]] = []
@@ -1252,7 +1358,7 @@ def _compute_set_history(
         for name in test_names:
             entries = history.get(name, [])
             if i < len(entries):
-                statuses.append(entries[i].get("status", "no_tests"))
+                statuses.append(entries[i].get("status", "success"))
                 if commit is None:
                     commit = entries[i].get("commit")
 
@@ -1264,7 +1370,7 @@ def _compute_set_history(
         elif all(s in _GREY_STATUSES for s in statuses):
             agg = "dependencies_failed"
         else:
-            agg = "passed"
+            agg = "success"
 
         entry: dict[str, Any] = {"status": agg}
         if commit:
@@ -1290,7 +1396,7 @@ def _render_set_summary_card(
     detail pane, mirroring the pattern used for test entries.
     """
     name = test_set.get("name", "Test Set")
-    status = test_set.get("status", "no_tests")
+    status = test_set.get("status", "success")
     assertion = test_set.get("assertion", "")
     color = STATUS_COLORS.get(status, "#e8e8e8")
     label = STATUS_LABELS.get(status, status.upper())
@@ -1345,7 +1451,7 @@ def _render_ci_gate_card(
     tap handler on ci_gate nodes can locate and clone it.
     """
     name = node.get("name", "CI Gate")
-    status = node.get("status", "not_run")
+    status = node.get("status", "undecided")
     color = STATUS_COLORS.get(status, "#e8e8e8")
     label = STATUS_LABELS.get(status, status.upper())
     params = node.get("ci_gate_params", {})
@@ -1930,8 +2036,9 @@ _DAG_CSS = """\
 _DAG_JS = """\
 (function() {
     var STATUS_COLORS = {
-        passed: '#90EE90', failed: '#FFB6C1',
-        dependencies_failed: '#D3D3D3',
+        success: '#90EE90', failed: '#FFB6C1',
+        missing_result: '#FFFFAD', undecided: '#B0C4DE',
+        passed: '#90EE90', dependencies_failed: '#D3D3D3',
         'passed+dependencies_failed': '#FFFFAD',
         'failed+dependencies_failed': '#FFB6C1',
         mixed: '#FFFFAD', no_tests: '#D3D3D3', not_run: '#B0C4DE'
@@ -2019,7 +2126,7 @@ _DAG_JS = """\
                 }
             },
             {
-                selector: 'node.ci_gate[status = "not_run"]',
+                selector: 'node.ci_gate[status = "undecided"], node.ci_gate[status = "not_run"]',
                 style: {
                     'opacity': 0.6,
                     'border-style': 'dashed'
@@ -2073,7 +2180,7 @@ _DAG_JS = """\
                 }
             },
             {
-                selector: 'node.test[status = "not_run"]',
+                selector: 'node.test[status = "undecided"], node.test[status = "not_run"]',
                 style: {
                     'opacity': 0.6,
                     'border-style': 'dashed'
@@ -2177,7 +2284,7 @@ _DAG_JS = """\
             var show = this.checked;
             cy.batch(function() {
                 cy.nodes().forEach(function(node) {
-                    if (node.data('status') === 'not_run') {
+                    if (node.data('status') === 'undecided' || node.data('status') === 'not_run') {
                         node.style('display', show ? 'element' : 'none');
                     }
                 });
@@ -2548,10 +2655,15 @@ _DAG_JS = """\
 """
 
 
-# Map test run status to a DAG display color (green/red/grey).
+# Map verdict state to a DAG display color (verdict + backward-compat).
 _STATUS_DAG_COLOR: dict[str, str] = {
-    "passed": "green",
+    # Verdict states
+    "success": "green",
     "failed": "red",
+    "missing_result": "grey",
+    "undecided": "blue",
+    # Backward-compat aliases for old reports
+    "passed": "green",
     "dependencies_failed": "grey",
     "passed+dependencies_failed": "green",
     "failed+dependencies_failed": "red",
@@ -2591,57 +2703,17 @@ def _build_graph_data(test_set: dict[str, Any]) -> dict[str, Any]:
                  if e["data"]["source"] != ws_name
                  and e["data"]["target"] != ws_name]
 
-    # Build children map from membership edges.
-    children_map: dict[str, list[str]] = {}
-    for edge in edges:
-        ed = edge["data"]
-        if ed["type"] == "member":
-            children_map.setdefault(ed["source"], []).append(ed["target"])
-
-    # Compute dag_color leaf-to-root with memoisation.
-    color_cache: dict[str, str] = {}
-    for node_id in seen_nodes:
-        _compute_dag_color(node_id, seen_nodes, children_map, color_cache)
+    # Assign dag_color from each node's own status.  The status was already
+    # correctly computed by _aggregate_status() using four-state priority
+    # aggregation, so we just map it to a display color.  We intentionally
+    # do NOT aggregate colors from children because shared nodes
+    # (deduplicated by _walk_dag_for_graph) may carry a status from a
+    # different parent context.
+    for node in seen_nodes.values():
+        data = node["data"]
+        data["dag_color"] = _STATUS_DAG_COLOR.get(data["status"], "grey")
 
     return {"nodes": list(seen_nodes.values()), "edges": edges}
-
-
-def _compute_dag_color(
-    node_id: str,
-    seen_nodes: dict[str, dict[str, Any]],
-    children_map: dict[str, list[str]],
-    cache: dict[str, str],
-) -> str:
-    """Recursively compute and store ``dag_color`` for *node_id*."""
-    if node_id in cache:
-        return cache[node_id]
-
-    data = seen_nodes[node_id]["data"]
-
-    if data["type"] == "test":
-        color = _STATUS_DAG_COLOR.get(data["status"], "grey")
-    else:
-        # group and ci_gate: aggregate from children
-        child_ids = children_map.get(node_id, [])
-        if not child_ids:
-            color = _STATUS_DAG_COLOR.get(data["status"], "grey")
-        else:
-            child_colors = [
-                _compute_dag_color(cid, seen_nodes, children_map, cache)
-                for cid in child_ids
-            ]
-            if any(c == "red" for c in child_colors):
-                color = "red"
-            elif all(c == "grey" for c in child_colors):
-                color = "grey"
-            elif all(c == "blue" for c in child_colors):
-                color = "blue"
-            else:
-                color = "green"
-
-    data["dag_color"] = color
-    cache[node_id] = color
-    return color
 
 
 def _walk_dag_for_graph(
@@ -2664,7 +2736,7 @@ def _walk_dag_for_graph(
             "id": node_id,
             "label": node_id,
             "type": node_type,
-            "status": node.get("status", "no_tests"),
+            "status": node.get("status", "success"),
         }}
 
     if parent_id is not None:
@@ -2688,7 +2760,7 @@ def _walk_dag_for_graph(
                 "id": test_name,
                 "label": short_label,
                 "type": "test",
-                "status": test_data.get("status", "no_tests"),
+                "status": test_data.get("status", "success"),
                 "lifecycle": lifecycle.get("state", ""),
                 "parameters": parameters,
             }}

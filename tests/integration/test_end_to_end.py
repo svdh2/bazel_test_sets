@@ -113,7 +113,7 @@ class TestDiagnosticEndToEnd:
             report = reporter.generate_report()
 
             assert report["report"]["summary"]["total"] == 1
-            assert report["report"]["summary"]["passed"] == 1
+            assert report["report"]["summary"]["success"] == 1
             assert "test_set" in report["report"]
 
     def test_multiple_tests_dag_order(self):
@@ -176,7 +176,7 @@ class TestDiagnosticEndToEnd:
             with open(report_path) as f:
                 report_data = json.load(f)
 
-            assert report_data["report"]["summary"]["passed"] == 2
+            assert report_data["report"]["summary"]["success"] == 2
             assert report_data["report"]["summary"]["failed"] == 0
             assert report_data["report"]["commit"] == "abc123"
 
@@ -271,8 +271,7 @@ class TestFailureCascade:
             reporter.add_results(results)
             report = reporter.generate_report()
 
-            assert report["report"]["summary"]["failed"] == 1
-            assert report["report"]["summary"]["dependencies_failed"] == 1
+            assert report["report"]["summary"]["failed"] == 2  # failed + dependencies_failed both → failed
 
 
 # ---------------------------------------------------------------------------
@@ -348,7 +347,7 @@ class TestReportToHtmlPipeline:
             assert "test_1" in html_output
             assert "test_2" in html_output
             assert "def456" in html_output
-            assert "PASSED" in html_output
+            assert "SUCCESS" in html_output
 
 
 # ---------------------------------------------------------------------------
@@ -389,7 +388,7 @@ class TestRollingHistoryPipeline:
 
             history = report["report"]["history"]["t1"]
             assert len(history) == 2
-            assert history[0]["status"] == "passed"
+            assert history[0]["status"] == "success"  # passed → success in verdict vocabulary
             assert history[0]["commit"] == "commit1"
             assert history[1]["status"] == "failed"
             assert history[1]["commit"] == "commit2"
@@ -705,7 +704,7 @@ class TestHierarchicalReportValidation:
             assert r["commit"] == "test123"
             assert "test_set" in r
             ts = r["test_set"]
-            assert ts["status"] == "passed"
+            assert ts["status"] == "success"
             assert "t1" in ts["tests"]
             assert "t2" in ts["tests"]
 
@@ -792,7 +791,7 @@ class TestMainModuleIntegration:
 
             with open(report_path) as f:
                 report = json.load(f)
-            assert report["report"]["summary"]["passed"] == 1
+            assert report["report"]["summary"]["success"] == 1
 
     def test_main_invalid_manifest_returns_1(self):
         """main() returns 1 for invalid manifest JSON."""

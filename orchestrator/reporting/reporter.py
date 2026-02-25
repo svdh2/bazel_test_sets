@@ -1,8 +1,19 @@
 """Report generation for test execution results.
 
-Generates JSON reports from test results, supporting the six-status model:
-passed, failed, dependencies_failed, passed+dependencies_failed,
-failed+dependencies_failed, not_run.
+Generates JSON reports from test results using a four-state verdict model:
+
+- **success**: test ran and passed (set: all children success)
+- **failed**: test ran and failed (set: at least one child failed)
+- **missing_result**: test was in execution scope but no result returned
+  (set: at least one child missing_result, none undecided)
+- **undecided**: test was not in execution scope
+  (set: at least one child undecided — highest priority)
+
+Disabled tests are excluded from aggregation entirely.
+
+The executor internally uses a richer status vocabulary (passed, failed,
+dependencies_failed, passed+dependencies_failed, failed+dependencies_failed)
+which is mapped to verdict states by this module.
 
 Supports hierarchical reports mirroring the DAG structure, burn-in
 progress, regression selection details, and rolling history for
@@ -19,15 +30,42 @@ from typing import Any
 from orchestrator.execution.executor import TestResult
 
 
-# Valid status values in the six-status model
-VALID_STATUSES = frozenset({
-    "passed",
+# Valid verdict states for tests and sets
+VALID_VERDICT_STATES = frozenset({
+    "success",
     "failed",
-    "dependencies_failed",
-    "passed+dependencies_failed",
-    "failed+dependencies_failed",
-    "not_run",
+    "missing_result",
+    "undecided",
 })
+
+# Priority ordering for aggregation (lower number = higher priority)
+_VERDICT_PRIORITY: dict[str, int] = {
+    "undecided": 1,
+    "missing_result": 2,
+    "failed": 3,
+    "success": 4,
+}
+
+# Mapping from executor's internal status vocabulary to verdict states
+_EXECUTION_STATUS_TO_VERDICT: dict[str, str] = {
+    "passed": "success",
+    "failed": "failed",
+    "dependencies_failed": "failed",
+    "passed+dependencies_failed": "failed",
+    "failed+dependencies_failed": "failed",
+}
+
+
+def _execution_status_to_verdict(status: str) -> str:
+    """Map an executor status string to a verdict state.
+
+    Args:
+        status: Executor status (passed, failed, dependencies_failed, etc.)
+
+    Returns:
+        Verdict state string (success or failed).
+    """
+    return _EXECUTION_STATUS_TO_VERDICT.get(status, "failed")
 
 # Maximum rolling history entries per test
 MAX_HISTORY = 500
@@ -57,6 +95,8 @@ class Reporter:
         self.reliability_demoted_tests: list[str] = []
         self.source_link_base: str | None = None
         self.ci_gate_name: str | None = None
+        self.execution_scope: set[str] | None = None
+        self.execution_mode: str | None = None
         self.status_file_history: dict[str, list[dict[str, Any]]] | None = None
 
     def set_manifest(self, manifest: dict[str, Any]) -> None:
@@ -175,6 +215,27 @@ class Reporter:
         """
         self.ci_gate_name = name
 
+    def set_execution_scope(self, names: set[str]) -> None:
+        """Set the execution scope for missing_result vs undecided classification.
+
+        Tests in this set that produced no result are classified as
+        ``missing_result``; tests not in this set are ``undecided``.
+
+        Args:
+            names: Set of test names that were in the DAG after all
+                filtering (disabled removal, hash filtering, regression
+                selection).
+        """
+        self.execution_scope = names
+
+    def set_execution_mode(self, mode: str) -> None:
+        """Set the execution mode (diagnostic or detection).
+
+        Args:
+            mode: Execution mode string.
+        """
+        self.execution_mode = mode
+
     def set_status_file_history(
         self, history: dict[str, list[dict[str, Any]]],
     ) -> None:
@@ -251,6 +312,9 @@ class Reporter:
         if self.ci_gate_name:
             report["ci_gate_name"] = self.ci_gate_name
 
+        if self.execution_mode:
+            report["execution_mode"] = self.execution_mode
+
         if self.status_file_history:
             report["status_file_history"] = self.status_file_history
 
@@ -283,14 +347,18 @@ class Reporter:
             except (json.JSONDecodeError, OSError):
                 pass
 
-        # Append current results to history
+        # Append current results to history (skip pure dependency-cascade
+        # results since those tests didn't actually execute)
         history: dict[str, list[dict[str, Any]]] = dict(existing_history)
         for result in self.results:
+            if result.status == "dependencies_failed":
+                continue
+
             if result.name not in history:
                 history[result.name] = []
 
             entry = {
-                "status": result.status,
+                "status": _execution_status_to_verdict(result.status),
                 "duration_seconds": round(result.duration, 3),
                 "timestamp": report["report"]["generated_at"],
             }
@@ -327,18 +395,38 @@ class Reporter:
         matches the visible timeline.
         """
         # Compute reliability from history for each test
+        # Accept both old vocabulary (passed, passed+dependencies_failed)
+        # and new vocabulary (success) for backward compatibility with
+        # existing history entries.
+        _HISTORY_PASS = frozenset({
+            "passed", "passed+dependencies_failed",  # old vocabulary
+            "success",  # new vocabulary
+        })
+        _HISTORY_FAIL = frozenset({
+            "failed", "failed+dependencies_failed",  # old vocabulary
+            # "failed" already covers new vocabulary
+        })
+
         history_reliability: dict[str, dict[str, int | float]] = {}
+
+        # Pre-initialize with zeros for all tests that have lifecycle data
+        # so tests with no history entries still get runs=0 / passes=0.
+        for test_name in self.lifecycle_data:
+            history_reliability[test_name] = {
+                "runs": 0, "passes": 0, "reliability": 0.0,
+            }
+
         for test_name, entries in history.items():
             runs = 0
             passes = 0
             for e in entries:
                 status = e.get("status", "")
-                if status in ("passed", "passed+dependencies_failed"):
+                if status in _HISTORY_PASS:
                     runs += 1
                     passes += 1
-                elif status in ("failed", "failed+dependencies_failed"):
+                elif status in _HISTORY_FAIL:
                     runs += 1
-                # dependencies_failed: test wasn't run, skip
+                # dependencies_failed, missing_result, undecided: skip
             history_reliability[test_name] = {
                 "runs": runs,
                 "passes": passes,
@@ -403,10 +491,12 @@ class Reporter:
             if "status" not in test_data:
                 continue
             lifecycle = test_data.get("lifecycle")
+            # Exclude disabled tests from aggregation entirely
+            if lifecycle and lifecycle.get("state") == "disabled":
+                continue
             if (
                 lifecycle
                 and test_name in history_reliability
-                and lifecycle.get("state") != "disabled"
                 and history_reliability[test_name]["runs"] > 0
                 and history_reliability[test_name]["reliability"] < min_rel
             ):
@@ -414,7 +504,7 @@ class Reporter:
             else:
                 direct_statuses.append(test_data["status"])
         subset_statuses = [
-            s.get("status", "no_tests") for s in node.get("subsets", [])
+            s.get("status", "success") for s in node.get("subsets", [])
         ]
         node["status"] = _aggregate_status(direct_statuses + subset_statuses)
 
@@ -492,7 +582,9 @@ class Reporter:
             if entry is not None:
                 test_entries[test_label] = entry
                 if "status" in entry:
-                    direct_statuses.append(entry["status"])
+                    lifecycle = entry.get("lifecycle", {})
+                    if lifecycle.get("state") != "disabled":
+                        direct_statuses.append(entry["status"])
 
         # Recurse into subsets
         subset_nodes: list[dict[str, Any]] = []
@@ -543,7 +635,9 @@ class Reporter:
                 test_entries[name] = entry
 
         statuses = [
-            e["status"] for e in test_entries.values() if "status" in e
+            e["status"] for e in test_entries.values()
+            if "status" in e
+            and e.get("lifecycle", {}).get("state") != "disabled"
         ]
         agg_status = _aggregate_status(statuses)
 
@@ -590,7 +684,10 @@ class Reporter:
             entry.update(self._format_result(result))
             entry.pop("name", None)
         else:
-            entry["status"] = "not_run"
+            if self.execution_scope is not None and name in self.execution_scope:
+                entry["status"] = "missing_result"
+            else:
+                entry["status"] = "undecided"
 
         if name in self.burn_in_data:
             entry["burn_in"] = self.burn_in_data[name]
@@ -670,47 +767,50 @@ class Reporter:
         }
 
     def _compute_summary(self) -> dict[str, Any]:
-        """Compute summary statistics from results.
+        """Compute summary statistics from results using verdict states.
 
         Returns:
-            Dictionary with counts and total duration.
+            Dictionary with verdict state counts and total duration.
         """
-        total = len(self.results)
-        passed = sum(1 for r in self.results if r.status == "passed")
-        failed = sum(1 for r in self.results if r.status == "failed")
-        dep_failed = sum(
-            1 for r in self.results if r.status == "dependencies_failed"
-        )
-        passed_dep_failed = sum(
-            1
-            for r in self.results
-            if r.status == "passed+dependencies_failed"
-        )
-        failed_dep_failed = sum(
-            1
-            for r in self.results
-            if r.status == "failed+dependencies_failed"
-        )
+        success = 0
+        failed = 0
+        for r in self.results:
+            verdict = _execution_status_to_verdict(r.status)
+            if verdict == "success":
+                success += 1
+            else:
+                failed += 1
+
         total_duration = sum(r.duration for r in self.results)
 
-        summary: dict[str, Any] = {
-            "total": total,
-            "passed": passed,
-            "failed": failed,
-            "dependencies_failed": dep_failed,
-            "passed+dependencies_failed": passed_dep_failed,
-            "failed+dependencies_failed": failed_dep_failed,
-            "total_duration_seconds": round(total_duration, 3),
-        }
-
+        missing_result = 0
+        undecided = 0
         if self.manifest:
             all_test_names = set(
                 self.manifest.get("test_set_tests", {}).keys()
             )
             executed_names = {r.name for r in self.results}
-            not_run = len(all_test_names - executed_names)
-            if not_run:
-                summary["not_run"] = not_run
+            for name in all_test_names - executed_names:
+                if (
+                    self.execution_scope is not None
+                    and name in self.execution_scope
+                ):
+                    missing_result += 1
+                else:
+                    undecided += 1
+
+        total = success + failed + missing_result + undecided
+
+        summary: dict[str, Any] = {
+            "total": total,
+            "success": success,
+            "failed": failed,
+            "total_duration_seconds": round(total_duration, 3),
+        }
+        if missing_result:
+            summary["missing_result"] = missing_result
+        if undecided:
+            summary["undecided"] = undecided
 
         return summary
 
@@ -723,12 +823,16 @@ class Reporter:
         Returns:
             Dictionary representing one test entry in the report.
         """
+        verdict = _execution_status_to_verdict(result.status)
         entry: dict[str, Any] = {
             "name": result.name,
             "assertion": result.assertion,
-            "status": result.status,
+            "status": verdict,
             "duration_seconds": round(result.duration, 3),
         }
+
+        if result.status not in ("passed", "failed"):
+            entry["execution_status"] = result.status
 
         if result.exit_code is not None:
             entry["exit_code"] = result.exit_code
@@ -746,28 +850,21 @@ class Reporter:
 
 
 def _aggregate_status(statuses: list[str]) -> str:
-    """Compute aggregated status from child statuses.
+    """Aggregate child verdict states into a parent verdict.
 
-    Ignores ``not_run`` entries so that tests absent from the current
-    execution do not influence the aggregated pass/fail verdict.
+    Priority (lowest number wins):
+      undecided (1) > missing_result (2) > failed (3) > success (4)
+
+    An empty list (e.g. after disabled exclusion) returns ``success``
+    (vacuously true — there is nothing to fail).
 
     Args:
-        statuses: List of child test statuses.
+        statuses: List of child verdict states.
 
     Returns:
-        Aggregated status string.
+        Aggregated verdict state string.
     """
-    active = [s for s in statuses if s != "not_run"]
-    if not active:
-        # All children are not_run → propagate not_run (vs truly empty)
-        if statuses:
-            return "not_run"
-        return "no_tests"
-
-    if all(s == "passed" for s in active):
-        return "passed"
-    # Check for actual test failures (not just dependency failures)
-    failure_statuses = {"failed", "failed+dependencies_failed"}
-    if any(s in failure_statuses for s in active):
-        return "failed"
-    return "mixed"
+    known = [s for s in statuses if s in _VERDICT_PRIORITY]
+    if not known:
+        return "success"
+    return min(known, key=lambda s: _VERDICT_PRIORITY[s])
