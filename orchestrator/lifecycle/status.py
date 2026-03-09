@@ -1,8 +1,12 @@
 """State file management for the burn-in lifecycle.
 
-Reads and writes the .tests/status JSON file that tracks test maturity
-states. Statistical parameters (min_reliability, statistical_significance)
-are passed directly to the StatusFile constructor.
+Manages test maturity state via a modular storage backend.  The default
+``SqliteBackend`` stores data in an in-memory SQLite database and
+persists it to CSV files (``tests.csv`` and ``history.csv``) inside a
+directory, keeping only git-friendly text files on disk.
+
+Statistical parameters (min_reliability, statistical_significance) are
+passed directly to the StatusFile constructor.
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from orchestrator.lifecycle.backend import SqliteBackend, StorageBackend
 from orchestrator.lifecycle.config import DEFAULT_CONFIG
 
 
@@ -39,9 +44,9 @@ def runs_and_passes_from_history(
 
 
 class StatusFile:
-    """Manages the .tests/status JSON state file.
+    """Manages test maturity state via a storage backend.
 
-    The state file tracks per-test state (state, history, last_updated).
+    The state directory (``path``) holds CSV files consumed by the backend.
     Statistical parameters are stored directly as instance attributes.
     """
 
@@ -51,9 +56,9 @@ class StatusFile:
         *,
         min_reliability: float | None = None,
         statistical_significance: float | None = None,
+        engine: StorageBackend | None = None,
     ) -> None:
         self.path = Path(path)
-        self._data: dict[str, Any] = {"tests": {}}
         self._min_reliability = (
             min_reliability
             if min_reliability is not None
@@ -64,29 +69,37 @@ class StatusFile:
             if statistical_significance is not None
             else DEFAULT_CONFIG["statistical_significance"]
         )
-        if self.path.exists():
-            self._load()
+        self._engine = engine or SqliteBackend()
+        self._load()
 
     def _load(self) -> None:
-        """Load state from the file."""
+        """Load state from CSV directory or legacy JSON file."""
+        if self.path.is_dir():
+            self._engine.load(self.path)
+        elif self.path.is_file():
+            self._load_json_legacy()
+
+    def _load_json_legacy(self) -> None:
+        """Load from a legacy JSON status file."""
         try:
             text = self.path.read_text()
-            self._data = json.loads(text)
+            data = json.loads(text)
         except (json.JSONDecodeError, OSError):
-            # If file is corrupted, start fresh
-            self._data = {"tests": {}}
-
-        # Ensure required sections exist
-        if "tests" not in self._data:
-            self._data["tests"] = {}
+            return
+        if not isinstance(data, dict):
+            return
+        self._engine.load_from_json_data(data)
 
     def save(self) -> None:
-        """Write state to the file."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        save_data = {"tests": self._data.get("tests", {})}
-        with open(self.path, "w") as f:
-            json.dump(save_data, f, indent=2)
-            f.write("\n")
+        """Persist state to CSV files in the directory.
+
+        If ``path`` was previously a legacy JSON file it is removed first
+        so the directory can be created in its place.
+        """
+        if self.path.is_file():
+            self.path.unlink()
+        self.path.mkdir(parents=True, exist_ok=True)
+        self._engine.persist(self.path)
 
     @property
     def min_reliability(self) -> float:
@@ -123,7 +136,7 @@ class StatusFile:
         Returns:
             State string or None if test not in state file.
         """
-        entry = self._data["tests"].get(test_name)
+        entry = self._engine.get_test(test_name)
         if entry is None:
             return None
         return entry.get("state")
@@ -137,7 +150,17 @@ class StatusFile:
         Returns:
             Dict with state, history, last_updated, or None.
         """
-        return self._data["tests"].get(test_name)
+        entry = self._engine.get_test(test_name)
+        if entry is None:
+            return None
+        result: dict[str, Any] = {
+            "state": entry["state"],
+            "history": self._engine.get_history(test_name),
+            "last_updated": entry["last_updated"],
+        }
+        if entry.get("target_hash") is not None:
+            result["target_hash"] = entry["target_hash"]
+        return result
 
     def set_test_state(
         self,
@@ -163,17 +186,12 @@ class StatusFile:
 
         now = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
 
-        existing = self._data["tests"].get(test_name, {})
+        existing = self._engine.get_test(test_name)
+        target_hash = existing.get("target_hash") if existing else None
 
-        entry: dict[str, Any] = {
-            "state": state,
-            "history": [] if clear_history else existing.get("history", []),
-            "last_updated": now,
-        }
-        # Preserve target_hash if it was previously set
-        if "target_hash" in existing:
-            entry["target_hash"] = existing["target_hash"]
-        self._data["tests"][test_name] = entry
+        self._engine.upsert_test(test_name, state, target_hash, now)
+        if clear_history:
+            self._engine.clear_history(test_name)
 
     def get_target_hash(self, test_name: str) -> str | None:
         """Get the stored target hash for a test.
@@ -184,7 +202,7 @@ class StatusFile:
         Returns:
             Hash string, or None if test not found or no hash stored.
         """
-        entry = self._data["tests"].get(test_name)
+        entry = self._engine.get_test(test_name)
         if entry is None:
             return None
         return entry.get("target_hash")
@@ -201,14 +219,28 @@ class StatusFile:
         """
         now = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
 
-        if test_name not in self._data["tests"]:
-            self._data["tests"][test_name] = {
-                "state": "new",
-                "history": [],
-                "last_updated": now,
-            }
+        existing = self._engine.get_test(test_name)
+        if existing is None:
+            self._engine.upsert_test(test_name, "new", hash_value, now)
+        else:
+            self._engine.upsert_test(
+                test_name, existing["state"], hash_value, existing["last_updated"]
+            )
 
-        self._data["tests"][test_name]["target_hash"] = hash_value
+    def clear_target_hash(self, test_name: str) -> None:
+        """Clear the target hash for a test.
+
+        If the test does not exist this is a no-op.
+
+        Args:
+            test_name: Test identifier.
+        """
+        existing = self._engine.get_test(test_name)
+        if existing is None:
+            return
+        self._engine.upsert_test(
+            test_name, existing["state"], None, existing["last_updated"]
+        )
 
     def invalidate_evidence(self, test_name: str) -> None:
         """Invalidate SPRT evidence for a test due to hash change.
@@ -222,14 +254,15 @@ class StatusFile:
         Args:
             test_name: Test identifier.
         """
-        entry = self._data["tests"].get(test_name)
-        if entry is None:
+        existing = self._engine.get_test(test_name)
+        if existing is None:
             return
 
         now = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
-        entry["state"] = "burning_in"
-        entry["history"] = []
-        entry["last_updated"] = now
+        self._engine.upsert_test(
+            test_name, "burning_in", existing.get("target_hash"), now
+        )
+        self._engine.clear_history(test_name)
 
     def get_same_hash_history(
         self, test_name: str, target_hash: str
@@ -247,14 +280,7 @@ class StatusFile:
         Returns:
             Filtered list of history entries (newest-first order preserved).
         """
-        entry = self._data["tests"].get(test_name)
-        if entry is None:
-            return []
-        return [
-            h
-            for h in entry.get("history", [])
-            if h.get("target_hash") == target_hash
-        ]
+        return self._engine.get_same_hash_history(test_name, target_hash)
 
     def record_run(
         self,
@@ -266,7 +292,7 @@ class StatusFile:
     ) -> None:
         """Record a test run result.
 
-        Prepends a history entry with the pass/fail result, commit SHA,
+        Appends a history entry with the pass/fail result, commit SHA,
         and optional target hash.  Updates last_updated. If test doesn't
         exist in state file, creates it with state "new".
 
@@ -278,23 +304,17 @@ class StatusFile:
         """
         now = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
 
-        if test_name not in self._data["tests"]:
-            self._data["tests"][test_name] = {
-                "state": "new",
-                "history": [],
-                "last_updated": now,
-            }
+        if not self._engine.test_exists(test_name):
+            self._engine.upsert_test(test_name, "new", None, now)
+        else:
+            existing = self._engine.get_test(test_name)
+            assert existing is not None
+            self._engine.upsert_test(
+                test_name, existing["state"], existing.get("target_hash"), now
+            )
 
-        entry = self._data["tests"][test_name]
-        entry["last_updated"] = now
-
-        # Prepend to history (newest-first) and cap
-        history = entry.get("history", [])
-        history_entry: dict[str, Any] = {"passed": passed, "commit": commit}
-        if target_hash is not None:
-            history_entry["target_hash"] = target_hash
-        history.insert(0, history_entry)
-        entry["history"] = history[:HISTORY_CAP]
+        self._engine.insert_history(test_name, passed, commit, target_hash)
+        self._engine.enforce_history_cap(test_name, HISTORY_CAP)
 
     def get_test_history(self, test_name: str) -> list[dict[str, Any]]:
         """Get the run history for a test (newest-first).
@@ -307,10 +327,7 @@ class StatusFile:
         Returns:
             List of history entries, or empty list if not found.
         """
-        entry = self._data["tests"].get(test_name)
-        if entry is None:
-            return []
-        return list(entry.get("history", []))
+        return self._engine.get_history(test_name)
 
     def get_all_tests(self) -> dict[str, dict[str, Any]]:
         """Get all test entries.
@@ -318,7 +335,7 @@ class StatusFile:
         Returns:
             Dict of {test_name: {state, history, last_updated}}.
         """
-        return dict(self._data["tests"])
+        return self._engine.get_all_tests()
 
     def get_tests_by_state(self, state: str) -> list[str]:
         """Get all test names with a given state.
@@ -329,11 +346,7 @@ class StatusFile:
         Returns:
             List of test names.
         """
-        return [
-            name
-            for name, entry in self._data["tests"].items()
-            if entry.get("state") == state
-        ]
+        return self._engine.get_tests_by_state(state)
 
     def remove_test(self, test_name: str) -> bool:
         """Remove a test from the state file.
@@ -344,7 +357,4 @@ class StatusFile:
         Returns:
             True if the test was removed, False if not found.
         """
-        if test_name in self._data["tests"]:
-            del self._data["tests"][test_name]
-            return True
-        return False
+        return self._engine.remove_test(test_name)

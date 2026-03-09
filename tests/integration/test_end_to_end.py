@@ -429,7 +429,7 @@ class TestBurnInLifecycle:
         from orchestrator.lifecycle.status import StatusFile
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
 
             sf.set_test_state("test_a", "burning_in")

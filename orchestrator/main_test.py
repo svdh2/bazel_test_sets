@@ -471,7 +471,7 @@ class TestBurnIn:
     def test_burn_in_new_to_burning_in(self):
         """Burn-in transitions new test to burning_in."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "new")
             sf.save()
@@ -491,7 +491,7 @@ class TestBurnIn:
     def test_burn_in_unknown_test(self):
         """Burn-in of test not in status file creates it as burning_in."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.save()
 
@@ -509,7 +509,7 @@ class TestBurnIn:
     def test_burn_in_already_burning_in(self):
         """Burn-in of already burning_in test is a no-op."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "burning_in")
             for _ in range(5):
@@ -530,7 +530,7 @@ class TestBurnIn:
     def test_burn_in_stable_rejected(self):
         """Burn-in of stable test is rejected."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "stable")
             sf.save()
@@ -549,7 +549,7 @@ class TestBurnIn:
     def test_burn_in_disabled_rejected(self):
         """Burn-in of disabled test is rejected."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "disabled", clear_history=True)
             sf.save()
@@ -568,7 +568,7 @@ class TestBurnIn:
     def test_burn_in_list_all(self):
         """Burn-in with no tests lists all burning_in tests."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "burning_in")
             for _ in range(5):
@@ -591,7 +591,7 @@ class TestDeflake:
     def test_deflake_flaky_to_burning_in(self):
         """Deflake transitions flaky test to burning_in with reset counters."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "flaky")
             sf.save()
@@ -611,7 +611,7 @@ class TestDeflake:
     def test_deflake_not_found(self):
         """Deflake of nonexistent test returns error."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.save()
 
@@ -626,7 +626,7 @@ class TestDeflake:
     def test_deflake_stable_rejected(self):
         """Deflake of stable test is rejected."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "stable")
             sf.save()
@@ -645,7 +645,7 @@ class TestDeflake:
     def test_deflake_disabled_rejected(self):
         """Deflake of disabled test is rejected."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "disabled", clear_history=True)
             sf.save()
@@ -664,7 +664,7 @@ class TestDeflake:
     def test_deflake_multiple(self):
         """Deflake multiple tests at once."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "flaky")
             sf.set_test_state("//test:b", "flaky")
@@ -685,7 +685,7 @@ class TestDeflake:
     def test_deflake_clears_target_hash(self):
         """Deflake clears target_hash so test gets fresh hash tracking."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "flaky")
             sf.set_target_hash("//test:a", "old_hash_abc")
@@ -711,7 +711,7 @@ class TestDeflake:
     def test_deflake_without_target_hash(self):
         """Deflake works fine when no target_hash was set."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "flaky")
             sf.save()
@@ -734,7 +734,7 @@ class TestDeflake:
         from orchestrator.execution.executor import TestResult
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
 
             # Step 1: Test starts as flaky with old hash
             sf = StatusFile(status_path, min_reliability=0.99,
@@ -803,7 +803,7 @@ class TestDeflake:
             dag = TestDAG.from_manifest(manifest)
 
             # Status file has test as disabled
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:was_disabled", "disabled")
             sf.save()
@@ -822,7 +822,7 @@ class TestTestStatus:
     def test_test_status_empty(self):
         """Status with no tests shows empty message."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.save()
 
@@ -837,7 +837,7 @@ class TestTestStatus:
     def test_test_status_displays_all(self):
         """Status displays all tests."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "stable")
             sf.set_test_state("//test:b", "burning_in")
@@ -855,7 +855,7 @@ class TestTestStatus:
     def test_test_status_filter_by_state(self):
         """Status filters by state."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("//test:a", "stable")
             sf.set_test_state("//test:b", "flaky")
@@ -885,7 +885,7 @@ class TestMainEntryPoint:
         from orchestrator.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.save()
 
@@ -901,7 +901,7 @@ class TestMainEntryPoint:
         from orchestrator.main import main
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.save()
 
@@ -1325,7 +1325,7 @@ class TestMiniConvergeRegression:
             manifest_path.write_text(json.dumps(manifest))
 
             graph_path = self._make_graph(tmpdir, "fail_test")
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("fail_test", "stable")
             sf.save()
@@ -1384,7 +1384,7 @@ class TestMiniConvergeRegression:
             manifest_path.write_text(json.dumps(manifest))
 
             graph_path = self._make_graph(tmpdir, "flaky_test")
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("flaky_test", "flaky")
             sf.save()
@@ -1440,7 +1440,7 @@ class TestMiniConvergeRegression:
             manifest_path.write_text(json.dumps(manifest))
 
             graph_path = self._make_graph(tmpdir, "burnin_test")
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("burnin_test", "burning_in")
             sf.save()
@@ -1549,7 +1549,7 @@ class TestMiniConvergeRegression:
             manifest_path.write_text(json.dumps(manifest))
 
             graph_path = self._make_graph(tmpdir, "pass_test")
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("pass_test", "stable")
             sf.save()
@@ -1605,7 +1605,7 @@ class TestMiniConvergeRegression:
             manifest_path.write_text(json.dumps(manifest))
 
             graph_path = self._make_graph(tmpdir, "fail_test")
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("fail_test", "stable")
             sf.save()
@@ -1664,7 +1664,7 @@ class TestMiniConvergeRegression:
             manifest_path.write_text(json.dumps(manifest))
 
             graph_path = self._make_graph(tmpdir, "fail_test")
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("fail_test", "stable")
             sf.save()
@@ -1767,7 +1767,7 @@ class TestBurnInInclusionRegression:
             # Graph only knows about stable_test
             graph_path = self._make_graph(tmpdir, ["stable_test"])
 
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("stable_test", "stable")
             sf.set_test_state("new_test", "new")
@@ -1834,7 +1834,7 @@ class TestBurnInInclusionRegression:
             # Graph only selects stable_test
             graph_path = self._make_graph(tmpdir, ["stable_test"])
 
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("stable_test", "stable")
             sf.set_test_state("burnin_test", "burning_in")
@@ -1898,7 +1898,7 @@ class TestBurnInInclusionRegression:
 
             graph_path = self._make_graph(tmpdir, ["stable_test"])
 
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("stable_test", "stable")
             sf.set_test_state("burnin_test", "burning_in")
@@ -1983,7 +1983,7 @@ class TestBurnInInclusionRegression:
             # Graph only selects stable_test
             graph_path = self._make_graph(tmpdir, ["stable_test"])
 
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("stable_test", "stable")
             sf.set_test_state("dep_test", "stable")
@@ -2109,7 +2109,7 @@ class TestBurnInInclusionRegression:
 
             graph_path = self._make_graph(tmpdir, ["stable_test"])
 
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(
                 status_path,
                 min_reliability=0.90,
@@ -2190,7 +2190,7 @@ class TestBurnInSweepInEffort:
             manifest_path = Path(tmpdir) / "manifest.json"
             manifest_path.write_text(json.dumps(manifest))
 
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("stable_test", "stable")
             sf.set_test_state("burnin_test", "burning_in")
@@ -2252,7 +2252,7 @@ class TestBurnInSweepInEffort:
             manifest_path = Path(tmpdir) / "manifest.json"
             manifest_path.write_text(json.dumps(manifest))
 
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("stable_test", "stable")
             sf.save()
@@ -2305,7 +2305,7 @@ class TestBurnInSweepInEffort:
             manifest_path = Path(tmpdir) / "manifest.json"
             manifest_path.write_text(json.dumps(manifest))
 
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("burnin_test", "burning_in")
             # Pre-populate with enough prior passes so sweep can decide
@@ -2367,7 +2367,7 @@ class TestBurnInSweepInEffort:
             manifest_path = Path(tmpdir) / "manifest.json"
             manifest_path.write_text(json.dumps(manifest))
 
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("burnin_test", "burning_in")
             sf.save()
@@ -2429,7 +2429,7 @@ class TestBurnInSweepInEffort:
             manifest_path = Path(tmpdir) / "manifest.json"
             manifest_path.write_text(json.dumps(manifest))
 
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             sf.set_test_state("stable_test", "stable")
             sf.set_target_hash("stable_test", "hash_s")  # unchanged
@@ -2508,7 +2508,7 @@ class TestFlakyDeadlineInOrchestrator:
             manifest_path.write_text(json.dumps(manifest))
 
             # Set up status file with an old flaky test
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             old_date = (
                 datetime.datetime.now(tz=datetime.timezone.utc)
                 - datetime.timedelta(days=20)
@@ -2578,7 +2578,7 @@ class TestFlakyDeadlineInOrchestrator:
             manifest_path.write_text(json.dumps(manifest))
 
             # Set up status file with a recently-flaky test
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             recent_date = (
                 datetime.datetime.now(tz=datetime.timezone.utc)
                 - datetime.timedelta(days=3)
@@ -2801,7 +2801,7 @@ class TestComputeAndFilterHashes:
     def test_all_new_hashes_treated_as_changed(self):
         """All tests with no stored hash are treated as changed."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_test_state("//test:b", "stable")
             sf.save()
@@ -2826,7 +2826,7 @@ class TestComputeAndFilterHashes:
     def test_unchanged_hash_stable_is_skippable(self):
         """Stable test with unchanged hash is skippable."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_target_hash("//test:a", "hash_a")
             sf.save()
@@ -2847,7 +2847,7 @@ class TestComputeAndFilterHashes:
     def test_unchanged_hash_burning_in_not_skippable(self):
         """burning_in test with unchanged hash is NOT skippable."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             sf.set_target_hash("//test:a", "hash_a")
             sf.save()
@@ -2868,7 +2868,7 @@ class TestComputeAndFilterHashes:
     def test_changed_hash_invalidates_evidence(self):
         """Changed hash triggers invalidate_evidence."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_target_hash("//test:a", "old_hash")
             sf.record_run("//test:a", True, commit="c1", target_hash="old_hash")
@@ -2895,7 +2895,7 @@ class TestComputeAndFilterHashes:
     def test_skip_unchanged_false_no_skippable(self):
         """With skip_unchanged=False, no tests are skippable."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_target_hash("//test:a", "hash_a")
             sf.save()
@@ -2916,7 +2916,7 @@ class TestComputeAndFilterHashes:
     def test_hash_computation_failure_fallback(self):
         """When hash computation fails, all tests treated as changed."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.save()
 
@@ -2937,7 +2937,7 @@ class TestComputeAndFilterHashes:
     def test_mixed_changed_and_unchanged(self):
         """Mix of changed and unchanged tests."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_target_hash("//test:a", "hash_a")
             sf.set_test_state("//test:b", "stable")
@@ -2966,7 +2966,7 @@ class TestComputeAndFilterHashes:
     def test_new_hash_for_existing_test(self):
         """Test with no stored hash gets hash set."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             # No hash set
             sf.save()
@@ -2990,7 +2990,7 @@ class TestComputeAndFilterHashes:
     def test_label_missing_from_hash_result(self):
         """Test label not in hash result is treated as changed."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.save()
 
@@ -3011,7 +3011,7 @@ class TestComputeAndFilterHashes:
     def test_flaky_unchanged_is_skippable(self):
         """Flaky test with unchanged hash is skippable."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "flaky")
             sf.set_target_hash("//test:a", "hash_a")
             sf.save()
@@ -3032,7 +3032,7 @@ class TestComputeAndFilterHashes:
     def test_new_test_unchanged_not_skippable(self):
         """new test with unchanged hash is NOT skippable."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "new")
             sf.set_target_hash("//test:a", "hash_a")
             sf.save()
@@ -3053,7 +3053,7 @@ class TestComputeAndFilterHashes:
     def test_hash_saved_after_computation(self):
         """Status file is saved after hash computation."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
             sf = StatusFile(path)
             sf.set_test_state("//test:a", "stable")
             sf.save()

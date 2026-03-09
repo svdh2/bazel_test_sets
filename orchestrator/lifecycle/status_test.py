@@ -20,10 +20,10 @@ from orchestrator.lifecycle.status import (
 class TestStatusFileCreate:
     """Tests for creating new status files."""
 
-    def test_create_new_file(self):
-        """StatusFile creates empty state for nonexistent file."""
+    def test_create_new(self):
+        """StatusFile creates empty state for nonexistent directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
             sf = StatusFile(path)
 
             assert sf.get_all_tests() == {}
@@ -33,25 +33,25 @@ class TestStatusFileCreate:
                 == DEFAULT_CONFIG["statistical_significance"]
             )
 
-    def test_save_creates_file(self):
-        """save() creates the file on disk."""
+    def test_save_creates_directory(self):
+        """save() creates the status directory with CSV files."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
             sf = StatusFile(path)
             sf.save()
 
-            assert path.exists()
-            data = json.loads(path.read_text())
-            assert "config" not in data
-            assert "tests" in data
+            assert path.is_dir()
+            assert (path / "tests.csv").exists()
+            assert (path / "history.csv").exists()
 
     def test_save_creates_parent_dirs(self):
         """save() creates parent directories if needed."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "sub" / "dir" / "status.json"
+            path = Path(tmpdir) / "sub" / "dir" / "status"
             sf = StatusFile(path)
             sf.save()
-            assert path.exists()
+            assert path.is_dir()
+            assert (path / "tests.csv").exists()
 
 
 class TestStatusFileReadWrite:
@@ -60,7 +60,7 @@ class TestStatusFileReadWrite:
     def test_roundtrip(self):
         """State survives save/load roundtrip."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
 
             sf1 = StatusFile(path)
             sf1.set_test_state("//test:a", "stable")
@@ -84,14 +84,14 @@ class TestStatusFileReadWrite:
     def test_get_nonexistent_test(self):
         """Getting state of nonexistent test returns None."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             assert sf.get_test_state("//test:nonexistent") is None
             assert sf.get_test_entry("//test:nonexistent") is None
 
     def test_update_existing_test(self):
         """Updating existing test preserves history."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             for _ in range(10):
                 sf.record_run("//test:a", passed=True)
@@ -113,7 +113,7 @@ class TestStatusFileConfig:
     def test_default_config(self):
         """Default config matches expected values when no params passed."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             assert sf.min_reliability == 0.99
             assert sf.statistical_significance == 0.95
 
@@ -121,7 +121,7 @@ class TestStatusFileConfig:
         """Statistical params can be passed directly to constructor."""
         with tempfile.TemporaryDirectory() as tmpdir:
             sf = StatusFile(
-                Path(tmpdir) / "status.json",
+                Path(tmpdir) / "status",
                 min_reliability=0.95,
                 statistical_significance=0.90,
             )
@@ -131,7 +131,7 @@ class TestStatusFileConfig:
     def test_set_config(self):
         """Config can be updated in memory."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_config(min_reliability=0.95, statistical_significance=0.99)
             assert sf.min_reliability == 0.95
             assert sf.statistical_significance == 0.99
@@ -139,7 +139,7 @@ class TestStatusFileConfig:
     def test_partial_config_update(self):
         """Updating one config value doesn't affect others."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_config(min_reliability=0.90)
             assert sf.statistical_significance == 0.95  # unchanged
 
@@ -150,7 +150,7 @@ class TestStatusFileRecordRun:
     def test_record_run_new_test(self):
         """Recording a run for a new test creates it with state 'new'."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.record_run("//test:a", passed=True)
 
             entry = sf.get_test_entry("//test:a")
@@ -165,7 +165,7 @@ class TestStatusFileRecordRun:
     def test_record_run_existing_test(self):
         """Recording runs grows history."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             for _ in range(5):
                 sf.record_run("//test:a", passed=True)
@@ -187,7 +187,7 @@ class TestStatusFileRecordRun:
     def test_record_run_updates_timestamp(self):
         """Recording a run updates last_updated."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.record_run("//test:a", passed=True)
             entry = sf.get_test_entry("//test:a")
             assert entry is not None
@@ -200,7 +200,7 @@ class TestStatusFileQuery:
     def test_get_tests_by_state(self):
         """Filter tests by state."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_test_state("//test:b", "burning_in")
             sf.set_test_state("//test:c", "stable")
@@ -218,13 +218,13 @@ class TestStatusFileQuery:
     def test_get_tests_by_state_empty(self):
         """No tests with given state returns empty list."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             assert sf.get_tests_by_state("stable") == []
 
     def test_get_all_tests(self):
         """Get all test entries."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_test_state("//test:b", "flaky")
 
@@ -240,7 +240,7 @@ class TestStatusFileRemove:
     def test_remove_existing(self):
         """Remove an existing test."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             assert sf.remove_test("//test:a") is True
             assert sf.get_test_state("//test:a") is None
@@ -248,7 +248,7 @@ class TestStatusFileRemove:
     def test_remove_nonexistent(self):
         """Removing nonexistent test returns False."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             assert sf.remove_test("//test:nonexistent") is False
 
 
@@ -258,7 +258,7 @@ class TestStatusFileValidation:
     def test_invalid_state_raises(self):
         """Setting an invalid state raises ValueError."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             with pytest.raises(ValueError, match="Invalid state"):
                 sf.set_test_state("//test:a", "invalid_state")
 
@@ -268,28 +268,47 @@ class TestStatusFileValidation:
 
 
 class TestStatusFileCorrupted:
-    """Tests for handling corrupted files."""
+    """Tests for handling corrupted CSV files."""
 
-    def test_corrupted_json(self):
-        """Corrupted JSON file starts fresh."""
+    def test_corrupted_csv(self):
+        """Corrupted CSV files start fresh."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
+            path.mkdir()
+            (path / "tests.csv").write_text("garbage\nno,proper,columns")
+            sf = StatusFile(path)
+            assert sf.get_all_tests() == {}
+
+    def test_empty_csv_files(self):
+        """Empty CSV files start fresh."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "status"
+            path.mkdir()
+            (path / "tests.csv").write_text("")
+            (path / "history.csv").write_text("")
+            sf = StatusFile(path)
+            assert sf.get_all_tests() == {}
+
+    def test_corrupted_json_legacy(self):
+        """Corrupted legacy JSON file starts fresh."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "status"
             path.write_text("{ invalid json }")
             sf = StatusFile(path)
             assert sf.get_all_tests() == {}
 
-    def test_empty_file(self):
-        """Empty file starts fresh."""
+    def test_empty_json_legacy(self):
+        """Empty legacy JSON file starts fresh."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
             path.write_text("")
             sf = StatusFile(path)
             assert sf.get_all_tests() == {}
 
-    def test_missing_sections(self):
-        """File with missing sections gets defaults."""
+    def test_missing_sections_json_legacy(self):
+        """Legacy JSON file with missing sections gets defaults."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
             path.write_text('{"some_key": "value"}')
             sf = StatusFile(path)
             assert sf.min_reliability == DEFAULT_CONFIG["min_reliability"]
@@ -302,7 +321,7 @@ class TestStatusFileHistory:
     def test_record_run_creates_history_entry(self):
         """record_run creates a history entry."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.record_run("//test:a", passed=True, commit="abc123")
 
             history = sf.get_test_history("//test:a")
@@ -312,7 +331,7 @@ class TestStatusFileHistory:
     def test_history_newest_first(self):
         """History is stored newest-first."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.record_run("//test:a", passed=True, commit="aaa")
             sf.record_run("//test:a", passed=False, commit="bbb")
             sf.record_run("//test:a", passed=True, commit="ccc")
@@ -326,7 +345,7 @@ class TestStatusFileHistory:
     def test_history_without_commit(self):
         """record_run without commit stores None."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.record_run("//test:a", passed=True)
 
             history = sf.get_test_history("//test:a")
@@ -335,7 +354,7 @@ class TestStatusFileHistory:
     def test_history_capped_at_limit(self):
         """History is capped at HISTORY_CAP entries."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             for i in range(HISTORY_CAP + 10):
                 sf.record_run("//test:a", passed=True, commit=f"c{i}")
 
@@ -347,7 +366,7 @@ class TestStatusFileHistory:
     def test_history_survives_roundtrip(self):
         """History persists through save/load."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
             sf1 = StatusFile(path)
             sf1.record_run("//test:a", passed=True, commit="abc")
             sf1.record_run("//test:a", passed=False, commit="def")
@@ -360,10 +379,10 @@ class TestStatusFileHistory:
             assert history[1] == {"passed": True, "commit": "abc"}
 
     def test_backward_compat_missing_history_field(self):
-        """Old status files without history field return empty list."""
+        """Old JSON status files without history field return empty list."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
-            # Write a status file in the old format (no history)
+            path = Path(tmpdir) / "status"
+            # Write a status file in the old JSON format (no history)
             data = {
                 "tests": {
                     "//test:a": {
@@ -386,7 +405,7 @@ class TestStatusFileHistory:
     def test_reset_clears_history(self):
         """set_test_state with clear_history=True clears history."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.record_run("//test:a", passed=True, commit="abc")
             sf.record_run("//test:a", passed=False, commit="def")
@@ -399,7 +418,7 @@ class TestStatusFileHistory:
     def test_set_test_state_preserves_history(self):
         """set_test_state without clear_history preserves history."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in", clear_history=True)
             sf.record_run("//test:a", passed=True, commit="abc")
             sf.record_run("//test:a", passed=True, commit="def")
@@ -411,13 +430,13 @@ class TestStatusFileHistory:
     def test_get_test_history_nonexistent(self):
         """get_test_history for unknown test returns empty list."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             assert sf.get_test_history("//test:nonexistent") == []
 
     def test_get_test_history_returns_copy(self):
         """get_test_history returns a copy, not a reference."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.record_run("//test:a", passed=True, commit="abc")
             history = sf.get_test_history("//test:a")
             history.clear()
@@ -430,7 +449,7 @@ class TestStatusFileTargetHash:
     def test_set_and_get_target_hash(self):
         """Target hash can be stored and retrieved."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_target_hash("//test:a", "hash123")
             assert sf.get_target_hash("//test:a") == "hash123"
@@ -438,20 +457,20 @@ class TestStatusFileTargetHash:
     def test_get_target_hash_nonexistent_test(self):
         """Getting hash for nonexistent test returns None."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             assert sf.get_target_hash("//test:nonexistent") is None
 
     def test_get_target_hash_no_hash_stored(self):
         """Getting hash for test without hash returns None."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             assert sf.get_target_hash("//test:a") is None
 
     def test_set_target_hash_creates_test_entry(self):
         """Setting hash for nonexistent test creates it with state 'new'."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_target_hash("//test:a", "hash123")
             assert sf.get_test_state("//test:a") == "new"
             assert sf.get_target_hash("//test:a") == "hash123"
@@ -459,7 +478,7 @@ class TestStatusFileTargetHash:
     def test_update_target_hash(self):
         """Target hash can be updated."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_target_hash("//test:a", "hash_v1")
             assert sf.get_target_hash("//test:a") == "hash_v1"
@@ -470,7 +489,7 @@ class TestStatusFileTargetHash:
     def test_target_hash_survives_roundtrip(self):
         """Target hash persists through save/load."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
             sf1 = StatusFile(path)
             sf1.set_test_state("//test:a", "stable")
             sf1.set_target_hash("//test:a", "hash123")
@@ -482,7 +501,7 @@ class TestStatusFileTargetHash:
     def test_set_test_state_preserves_target_hash(self):
         """set_test_state preserves existing target_hash."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             sf.set_target_hash("//test:a", "hash123")
 
@@ -493,7 +512,7 @@ class TestStatusFileTargetHash:
     def test_set_test_state_with_clear_history_preserves_hash(self):
         """set_test_state with clear_history=True still preserves target_hash."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_target_hash("//test:a", "hash123")
             sf.record_run("//test:a", passed=True, commit="abc")
@@ -503,9 +522,9 @@ class TestStatusFileTargetHash:
             assert sf.get_test_history("//test:a") == []
 
     def test_backward_compat_old_format_no_target_hash(self):
-        """Old status files without target_hash load without error."""
+        """Old JSON status files without target_hash load without error."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
             data = {
                 "tests": {
                     "//test:a": {
@@ -525,13 +544,55 @@ class TestStatusFileTargetHash:
             assert len(sf.get_test_history("//test:a")) == 1
 
 
+class TestStatusFileClearTargetHash:
+    """Tests for clear_target_hash method."""
+
+    def test_clear_existing_hash(self):
+        """clear_target_hash removes the hash."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status")
+            sf.set_test_state("//test:a", "stable")
+            sf.set_target_hash("//test:a", "hash123")
+            assert sf.get_target_hash("//test:a") == "hash123"
+
+            sf.clear_target_hash("//test:a")
+            assert sf.get_target_hash("//test:a") is None
+
+    def test_clear_preserves_state(self):
+        """clear_target_hash does not change state or history."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status")
+            sf.set_test_state("//test:a", "stable")
+            sf.set_target_hash("//test:a", "hash123")
+            sf.record_run("//test:a", passed=True, commit="abc")
+
+            sf.clear_target_hash("//test:a")
+            assert sf.get_test_state("//test:a") == "stable"
+            assert len(sf.get_test_history("//test:a")) == 1
+
+    def test_clear_nonexistent_test_noop(self):
+        """clear_target_hash for nonexistent test is a no-op."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status")
+            sf.clear_target_hash("//test:nonexistent")
+            assert sf.get_test_state("//test:nonexistent") is None
+
+    def test_clear_no_hash_noop(self):
+        """clear_target_hash when no hash is set is a no-op."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sf = StatusFile(Path(tmpdir) / "status")
+            sf.set_test_state("//test:a", "stable")
+            sf.clear_target_hash("//test:a")
+            assert sf.get_target_hash("//test:a") is None
+
+
 class TestStatusFileInvalidateEvidence:
     """Tests for invalidate_evidence method."""
 
     def test_invalidate_evidence_clears_history(self):
         """invalidate_evidence clears all history."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.record_run("//test:a", True, commit="abc")
             sf.record_run("//test:a", True, commit="def")
@@ -543,7 +604,7 @@ class TestStatusFileInvalidateEvidence:
     def test_invalidate_evidence_transitions_to_burning_in(self):
         """invalidate_evidence transitions state to burning_in."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.invalidate_evidence("//test:a")
             assert sf.get_test_state("//test:a") == "burning_in"
@@ -551,14 +612,12 @@ class TestStatusFileInvalidateEvidence:
     def test_invalidate_evidence_updates_last_updated(self):
         """invalidate_evidence updates last_updated timestamp."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             entry_before = sf.get_test_entry("//test:a")
             assert entry_before is not None
             ts_before = entry_before["last_updated"]
 
-            # Small delay not needed -- timestamp is ISO format so even
-            # same-second calls are fine for a non-equality check
             sf.invalidate_evidence("//test:a")
             entry_after = sf.get_test_entry("//test:a")
             assert entry_after is not None
@@ -567,7 +626,7 @@ class TestStatusFileInvalidateEvidence:
     def test_invalidate_evidence_preserves_target_hash(self):
         """invalidate_evidence preserves the target_hash field."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_target_hash("//test:a", "hash123")
             sf.record_run("//test:a", True, commit="abc")
@@ -580,7 +639,7 @@ class TestStatusFileInvalidateEvidence:
     def test_invalidate_evidence_nonexistent_test_noop(self):
         """invalidate_evidence for nonexistent test is a no-op."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             # Should not raise
             sf.invalidate_evidence("//test:nonexistent")
             assert sf.get_test_state("//test:nonexistent") is None
@@ -588,7 +647,7 @@ class TestStatusFileInvalidateEvidence:
     def test_invalidate_evidence_from_flaky(self):
         """invalidate_evidence transitions flaky -> burning_in."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "flaky")
             sf.record_run("//test:a", True, commit="abc")
             sf.record_run("//test:a", False, commit="def")
@@ -600,7 +659,7 @@ class TestStatusFileInvalidateEvidence:
     def test_invalidate_evidence_from_burning_in(self):
         """invalidate_evidence on burning_in test clears history, stays burning_in."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             sf.record_run("//test:a", True, commit="abc")
 
@@ -615,7 +674,7 @@ class TestStatusFileSameHashHistory:
     def test_same_hash_filters_matching(self):
         """get_same_hash_history returns only entries with matching hash."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             sf.record_run("//test:a", True, commit="c1", target_hash="hash_v1")
             sf.record_run("//test:a", False, commit="c2", target_hash="hash_v2")
@@ -630,7 +689,7 @@ class TestStatusFileSameHashHistory:
     def test_same_hash_excludes_no_hash_entries(self):
         """Entries without target_hash are excluded."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             sf.record_run("//test:a", True, commit="c1")  # no hash
             sf.record_run("//test:a", True, commit="c2", target_hash="hash_v1")
@@ -643,7 +702,7 @@ class TestStatusFileSameHashHistory:
     def test_same_hash_no_matches(self):
         """No matching hash entries returns empty list."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             sf.record_run("//test:a", True, commit="c1", target_hash="hash_v1")
 
@@ -652,20 +711,20 @@ class TestStatusFileSameHashHistory:
     def test_same_hash_nonexistent_test(self):
         """Nonexistent test returns empty list."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             assert sf.get_same_hash_history("//test:nonexistent", "hash") == []
 
     def test_same_hash_empty_history(self):
         """Test with no history returns empty list."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             assert sf.get_same_hash_history("//test:a", "hash") == []
 
     def test_same_hash_all_match(self):
         """All entries with same hash are returned."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             for i in range(5):
                 sf.record_run(
@@ -678,7 +737,7 @@ class TestStatusFileSameHashHistory:
     def test_same_hash_preserves_order(self):
         """Filtered results preserve newest-first order."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             sf.record_run("//test:a", True, commit="old", target_hash="h1")
             sf.record_run("//test:a", False, commit="mid", target_hash="h2")
@@ -691,7 +750,7 @@ class TestStatusFileSameHashHistory:
     def test_same_hash_survives_roundtrip(self):
         """Hash-tagged history entries survive save/load."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
             sf1 = StatusFile(path)
             sf1.set_test_state("//test:a", "burning_in")
             sf1.record_run("//test:a", True, commit="c1", target_hash="hash_v1")
@@ -707,7 +766,7 @@ class TestStatusFileSameHashHistory:
     def test_same_hash_with_runs_and_passes(self):
         """Runs and passes can be derived from same-hash filtered history."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             # 3 runs with hash_v1: 2 pass, 1 fail
             sf.record_run("//test:a", True, commit="c1", target_hash="hash_v1")
@@ -734,7 +793,7 @@ class TestStatusFileRecordRunWithHash:
     def test_record_run_with_target_hash(self):
         """record_run stores target_hash in history entry."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             sf.record_run("//test:a", True, commit="abc", target_hash="hash123")
 
@@ -747,7 +806,7 @@ class TestStatusFileRecordRunWithHash:
     def test_record_run_without_target_hash(self):
         """record_run without target_hash does not add hash to entry."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             sf.record_run("//test:a", True, commit="abc")
 
@@ -758,7 +817,7 @@ class TestStatusFileRecordRunWithHash:
     def test_record_run_mixed_hash_no_hash(self):
         """History can have mix of entries with and without target_hash."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             sf.record_run("//test:a", True, commit="c1")
             sf.record_run("//test:a", True, commit="c2", target_hash="hash_v1")
@@ -774,7 +833,7 @@ class TestStatusFileRecordRunWithHash:
     def test_record_run_hash_survives_roundtrip(self):
         """Target hash in history entries persists through save/load."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
             sf1 = StatusFile(path)
             sf1.set_test_state("//test:a", "burning_in")
             sf1.record_run("//test:a", True, commit="abc", target_hash="hash123")
@@ -787,7 +846,7 @@ class TestStatusFileRecordRunWithHash:
     def test_record_run_hash_new_test(self):
         """record_run with hash for new test creates entry with hash."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.record_run("//test:a", True, commit="abc", target_hash="hash123")
 
             assert sf.get_test_state("//test:a") == "new"
@@ -797,7 +856,7 @@ class TestStatusFileRecordRunWithHash:
     def test_record_run_hash_capped(self):
         """History cap applies to entries with target_hash."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             for i in range(HISTORY_CAP + 10):
                 sf.record_run(
@@ -816,7 +875,7 @@ class TestStatusFileDisabled:
     def test_disabled_state_roundtrip(self):
         """Disabled state survives save/load."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            path = Path(tmpdir) / "status.json"
+            path = Path(tmpdir) / "status"
             sf1 = StatusFile(path)
             sf1.set_test_state("//test:a", "disabled", clear_history=True)
             sf1.save()
@@ -827,7 +886,7 @@ class TestStatusFileDisabled:
     def test_get_tests_by_state_disabled(self):
         """Filter tests by disabled state."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_test_state("//test:b", "disabled", clear_history=True)
             sf.set_test_state("//test:c", "disabled", clear_history=True)
@@ -838,10 +897,52 @@ class TestStatusFileDisabled:
     def test_disabled_resets_history(self):
         """Setting state to disabled with clear_history clears history."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.record_run("//test:a", passed=True, commit="abc")
             assert len(sf.get_test_history("//test:a")) == 1
 
             sf.set_test_state("//test:a", "disabled", clear_history=True)
             assert sf.get_test_history("//test:a") == []
+
+
+class TestStatusFileJsonMigration:
+    """Tests for JSON-to-CSV migration."""
+
+    def test_json_file_migrates_to_csv_on_save(self):
+        """Legacy JSON file is migrated to CSV directory on save."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "status"
+            data = {
+                "tests": {
+                    "//test:a": {
+                        "state": "stable",
+                        "history": [
+                            {"passed": True, "commit": "abc"},
+                            {"passed": False, "commit": "def"},
+                        ],
+                        "last_updated": "2026-01-01T00:00:00+00:00",
+                        "target_hash": "hash123",
+                    }
+                },
+            }
+            path.write_text(json.dumps(data))
+
+            sf = StatusFile(path)
+            assert sf.get_test_state("//test:a") == "stable"
+            assert sf.get_target_hash("//test:a") == "hash123"
+            history = sf.get_test_history("//test:a")
+            assert len(history) == 2
+            assert history[0]["commit"] == "abc"
+            assert history[1]["commit"] == "def"
+
+            sf.save()
+            assert path.is_dir()
+            assert (path / "tests.csv").exists()
+            assert (path / "history.csv").exists()
+
+            # Re-load from CSV directory
+            sf2 = StatusFile(path)
+            assert sf2.get_test_state("//test:a") == "stable"
+            assert sf2.get_target_hash("//test:a") == "hash123"
+            assert len(sf2.get_test_history("//test:a")) == 2

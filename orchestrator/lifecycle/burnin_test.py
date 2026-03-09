@@ -73,7 +73,7 @@ class TestBurnInSweepToStable:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                status_path = Path(tmpdir) / "status.json"
+                status_path = Path(tmpdir) / "status"
                 sf = StatusFile(status_path)
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 sf.save()
@@ -106,7 +106,7 @@ class TestBurnInSweepToFlaky:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                status_path = Path(tmpdir) / "status.json"
+                status_path = Path(tmpdir) / "status"
                 sf = StatusFile(status_path)
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 sf.save()
@@ -139,7 +139,7 @@ class TestBurnInSweepMultiple:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 sf.set_test_state("b", "burning_in", clear_history=True)
                 sf.save()
@@ -164,7 +164,7 @@ class TestBurnInSweepMultiple:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 sf.set_test_state("b", "stable")
                 sf.save()
@@ -193,7 +193,7 @@ class TestBurnInSweepSpecific:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 sf.set_test_state("b", "burning_in", clear_history=True)
                 sf.save()
@@ -220,7 +220,7 @@ class TestBurnInCrashRecovery:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                status_path = Path(tmpdir) / "status.json"
+                status_path = Path(tmpdir) / "status"
                 sf = StatusFile(status_path)
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 sf.save()
@@ -249,7 +249,7 @@ class TestStableDemotion:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "stable")
                 sf.save()
 
@@ -271,7 +271,7 @@ class TestStableDemotion:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "stable")
                 sf.save()
 
@@ -285,7 +285,7 @@ class TestStableDemotion:
         """Demotion for test not in DAG returns inconclusive."""
         dag = TestDAG()
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             result = handle_stable_failure("nonexistent", dag, sf)
             assert result == "inconclusive"
 
@@ -299,7 +299,7 @@ class TestStableDemotion:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "stable")
                 sf.save()
 
@@ -327,7 +327,7 @@ class TestStableDemotion:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "stable")
 
                 # Pre-populate with a history of recent failures from
@@ -361,7 +361,7 @@ class TestBurnInSweepCommitSHA:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 sf.save()
 
@@ -384,7 +384,7 @@ class TestBurnInSweepCommitSHA:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 sf.save()
 
@@ -413,7 +413,7 @@ class TestFilterTestsByState:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "stable")
                 sf.set_test_state("b", "burning_in")
                 sf.set_test_state("c", "flaky")
@@ -435,7 +435,7 @@ class TestFilterTestsByState:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "stable")
                 # b is not in status file
                 sf.save()
@@ -457,7 +457,7 @@ class TestFilterTestsByState:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "burning_in")
                 sf.set_test_state("b", "flaky")
                 sf.set_test_state("c", "stable")
@@ -474,7 +474,7 @@ class TestFilterTestsByState:
         """Empty DAG returns empty list."""
         dag = TestDAG()
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             result = filter_tests_by_state(dag, sf)
             assert result == []
 
@@ -490,7 +490,7 @@ class TestProcessResultsNormalOps:
     def test_records_passing_result(self):
         """Passing test is recorded in status file."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             results = [_result("a", "passed")]
             events = process_results(results, sf)
 
@@ -502,7 +502,7 @@ class TestProcessResultsNormalOps:
     def test_skips_dependencies_failed(self):
         """Tests with dependencies_failed are not recorded."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             results = [_result("a", "dependencies_failed")]
             events = process_results(results, sf)
 
@@ -512,7 +512,7 @@ class TestProcessResultsNormalOps:
     def test_new_test_created_as_new(self):
         """Test not in status file is created with state 'new'."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             results = [_result("a", "passed")]
             process_results(results, sf)
 
@@ -521,7 +521,7 @@ class TestProcessResultsNormalOps:
     def test_flaky_test_just_records(self):
         """Flaky test result is recorded without state transition."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("a", "flaky")
             for _ in range(30):
                 sf.record_run("a", True)
@@ -536,7 +536,7 @@ class TestProcessResultsNormalOps:
     def test_commit_sha_propagated(self):
         """Commit SHA is recorded in history entries."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             results = [_result("a", "passed")]
             process_results(results, sf, commit_sha="abc123")
 
@@ -551,7 +551,7 @@ class TestProcessResultsBurnIn:
     def test_burning_in_accepted(self):
         """Burning-in test with enough passes is accepted as stable."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("a", "burning_in", clear_history=True)
             for _ in range(29):
                 sf.record_run("a", True)
@@ -567,7 +567,7 @@ class TestProcessResultsBurnIn:
     def test_burning_in_rejected(self):
         """Burning-in test with many failures is rejected as flaky."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("a", "burning_in", clear_history=True)
             for _ in range(19):
                 sf.record_run("a", False)
@@ -583,7 +583,7 @@ class TestProcessResultsBurnIn:
     def test_burning_in_continue(self):
         """Burning-in test with few runs stays in burning_in."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("a", "burning_in", clear_history=True)
             for _ in range(2):
                 sf.record_run("a", True)
@@ -602,7 +602,7 @@ class TestProcessResultsDemotion:
     def test_stable_failure_demotes_with_history(self):
         """Stable test with enough failure history is demoted to flaky."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("a", "stable")
             # Pre-populate with recent failures (newest-first)
             for _ in range(5):
@@ -621,7 +621,7 @@ class TestProcessResultsDemotion:
     def test_stable_failure_retains_with_low_threshold(self):
         """Stable test retains when observed reliability meets a low threshold."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             # With min_reliability=0.50, a test with mostly passes retains
             # even after a failure because observed rate stays above 50%.
             sf.set_config(min_reliability=0.50, statistical_significance=0.95)
@@ -640,7 +640,7 @@ class TestProcessResultsDemotion:
     def test_stable_failure_inconclusive_to_burning_in(self):
         """Stable test with inconclusive SPRT moves to burning_in."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("a", "stable")
             # Very little history — SPRT will be inconclusive
             sf.record_run("a", passed=True)
@@ -657,7 +657,7 @@ class TestProcessResultsDemotion:
     def test_default_stable_failure_not_evaluated(self):
         """Test not in status file (default stable) is not evaluated for demotion."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             # "a" is NOT in the status file
             results = [_result("a", "failed")]
             events = process_results(results, sf)
@@ -669,7 +669,7 @@ class TestProcessResultsDemotion:
     def test_stable_pass_no_evaluation(self):
         """Passing stable test records result without evaluation."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("a", "stable")
             sf.save()
             results = [_result("a", "passed")]
@@ -686,7 +686,7 @@ class TestProcessResultsDisabled:
     def test_disabled_test_skipped(self):
         """Disabled test result is not recorded."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("a", "disabled", clear_history=True)
             sf.save()
 
@@ -712,7 +712,7 @@ class TestSyncDisabledState:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "stable")
                 sf.save()
 
@@ -733,7 +733,7 @@ class TestSyncDisabledState:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "disabled", clear_history=True)
                 sf.save()
 
@@ -755,7 +755,7 @@ class TestSyncDisabledState:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "disabled", clear_history=True)
                 sf.save()
 
@@ -774,7 +774,7 @@ class TestSyncDisabledState:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "stable")
                 sf.save()
 
@@ -795,7 +795,7 @@ class TestSyncDisabledState:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.save()
 
                 events = sync_disabled_state(dag, sf)
@@ -820,7 +820,7 @@ class TestFilterDisabled:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "stable")
                 sf.set_test_state("b", "disabled")
                 sf.save()
@@ -844,7 +844,7 @@ class TestBurnInSweepSameHashPooling:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 sf.save()
 
@@ -870,7 +870,7 @@ class TestBurnInSweepSameHashPooling:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 sf.save()
 
@@ -896,7 +896,7 @@ class TestBurnInSweepSameHashPooling:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 # Pre-populate with prior same-hash passing runs
                 for _ in range(25):
@@ -928,7 +928,7 @@ class TestBurnInSweepSameHashPooling:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 # Prior evidence under a DIFFERENT hash -- should be ignored
                 for _ in range(50):
@@ -961,7 +961,7 @@ class TestBurnInSweepSameHashPooling:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 sf.save()
 
@@ -991,7 +991,7 @@ class TestBurnInSweepSameHashPooling:
             dag = TestDAG.from_manifest(manifest)
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                sf = StatusFile(Path(tmpdir) / "status.json")
+                sf = StatusFile(Path(tmpdir) / "status")
                 sf.set_test_state("a", "burning_in", clear_history=True)
                 # Add prior evidence without hashes
                 for _ in range(25):
@@ -1015,7 +1015,7 @@ class TestProcessResultsTargetHashes:
     def test_target_hash_passed_to_record_run(self):
         """process_results passes target_hash to record_run."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             results = [_result("a", "passed")]
             process_results(
                 results, sf, commit_sha="abc123",
@@ -1029,7 +1029,7 @@ class TestProcessResultsTargetHashes:
     def test_no_target_hash_without_hashes_param(self):
         """Without target_hashes, no target_hash in history."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             results = [_result("a", "passed")]
             process_results(results, sf, commit_sha="abc123")
 
@@ -1040,7 +1040,7 @@ class TestProcessResultsTargetHashes:
     def test_test_not_in_target_hashes(self):
         """Test not in target_hashes dict records no target_hash."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             results = [_result("a", "passed")]
             process_results(
                 results, sf, commit_sha="abc123",
@@ -1054,7 +1054,7 @@ class TestProcessResultsTargetHashes:
     def test_burning_in_uses_same_hash_for_sprt(self):
         """process_results uses same-hash history for burning_in SPRT."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("a", "burning_in", clear_history=True)
             # Add 28 prior same-hash passes
             for _ in range(28):
@@ -1078,7 +1078,7 @@ class TestProcessResultsTargetHashes:
     def test_backward_compat_burning_in_no_hashes(self):
         """Without target_hashes, burning_in uses all history (backward compat)."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("a", "burning_in", clear_history=True)
             # Add 29 prior passes (no hash)
             for _ in range(29):
@@ -1095,7 +1095,7 @@ class TestProcessResultsTargetHashes:
     def test_multiple_tests_different_hashes(self):
         """Multiple tests with different hashes are tracked correctly."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             results = [
                 _result("a", "passed"),
                 _result("b", "passed"),
@@ -1117,7 +1117,7 @@ class TestFlakyDeadlineAutoDisable:
     def test_flaky_deadline_exceeded_auto_disables(self):
         """Flaky test exceeding deadline transitions to disabled."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             old_date = (
                 datetime.datetime.now(tz=datetime.timezone.utc)
                 - datetime.timedelta(days=20)
@@ -1145,7 +1145,7 @@ class TestFlakyDeadlineAutoDisable:
     def test_flaky_deadline_within_deadline_remains_flaky(self):
         """Flaky test within deadline remains in flaky state."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             recent_date = (
                 datetime.datetime.now(tz=datetime.timezone.utc)
                 - datetime.timedelta(days=5)
@@ -1172,7 +1172,7 @@ class TestFlakyDeadlineAutoDisable:
     def test_flaky_deadline_non_flaky_unaffected(self):
         """Non-flaky tests (stable, burning_in, new) are not affected."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             old_date = (
                 datetime.datetime.now(tz=datetime.timezone.utc)
                 - datetime.timedelta(days=100)
@@ -1211,7 +1211,7 @@ class TestFlakyDeadlineAutoDisable:
     def test_flaky_deadline_missing_last_updated_skipped(self):
         """Flaky test with missing last_updated is skipped gracefully."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             with open(status_path, "w") as f:
                 json.dump(
                     {
@@ -1233,7 +1233,7 @@ class TestFlakyDeadlineAutoDisable:
     def test_flaky_deadline_malformed_last_updated_skipped(self):
         """Flaky test with malformed last_updated is skipped gracefully."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             with open(status_path, "w") as f:
                 json.dump(
                     {
@@ -1256,7 +1256,7 @@ class TestFlakyDeadlineAutoDisable:
     def test_flaky_deadline_multiple_tests_mixed(self):
         """Multiple flaky tests: some exceed deadline, some don't."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             old_date = (
                 datetime.datetime.now(tz=datetime.timezone.utc)
                 - datetime.timedelta(days=30)
@@ -1302,7 +1302,7 @@ class TestFlakyDeadlineAutoDisable:
     def test_flaky_deadline_zero_days_disables_immediately(self):
         """deadline_days=0 disables any flaky test immediately."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             # Set last_updated to just 1 second ago
             just_now = (
                 datetime.datetime.now(tz=datetime.timezone.utc)
@@ -1330,7 +1330,7 @@ class TestFlakyDeadlineAutoDisable:
     def test_flaky_deadline_negative_days_no_disable(self):
         """deadline_days=-1 effectively means no deadline -- no tests disabled."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             old_date = (
                 datetime.datetime.now(tz=datetime.timezone.utc)
                 - datetime.timedelta(days=1000)
@@ -1357,7 +1357,7 @@ class TestFlakyDeadlineAutoDisable:
     def test_flaky_deadline_saves_status_file(self):
         """Auto-disable persists to disk after check."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             old_date = (
                 datetime.datetime.now(tz=datetime.timezone.utc)
                 - datetime.timedelta(days=20)
@@ -1385,7 +1385,7 @@ class TestFlakyDeadlineAutoDisable:
     def test_flaky_deadline_empty_status_file(self):
         """Empty status file produces no events."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = StatusFile(status_path)
             events = check_flaky_deadlines(sf, 14)
             assert len(events) == 0
