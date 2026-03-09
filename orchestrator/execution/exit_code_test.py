@@ -199,7 +199,7 @@ class TestComputeExitCodeRegression:
     def test_flaky_true_fail_exit_0(self):
         """Flaky test with true_fail -> exit 0."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "flaky")
             sf.save()
 
@@ -213,7 +213,7 @@ class TestComputeExitCodeRegression:
     def test_mixed_stable_and_flaky(self):
         """Stable failure blocks; flaky failure does not."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             sf.set_test_state("//test:b", "flaky")
             sf.save()
@@ -240,7 +240,7 @@ class TestComputeExitCodeRegression:
     def test_burning_in_undecided_non_blocking(self):
         """burning_in + undecided is non-blocking in regression mode."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "burning_in")
             sf.save()
 
@@ -253,7 +253,7 @@ class TestComputeExitCodeRegression:
     def test_unknown_test_defaults_to_stable(self):
         """Test not in status file defaults to stable."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.save()
 
             classifications = {
@@ -281,7 +281,7 @@ class TestComputeExitCodeRegression:
     def test_all_non_blocking_exit_0(self):
         """All tests non-blocking -> exit 0."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "flaky")
             sf.set_test_state("//test:b", "new")
             sf.set_test_state("//test:c", "burning_in")
@@ -344,7 +344,7 @@ class TestComputeExitCodeConverge:
     def test_flaky_lifecycle_does_not_help(self):
         """In converge mode, flaky lifecycle does not make test non-blocking."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "flaky")
             sf.save()
 
@@ -507,7 +507,7 @@ class TestExitCodeEdgeCases:
     def test_disabled_test_non_blocking_regression(self):
         """Disabled test is non-blocking in regression mode."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "disabled")
             sf.save()
 
@@ -520,7 +520,7 @@ class TestExitCodeEdgeCases:
     def test_single_blocking_among_many_non_blocking(self):
         """One blocking test among many non-blocking -> exit 1."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            sf = StatusFile(Path(tmpdir) / "status.json")
+            sf = StatusFile(Path(tmpdir) / "status")
             sf.set_test_state("//test:a", "stable")
             for i in range(10):
                 sf.set_test_state(f"//test:ok_{i}", "flaky")

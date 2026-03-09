@@ -68,7 +68,7 @@ class TestEffortRunnerConverge:
     def test_converge_only_reruns_failed_tests(self):
         """Converge mode targets only initially-failed tests."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             dag = _make_dag(tmpdir, {"t_pass": True, "t_fail": False})
@@ -104,7 +104,7 @@ class TestEffortRunnerConverge:
     def test_converge_true_fail_classification(self):
         """A consistently failing test is classified as true_fail."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             dag = _make_dag(tmpdir, {"t_fail": False})
@@ -136,7 +136,7 @@ class TestEffortRunnerConverge:
     def test_converge_flake_classification(self):
         """A test that fails initially but mostly passes is classified as flake."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             dag = _make_dag(tmpdir, {"t_flaky": False})
@@ -169,7 +169,7 @@ class TestEffortRunnerConverge:
     def test_converge_budget_exhausted_is_undecided(self):
         """Budget exhaustion produces undecided classification."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path, min_reliability=0.99)
 
             dag = _make_dag(tmpdir, {"t_ambig": False})
@@ -203,7 +203,7 @@ class TestEffortRunnerConverge:
     def test_converge_records_all_reruns_in_status_file(self):
         """All reruns are recorded in the status file."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             dag = _make_dag(tmpdir, {"t_fail": False})
@@ -236,7 +236,7 @@ class TestEffortRunnerConverge:
     def test_converge_skips_dependencies_failed(self):
         """Tests with dependencies_failed are not classified."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             dag = _make_dag(tmpdir, {"t_skip": False})
@@ -268,7 +268,7 @@ class TestEffortRunnerMax:
     def test_max_reruns_all_tests(self):
         """Max mode targets both passing and failing tests."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             dag = _make_dag(tmpdir, {"t_pass": True, "t_fail": False})
@@ -307,7 +307,7 @@ class TestEffortRunnerMax:
     def test_max_passing_test_accept_is_true_pass(self):
         """A consistently passing test in max mode is classified as true_pass."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             dag = _make_dag(tmpdir, {"t_pass": True})
@@ -338,7 +338,7 @@ class TestEffortRunnerMax:
     def test_max_passing_test_reject_is_flake(self):
         """A passing test that starts failing on rerun is classified as flake."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             dag = _make_dag(tmpdir, {"t_flaky": True})
@@ -374,7 +374,7 @@ class TestEffortRunnerSessionOnly:
     def test_no_historic_data_used(self):
         """Pre-existing status file history is not used for SPRT evaluation."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             # Pre-populate with old history (many failures on a different commit)
@@ -411,7 +411,7 @@ class TestEffortRunnerSessionOnly:
     def test_no_target_hashes_ignores_prior_same_hash_history(self):
         """Without target_hashes, same-hash history in status file is ignored."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             # Pre-populate with many same-hash failures -- these should be
@@ -457,7 +457,7 @@ class TestEffortRunnerSameHashPooling:
     def test_prior_passes_speed_up_accept(self):
         """Prior same-hash passes help SPRT reach 'accept' faster."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             # Pre-populate with many same-hash passes from a prior session
@@ -501,7 +501,7 @@ class TestEffortRunnerSameHashPooling:
     def test_prior_passes_enable_immediate_accept(self):
         """Enough prior same-hash evidence can produce immediate acceptance."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             # Pre-populate with enough same-hash passes for immediate SPRT accept
@@ -541,7 +541,7 @@ class TestEffortRunnerSameHashPooling:
     def test_prior_failures_speed_up_reject(self):
         """Prior same-hash failures help SPRT reach 'reject' faster."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             # Pre-populate with many same-hash failures
@@ -583,7 +583,7 @@ class TestEffortRunnerSameHashPooling:
     def test_different_hash_not_pooled(self):
         """Prior history with a different hash is NOT pooled."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             # Pre-populate with OLD hash history (many passes)
@@ -627,7 +627,7 @@ class TestEffortRunnerSameHashPooling:
     def test_mixed_hash_history_only_pools_matching(self):
         """Only history entries with matching hash are pooled."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             sf.set_test_state("t_test", "burning_in")
@@ -676,7 +676,7 @@ class TestEffortRunnerSameHashPooling:
     def test_no_hash_for_test_uses_session_only(self):
         """If test has no entry in target_hashes, session-only is used."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             # Pre-populate with same-hash history
@@ -722,7 +722,7 @@ class TestEffortRunnerRecordRunWithHash:
     def test_target_hash_stored_in_history(self):
         """Each rerun records the target hash in the history entry."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             dag = _make_dag(tmpdir, {"t_fail": False})
@@ -755,7 +755,7 @@ class TestEffortRunnerRecordRunWithHash:
     def test_no_target_hash_when_not_provided(self):
         """Without target_hashes, no target_hash in history entries."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             dag = _make_dag(tmpdir, {"t_fail": False})
@@ -788,7 +788,7 @@ class TestEffortRunnerRecordRunWithHash:
     def test_target_hash_stored_even_when_test_not_in_hashes(self):
         """Test not in target_hashes dict records no hash."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             dag = _make_dag(tmpdir, {"t_fail": False})
@@ -830,7 +830,7 @@ class TestEffortRunnerRecordRunWithHash:
         among many passes doesn't push past the boundary.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             # Use lower min_reliability=0.90 so one failure among many
             # passes still evaluates as "reliable" (accept)
             sf = _make_status_file(
@@ -879,7 +879,7 @@ class TestEffortRunnerRecordRunWithHash:
     def test_classification_runs_include_prior_evidence(self):
         """The runs/passes counts in classification reflect pooled evidence."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             # Pre-populate with 20 same-hash passes
@@ -920,7 +920,7 @@ class TestEffortRunnerRecordRunWithHash:
     def test_empty_prior_history_same_as_no_target_hashes(self):
         """target_hashes provided but no matching history behaves like session-only."""
         with tempfile.TemporaryDirectory() as tmpdir:
-            status_path = Path(tmpdir) / "status.json"
+            status_path = Path(tmpdir) / "status"
             sf = _make_status_file(status_path)
 
             # Fresh status file -- no history at all

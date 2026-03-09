@@ -25,7 +25,7 @@ This workflow is well suited for large-scale testing:
 
 However, the current implementation has limitations that make it unsuitable for production use at scale without further investment:
 
-- **JSON-in-repo history** &mdash; historic test data is stored as JSON files committed to the repository. At scale this should be replaced with an external results database.
+- **CSV-in-repo history** &mdash; the storage layer is abstracted behind a `StorageBackend` interface, but the current `SqliteBackend` implementation persists data as CSV files committed to the repository. At scale this should be replaced with a backend API (e.g. REST/gRPC service) fronting an external results database, rather than the orchestrator calling the storage layer directly.
 - **Self-contained HTML reports** &mdash; reports are single-file HTML documents. While they include an interactive DAG visualization, at scale a dedicated dashboard backed by a results database would be more practical.
 - **Local execution only** &mdash; all tests run locally within this repository. For large-scale testing, Bazel remote execution should be enabled.
 

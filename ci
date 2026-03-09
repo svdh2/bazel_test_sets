@@ -398,35 +398,49 @@ def test_examples(ctx):
 
 
 def _create_status_file(status_path: Path) -> None:
-    """Create an empty status file for the lifecycle demo.
+    """Create an empty status directory for the lifecycle demo.
 
     The ci_gate targets in //ci: bake in the status_file path and SPRT
     parameters (min_reliability, statistical_significance), so a separate
     .test_set_config is no longer needed.
-    """
-    import json as json_mod
 
-    status = {"tests": {}}
-    status_path.parent.mkdir(parents=True, exist_ok=True)
-    status_path.write_text(json_mod.dumps(status, indent=2) + "\n")
-    console.print("[dim]  Created status file[/dim]")
+    Creates a directory with empty ``tests.csv`` and ``history.csv`` files
+    (header rows only).
+    """
+    import csv as csv_mod
+
+    status_path.mkdir(parents=True, exist_ok=True)
+    with open(status_path / "tests.csv", "w", newline="") as f:
+        csv_mod.writer(f).writerow(["test_name", "state", "target_hash", "last_updated"])
+    with open(status_path / "history.csv", "w", newline="") as f:
+        csv_mod.writer(f).writerow(["id", "test_name", "passed", "commit_sha", "target_hash"])
+    console.print("[dim]  Created status directory[/dim]")
 
 
 def _transition_all_to_burnin(status_path: Path) -> None:
-    """Transition all 'new' tests in the status file to 'burning_in'.
+    """Transition all 'new' tests in the status directory to 'burning_in'.
 
     The orchestrator creates 'new' entries on first run but doesn't evaluate
     SPRT for them. Transitioning to 'burning_in' enables SPRT acceptance.
-    """
-    import json as json_mod
 
-    data = json_mod.loads(status_path.read_text())
+    Reads and rewrites ``tests.csv`` in-place; ``history.csv`` is unchanged.
+    """
+    import csv as csv_mod
+
+    tests_csv = status_path / "tests.csv"
+    rows: list[dict[str, str]] = []
     count = 0
-    for entry in data.get("tests", {}).values():
-        if entry.get("state") == "new":
-            entry["state"] = "burning_in"
-            count += 1
-    status_path.write_text(json_mod.dumps(data, indent=2) + "\n")
+    with open(tests_csv, newline="") as f:
+        for row in csv_mod.DictReader(f):
+            if row["state"] == "new":
+                row["state"] = "burning_in"
+                count += 1
+            rows.append(row)
+    columns = ["test_name", "state", "target_hash", "last_updated"]
+    with open(tests_csv, "w", newline="") as f:
+        writer = csv_mod.DictWriter(f, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(rows)
     console.print(f"[dim]  Transitioned {count} tests from new → burning_in[/dim]")
 
 
@@ -459,28 +473,52 @@ def _run_orchestrator_quiet(
 
 
 def _print_lifecycle_summary(status_path: Path, phase_label: str = "") -> None:
-    """Print a summary of the status file after a lifecycle phase."""
-    import json as json_mod
+    """Print a summary of the status directory after a lifecycle phase.
+
+    Reads ``tests.csv`` and ``history.csv`` from the status directory.
+    """
+    import csv as csv_mod
+    from collections import Counter
 
     header = "Lifecycle summary"
     if phase_label:
         header += f" ({phase_label})"
     console.print(f"[bold]{header}[/bold]")
 
-    try:
-        data = json_mod.loads(status_path.read_text())
-    except (FileNotFoundError, json_mod.JSONDecodeError) as e:
-        console.print(f"[red]Could not read status file: {e}[/red]")
+    tests_csv = status_path / "tests.csv"
+    history_csv = status_path / "history.csv"
+    if not tests_csv.exists():
+        console.print("[red]Could not read status directory: tests.csv not found[/red]")
         return
 
-    tests = data.get("tests", {})
-    state_counts: dict[str, int] = {}
-    for name, entry in sorted(tests.items()):
-        state = entry.get("state", "unknown")
-        history = entry.get("history", [])
-        runs = len(history)
-        passes = sum(1 for h in history if h.get("passed", False))
-        state_counts[state] = state_counts.get(state, 0) + 1
+    # Load history counts per test
+    history_runs: Counter[str] = Counter()
+    history_passes: Counter[str] = Counter()
+    try:
+        with open(history_csv, newline="") as f:
+            for row in csv_mod.DictReader(f):
+                name = row["test_name"]
+                history_runs[name] += 1
+                if row["passed"] == "1":
+                    history_passes[name] += 1
+    except (FileNotFoundError, KeyError):
+        pass  # no history yet
+
+    # Load and display tests
+    try:
+        with open(tests_csv, newline="") as f:
+            tests = list(csv_mod.DictReader(f))
+    except (FileNotFoundError, KeyError) as e:
+        console.print(f"[red]Could not read status directory: {e}[/red]")
+        return
+
+    state_counts: Counter[str] = Counter()
+    for row in sorted(tests, key=lambda r: r["test_name"]):
+        name = row["test_name"]
+        state = row.get("state", "unknown")
+        state_counts[state] += 1
+        runs = history_runs[name]
+        passes = history_passes[name]
         short_name = name.split(":")[-1] if ":" in name else name
         if state == "stable":
             console.print(f"  [green]{short_name}: {state} ({runs} runs, {passes} passes)[/green]")

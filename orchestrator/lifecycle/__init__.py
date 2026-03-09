@@ -10,6 +10,7 @@ from orchestrator.lifecycle.e_values import (
     evaluate_test_set,
     verdict_to_dict,
 )
+from orchestrator.lifecycle.backend import SqliteBackend, StorageBackend
 from orchestrator.lifecycle.sprt import demotion_evaluate, sprt_evaluate
 from orchestrator.lifecycle.status import StatusFile
 
@@ -17,6 +18,8 @@ __all__ = [
     "BurnInSweep",
     "HiFiEvaluator",
     "HiFiResult",
+    "SqliteBackend",
+    "StorageBackend",
     "StatusFile",
     "SweepResult",
     "TestEValue",
